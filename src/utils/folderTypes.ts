@@ -1,3 +1,5 @@
+import { foldForSearch } from "./textSearch";
+
 export type FolderTypeValue = "movie" | "tv" | "documentary" | "mixed";
 
 export const DEFAULT_FOLDER_TYPES: Record<string, FolderTypeValue> = {
@@ -42,13 +44,6 @@ function sanitizeFolderTypes(
   ) as Record<string, FolderTypeValue>;
 }
 
-function normalizeFolderName(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
 export function parseFolderTypes(
   raw: string | null | undefined,
 ): Record<string, FolderTypeValue> {
@@ -66,7 +61,7 @@ export function parseFolderTypes(
 }
 
 export function inferFolderType(dir: string): FolderTypeValue | "" {
-  const normalized = normalizeFolderName(dir);
+  const normalized = foldForSearch(dir);
 
   const isDocumentary =
     /(documental|documentary|documentaries|docs?)(\b|$)/.test(normalized);

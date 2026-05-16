@@ -32,6 +32,7 @@ import {
   normalizeResolution,
   normalizeCodec,
 } from "../utils/filterUtils";
+import { foldForSearch } from "../utils/textSearch";
 import IndexStatus from "../components/IndexStatus";
 import Settings from "./Settings";
 import ActivityLog from "../components/ActivityLog";
@@ -773,14 +774,14 @@ export default function Library({
   const filtered = useMemo(() => {
     const matchingItems = filterableItems
       .filter((item) => {
-        const q = filters.search.toLowerCase();
+        const q = foldForSearch(filters.search);
         const matchesSearch =
           !q ||
-          (item.tmdb_title ?? "").toLowerCase().includes(q) ||
-          (item.tmdb_title_en ?? "").toLowerCase().includes(q) ||
-          (item.title ?? "").toLowerCase().includes(q) ||
-          (item.release_group ?? "").toLowerCase().includes(q) ||
-          item.filename.toLowerCase().includes(q);
+          foldForSearch(item.tmdb_title ?? "").includes(q) ||
+          foldForSearch(item.tmdb_title_en ?? "").includes(q) ||
+          foldForSearch(item.title ?? "").includes(q) ||
+          foldForSearch(item.release_group ?? "").includes(q) ||
+          foldForSearch(item.filename).includes(q);
         const matchesGenre =
           !filters.genre ||
           (parsedGenreMap.get(item.id) ?? []).includes(Number(filters.genre));

@@ -1,5 +1,17 @@
 # Novedades de Oscata
 
+## Versión 0.8.10 — 16 de mayo de 2026
+
+### 🔍 Buscador insensible a acentos en biblioteca y seguimiento
+
+El filtro de búsqueda de la pestaña Biblioteca y de la pestaña Seguimiento no encontraba títulos que llevaban tildes u otros diacríticos cuando se escribía sin acentuar. Por ejemplo, escribir «pokemon» no localizaba la entrada guardada como «Pokémon», y al revés tampoco funcionaba si el título estaba almacenado sin tilde. La comparación se hacía con `toLowerCase().includes()` directamente sobre el texto, y en Unicode «é» (U+00E9) y «e» (U+0065) son códigos distintos, por lo que la coincidencia fallaba.
+
+Ahora tanto la consulta como cada campo buscado pasan por una normalización común que descompone el texto en NFD, elimina las marcas combinantes (U+0300–U+036F) y pasa a minúsculas. Así «pokemon», «Pokémon» y «POKÉMON» se reducen a la misma forma comparable y la coincidencia es simétrica en ambas direcciones. La misma normalización se aplica sobre los cinco campos que la biblioteca consulta (`tmdb_title`, `tmdb_title_en`, `title`, `release_group` y `filename`) y sobre el título mostrado en seguimiento.
+
+Como parte del cambio se ha unificado en `src/utils/textSearch.ts` la función de plegado (`foldForSearch`) que ya existía duplicada en dos sitios del código (detección de carpetas en `folderTypes.ts` y detección de palabras clave en el flujo de subida de series), de modo que biblioteca, seguimiento y los flujos de subida usan exactamente la misma regla de normalización.
+
+---
+
 ## Versión 0.8.9 — 8 de abril de 2026
 
 ### 📣 Notificaciones de Telegram: pistas de audio mejoradas

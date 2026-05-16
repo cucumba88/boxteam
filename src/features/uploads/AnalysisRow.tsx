@@ -26,6 +26,7 @@ import type {
 } from "./types";
 import { formatBytes, formatDuration, formatLanguages } from "../../lib/format";
 import { formInputCompact, formSelectCompact } from "../../lib/formStyles";
+import { foldForSearch } from "../../utils/textSearch";
 
 const TMDB_IMG = "https://image.tmdb.org/t/p/w92";
 
@@ -828,19 +829,12 @@ export default function AnalysisRow({
   // For movies/docs: set the destination directly.
   const handleFtpPickerSelect = (p: string) => {
     if (mediaType === "tv") {
-      // Normalise: strip diacritics + lowercase for keyword detection.
-      const norm = (s: string) =>
-        s
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase();
-
       let base = p.replace(/\/$/, "");
       const segments = base.split("/");
 
       // Find which segment (if any) is the category folder ("Temporadas …").
       const catIdx = segments.findIndex((seg) =>
-        norm(seg).includes("temporad"),
+        foldForSearch(seg).includes("temporad"),
       );
 
       if (catIdx === -1) {

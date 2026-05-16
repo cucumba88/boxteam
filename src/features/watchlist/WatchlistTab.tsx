@@ -7,6 +7,7 @@ import { useIsMobile } from "../../hooks/useIsMobile";
 import WatchlistCard from "./WatchlistCard";
 import WatchlistAddModal from "./WatchlistAddModal";
 import WatchlistDetailPanel from "./WatchlistDetailPanel";
+import { foldForSearch } from "../../utils/textSearch";
 
 interface WatchlistTabProps {
   watchlist: UseWatchlistReturn;
@@ -33,7 +34,7 @@ export default function WatchlistTab({
     return watchlist.items.filter((item) => {
       const title =
         language === "es" ? item.title : (item.title_en ?? item.title);
-      if (search && !title.toLowerCase().includes(search.toLowerCase()))
+      if (search && !foldForSearch(title).includes(foldForSearch(search)))
         return false;
       if (typeFilter !== "all" && item.tmdb_type !== typeFilter) return false;
       if (statusFilter !== "all" && item.library_status !== statusFilter)
