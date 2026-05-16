@@ -1,0 +1,89 @@
+name: Build Linux
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            build-essential \
+            rpm \
+            curl wget file
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Tauri (deb, rpm, AppImage)
+        run: npm run tauri build -- --bundles deb,rpm,appimage
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+
+      - name: Pack tar.gz (binary + dist + resources)
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          ARCH=amd64
+          STAGE="oscata_${VERSION}_linux_${ARCH}"
+          mkdir -p "$STAGE"
+          cp src-tauri/target/release/oscata-tauri "$STAGE/"
+          cp -r dist "$STAGE/dist"
+          cp -r src-tauri/resources "$STAGE/resources"
+          tar -czf "${STAGE}.tar.gz" "$STAGE"
+          ls -lh "${STAGE}.tar.gz"
+
+      - name: Upload artifacts (main branch)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: oscata-linux-amd64
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            oscata_*_linux_amd64.tar.gz
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            oscata_*_linux_amd64.tar.gz

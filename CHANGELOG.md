@@ -1,5 +1,22 @@
 # Novedades de Oscata
 
+## Versión 0.8.11 — 16 de mayo de 2026
+
+### 🐧 Compilación nativa para Linux en GitHub Actions
+
+Hasta ahora cada release publicaba binarios para Windows (NSIS y portable) y una imagen Docker, pero no había artefactos nativos de Linux. El script de instalación headless `scripts/install-debian.sh` ya esperaba un asset `oscata_<versión>_linux_amd64.tar.gz` con el binario, `dist/` y `resources/`, pero nadie lo publicaba, así que la ruta principal del instalador estaba rota desde el primer día y solo funcionaba el fallback de binario suelto, que dejaba fuera la base de datos semilla (`library.seed.db`) y los recursos.
+
+Se añade un nuevo workflow `.github/workflows/build-linux.yml` que se dispara en `push` a `main` y en tags `v*`. Corre sobre `ubuntu-22.04` (fijado a propósito: `ubuntu-latest` está migrando a 24.04, que empaqueta `libwebkit2gtk-4.1` de forma distinta y es una fuente habitual de roturas en CI de Tauri 2). Instala las dependencias de sistema necesarias para compilar (`libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf`, `rpm`, `libssl-dev`, `build-essential`) y produce cuatro artefactos para arquitectura amd64:
+
+- **`.deb`** para Debian, Ubuntu, Mint y derivadas, instalable con `sudo apt install ./oscata-ftp-client_<versión>_amd64.deb`.
+- **`.rpm`** para Fedora, RHEL, CentOS y openSUSE, instalable con `sudo dnf install ./oscata-ftp-client-<versión>-1.x86_64.rpm`.
+- **`.AppImage`** universal, ejecutable directamente sin instalación en la mayoría de distros.
+- **`oscata_<versión>_linux_amd64.tar.gz`** con el binario, `dist/` y `resources/` empaquetados, que es lo que consume el instalador headless de `install-debian.sh`.
+
+En `push` a `main` los artefactos se suben como artefactos de la run (retención de 30 días). En tags `v*` se adjuntan automáticamente al GitHub Release. No se requiere firma ni certificados: a diferencia de macOS (Apple Developer ID + notarización) o Windows (Authenticode), los `.deb`, `.rpm` y AppImage se instalan sin firma cuando el usuario descarga el archivo directamente. La firma GPG solo es necesaria si se aloja un repositorio apt/yum propio, y aquí no es el caso.
+
+---
+
 ## Versión 0.8.10 — 16 de mayo de 2026
 
 ### 🔍 Buscador insensible a acentos en biblioteca y seguimiento
