@@ -1,5 +1,13 @@
 # Novedades de Oscata
 
+## Versión 0.9.1 — 17 de mayo de 2026
+
+### 🐛 Fix: el botón "Gestionar usuarios" del menú de avatar no hacía nada
+
+Tras el rediseño del menú del avatar en v0.9.0 (renderizado vía portal para que no lo cortara la sidebar), el botón "Gestionar usuarios" del modo web dejó de navegar. El handler de "click fuera" usaba `mousedown`, que se dispara antes del `click` del propio botón — al pulsar dentro del menú se cerraba el portal en el mismo tick y la navegación nunca se ejecutaba. Se cambia el listener a `click` y se añade `stopPropagation` en el botón del menú para que no haya carrera.
+
+---
+
 ## Versión 0.9.0 — 17 de mayo de 2026
 
 ### 🎨 Rediseño completo de la interfaz — shell nativo, páginas de detalle, cohesión total
