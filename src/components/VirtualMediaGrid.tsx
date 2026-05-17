@@ -46,6 +46,8 @@ export default memo(function VirtualMediaGrid({
   jumpRequest,
   onVisibleRangeChange,
   onFirstVisibleIndexChange,
+  initialScrollIndex,
+  onInitialScrollConsumed,
 }: {
   items: MediaItem[];
   selecting: boolean;
@@ -79,6 +81,14 @@ export default memo(function VirtualMediaGrid({
    * `onVisibleRangeChange`, which is debounced.
    */
   onFirstVisibleIndexChange?: (index: number) => void;
+  /**
+   * If > 0, the grid scrolls (instantly, no animation) so the row containing
+   * this item index is at the top of the viewport on first mount. Used by
+   * the parent to restore scroll position when the user closes a detail
+   * takeover and returns to the grid. Fired once per mount.
+   */
+  initialScrollIndex?: number;
+  onInitialScrollConsumed?: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -120,10 +130,42 @@ export default memo(function VirtualMediaGrid({
     overscan: 4,
   });
 
-  // Reset scroll on filter/sort/tab change.
+  // Reset scroll on filter/sort/tab change. Skip when an `initialScrollIndex`
+  // is pending — that consumer (detail-page return) wants to restore a saved
+  // position, not snap back to the top.
   useEffect(() => {
+    if (initialScrollIndex && initialScrollIndex > 0) return;
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
+
+  // Restore scroll to a saved item index once per mount. Used by the parent
+  // when the user closes a detail / TV-show takeover so the grid lands back
+  // at the row they were on instead of at the top. We wait until columns
+  // and containerWidth are known so the target row math is correct.
+  const initialConsumedRef = useRef(false);
+  useLayoutEffect(() => {
+    if (initialConsumedRef.current) return;
+    if (!initialScrollIndex || initialScrollIndex <= 0) {
+      initialConsumedRef.current = true;
+      onInitialScrollConsumed?.();
+      return;
+    }
+    if (columns <= 0 || rowHeight <= 0 || containerWidth === 0) return;
+    const targetRow = Math.floor(initialScrollIndex / columns);
+    if (targetRow > 0) {
+      rowVirtualizer.scrollToIndex(targetRow, { align: "start" });
+    }
+    initialConsumedRef.current = true;
+    onInitialScrollConsumed?.();
+  }, [
+    initialScrollIndex,
+    columns,
+    rowHeight,
+    containerWidth,
+    rowVirtualizer,
+    onInitialScrollConsumed,
+  ]);
 
   // Re-measure when the row height changes (resize / column count change).
   useLayoutEffect(() => {

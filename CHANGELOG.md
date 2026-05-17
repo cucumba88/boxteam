@@ -1,5 +1,15 @@
 # Novedades de Oscata
 
+## Versión 0.10.2 — 17 de mayo de 2026
+
+### 🔙 Volver del detalle preserva la posición de scroll
+
+Cuando abrías una carta desde la fila 100 del grid y volvías al listado, te encontrabas en la fila 0 — el grid se desmontaba al abrir el detalle y volvía a montarse limpio al cerrar. Ahora `handleCardSelect` guarda el índice del primer item visible justo antes de abrir el detalle, y `VirtualMediaGrid` lleva un par nuevo de props (`initialScrollIndex` + `onInitialScrollConsumed`) que lo consumen una sola vez por montaje, una vez que las columnas y el ancho del contenedor están calculados. El usuario aterriza en la misma fila de la que se fue.
+
+Cambiar de pestaña, filtro u orden sigue volviendo al top — el índice guardado se limpia explícitamente en `switchTab`, así que la restauración sólo se activa cuando el origen es realmente "vuelvo del detalle".
+
+---
+
 ## Versión 0.10.1 — 17 de mayo de 2026
 
 Dos arreglos de scroll que se colaron en v0.10.0:

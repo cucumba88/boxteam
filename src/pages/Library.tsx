@@ -472,6 +472,11 @@ export default function Library({
     end: number;
   }>({ start: 0, end: 0 });
   const [firstVisibleIndex, setFirstVisibleIndex] = useState(0);
+  // Saved grid scroll position so that closing a detail / TV-show takeover
+  // returns the user to roughly the same row instead of snapping to the top.
+  // Set by handleCardSelect, cleared by switchTab and after the grid consumes
+  // it via onInitialScrollConsumed.
+  const [restoreGridIndex, setRestoreGridIndex] = useState(0);
   // After a rail click we lock the highlight to the clicked letter so the
   // user always sees their click confirmed — the row containing the first
   // L item may have column-0 in K, which otherwise leaves the highlight
@@ -822,9 +827,14 @@ export default function Library({
     pinnedAtIndexRef.current = null;
     setFirstVisibleIndex(0);
     setVisibleRange({ start: 0, end: 0 });
+    setRestoreGridIndex(0);
   };
 
   const handleCardSelect = (item: MediaItem) => {
+    // Remember the grid's current scroll position so we can return to the
+    // same row when the user closes the detail / TV-show takeover. Captured
+    // before any state mutation that triggers re-render.
+    setRestoreGridIndex(firstVisibleIndex);
     const isTV =
       item.tmdb_type === "tv" ||
       item.media_type === "tv" ||
@@ -1704,6 +1714,8 @@ export default function Library({
           setVisibleRange({ start, end })
         }
         onFirstVisibleIndexChange={setFirstVisibleIndex}
+        initialScrollIndex={restoreGridIndex}
+        onInitialScrollConsumed={() => setRestoreGridIndex(0)}
       />
       {showAlphaRail && alphaIndex && (
         <AlphaJumpRail
