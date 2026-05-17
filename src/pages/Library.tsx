@@ -49,6 +49,7 @@ import {
 import { foldForSearch } from "../utils/textSearch";
 import IndexStatus from "../components/IndexStatus";
 import Settings from "./Settings";
+import WebUsers from "./WebUsers";
 import ActivityLog from "../components/ActivityLog";
 import DetailPage from "../components/DetailPage";
 import TVShowPage from "../components/TVShowPage";
@@ -353,9 +354,16 @@ function deduplicateByTitle(entries: MediaItem[]): MediaItem[] {
 export default function Library({
   startIndexingOnMount = false,
   headerSlot,
+  showUsers = false,
+  onCloseUsers,
 }: {
   startIndexingOnMount?: boolean;
   headerSlot?: React.ReactNode;
+  /** Web mode only — render the user-management page as a content-area
+   *  takeover instead of swapping out the whole shell. Keeps the sidebar
+   *  + status bar around the users page. */
+  showUsers?: boolean;
+  onCloseUsers?: () => void;
 }) {
   const showDevLog = import.meta.env.DEV;
   const {
@@ -567,6 +575,9 @@ export default function Library({
       const onSettingsUrl = window.location.pathname === "/ajustes";
       setShowSettings(onSettingsUrl);
       if (onSettingsUrl) return;
+      // /usuarios is handled by the outer WebRouter; don't reset library
+      // state (tab/filters/selection) while the users takeover is active.
+      if (window.location.pathname === "/usuarios") return;
       const tab = tabFromPathname();
       setActiveTab(tab);
       // Resolve any detail segment in the URL to the matching item — leaves
@@ -634,9 +645,10 @@ export default function Library({
   // the tab pushState history is not polluted with every filter keystroke).
   useEffect(() => {
     if (isTauri()) return;
-    // Don't pollute /ajustes with filter query strings — settings has no
-    // filter state of its own.
+    // Don't pollute /ajustes or /usuarios with filter query strings —
+    // neither page has filter state of its own.
     if (window.location.pathname === "/ajustes") return;
+    if (window.location.pathname === "/usuarios") return;
     const qs = filtersToSearchParams(filters, page);
     window.history.replaceState({}, "", window.location.pathname + qs);
   }, [filters, page]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2307,11 +2319,18 @@ export default function Library({
           />
         )}
 
+        {/* User management — content-area takeover so the sidebar + status
+            bar stay visible (web mode only; triggered from the avatar menu).
+            Settings still wins precedence if both are somehow open. */}
+        {!showSettings && showUsers && (
+          <WebUsers onBack={onCloseUsers} />
+        )}
+
         {/* Detail / TV show page takes over the content area when an item or
             show is selected. Sidebar + status bar stay visible; back button
             returns to the library. tvShow takes priority over selected — they
             shouldn't both be set, but if they were we'd want the show view. */}
-        {!showSettings && tvShow && (
+        {!showSettings && !showUsers && tvShow && (
           <TVShowPage
             show={tvShow}
             allEpisodes={getTvEpisodes(tvShow)}
@@ -2341,7 +2360,7 @@ export default function Library({
           />
         )}
 
-        {!showSettings && !tvShow && selected && (
+        {!showSettings && !showUsers && !tvShow && selected && (
           <DetailPage
             item={selected}
             language={language}
@@ -2374,7 +2393,7 @@ export default function Library({
           />
         )}
 
-        {!showSettings && !selected && !tvShow && (
+        {!showSettings && !showUsers && !selected && !tvShow && (
           <>
         {/* Toolbar row */}
         <div
@@ -3320,7 +3339,7 @@ export default function Library({
         />
       )}
 
-      {!selected && !tvShow && !showSettings &&
+      {!selected && !tvShow && !showSettings && !showUsers &&
         activeTab !== "downloads" && activeTab !== "watchlist" &&
         activeTab !== "uploads" && filtered.length > 0 && pageCount > 1 && (
         <div

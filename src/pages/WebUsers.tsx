@@ -171,14 +171,18 @@ export default function WebUsers({ onBack }: WebUsersProps = {}) {
 
   return (
     <div
-      className="app-shell-bg"
       style={{
-        minHeight: "100vh",
         position: "relative",
-        overflowY: "auto",
+        height: "100%",
+        width: "100%",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--color-bg)",
+        animation: "detail-page-in 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
       }}
     >
-      {/* Sticky back bar */}
+      {/* Sticky back bar — matches Settings / DetailPage pattern so the
+          shell (sidebar + status bar) keeps rendering around us. */}
       <div
         style={{
           position: "sticky",
@@ -187,12 +191,13 @@ export default function WebUsers({ onBack }: WebUsersProps = {}) {
           display: "flex",
           alignItems: "center",
           gap: 12,
-          padding: "12px 24px",
+          padding: "10px 24px",
           background: "color-mix(in srgb, var(--color-bg) 92%, transparent)",
           backdropFilter: "blur(14px) saturate(140%)",
           WebkitBackdropFilter: "blur(14px) saturate(140%)",
           borderBottom:
             "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
+          flexShrink: 0,
         }}
       >
         {onBack && (
@@ -223,6 +228,13 @@ export default function WebUsers({ onBack }: WebUsersProps = {}) {
         </div>
       </div>
 
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          background: "transparent",
+        }}
+      >
       <div
         style={{
           maxWidth: 880,
@@ -585,6 +597,7 @@ export default function WebUsers({ onBack }: WebUsersProps = {}) {
             </div>
           )}
         </section>
+      </div>
       </div>
     </div>
   );
@@ -977,9 +990,9 @@ function NoAccess({
 }) {
   return (
     <div
-      className="app-shell-bg"
       style={{
-        minHeight: "100vh",
+        height: "100%",
+        width: "100%",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -987,6 +1000,7 @@ function NoAccess({
         gap: 16,
         padding: 24,
         color: "var(--color-text-muted)",
+        background: "var(--color-bg)",
       }}
     >
       <div style={{ fontSize: 14 }}>{children}</div>

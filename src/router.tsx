@@ -10,7 +10,6 @@ import { apiBase } from "./lib/transport";
 import Login from "./pages/Login";
 import WebBootstrap from "./pages/WebBootstrap";
 import WebSetupWizard from "./pages/WebSetupWizard";
-import WebUsers from "./pages/WebUsers";
 import InviteAccept from "./pages/InviteAccept";
 import ThemeToggle from "./components/ThemeToggle";
 
@@ -195,18 +194,21 @@ function WebRouter() {
     />
   );
 
+  // Library is always mounted — the user-management page renders as a
+  // content-area takeover inside it (so the sidebar + status bar stay
+  // visible around it). `showUsers` swaps the content area only.
+  const closeUsers = () => {
+    window.history.pushState({}, "", "/");
+    setPage("library");
+  };
+
   return (
-    <>
-      {page === "library" && <Library startIndexingOnMount={false} headerSlot={headerSlot} />}
-      {page === "users" && isAdmin && (
-        <WebUsers
-          onBack={() => {
-            window.history.pushState({}, "", "/");
-            setPage("library");
-          }}
-        />
-      )}
-    </>
+    <Library
+      startIndexingOnMount={false}
+      headerSlot={headerSlot}
+      showUsers={page === "users" && isAdmin}
+      onCloseUsers={closeUsers}
+    />
   );
 }
 
