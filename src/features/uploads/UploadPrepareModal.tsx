@@ -18,6 +18,7 @@ import type {
   TmdbMatch,
   UploadSuggestion,
 } from "./types";
+import { mergeHdr } from "./quality";
 
 /** Lowercase + strip subtitle separators before sending to TMDB. */
 function cleanTmdbQuery(raw: string): string {
@@ -250,7 +251,11 @@ export default function UploadPrepareModal({
         const info = analysisResults.get(f.path)?.info;
         const sug = f.suggestion;
         const resolution = info?.resolution ?? sug?.detected_resolution ?? null;
-        const hdr = info?.hdr ?? sug?.detected_hdr ?? null;
+        // Combine ffprobe + filename-parser HDR so DV detected only by the
+        // parser (or HDR10 detected only by ffprobe) doesn't drop the other
+        // signal. Returns "" when neither source detected anything.
+        const mergedHdr = mergeHdr(info?.hdr, sug?.detected_hdr);
+        const hdr = mergedHdr || null;
         const languages =
           (info?.languages?.length
             ? info.languages

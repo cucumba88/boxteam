@@ -1,5 +1,42 @@
 # Novedades de Oscata
 
+## Versión 0.8.12 — 17 de mayo de 2026
+
+### 🎞️ Detección y selección manual de Dolby Vision (y resto de variantes HDR) en el flujo de subida
+
+Un usuario reportó que el formato Dolby Vision ni se detectaba ni se podía seleccionar a mano al subir un archivo. Una auditoría del flujo de subida confirmó el bug y reveló que era más amplio:
+
+1. **ffprobe nunca detectaba DV.** El backend solo miraba `color_transfer` (PQ/HLG) y `color_primaries` (BT.2020) — nunca inspeccionaba el `side_data_list` con la entrada `DOVI configuration record`, que es la señal fiable. Un fichero DV se reportaba siempre como `HDR10`, `HDR` o nada.
+2. **ffprobe pisaba al parser de nombre.** El modal hacía `info?.hdr ?? sug?.detected_hdr`, así que cuando ffprobe devolvía `HDR10` la pista `DV` que el parser extraía del nombre se descartaba en silencio. Un `*.HDR10.DV.mkv` aparecía como `HDR10`.
+3. **El modo "temporada completa" no tenía siquiera selector de HDR.** Al subir una carpeta de temporada solo se ofrecían Fuente / Resolución / Códec / Audio, por lo que DV no podía ni detectarse ni introducirse manualmente, y no entraba nunca en los nombres de los episodios renombrados.
+4. **Selectores frágiles.** El desplegable de HDR del modo "archivo único" solo aceptaba valores exactos: si ffprobe o el parser devolvían `"DOLBYVISION"` (en mayúsculas, sin espacio) el campo caía a "—". No existía la opción combinada `HDR10 + Dolby Vision`. El desplegable de códec de audio del builder de nombres tampoco incluía `EAC3 + Atmos`, que sí estaba en el del modo temporada.
+
+#### Cambios aplicados
+
+- **Backend (`detect_hdr` en `analysis.rs`).** Ahora deserializa `side_data_list` de cada stream de vídeo y combina las señales: PQ + DOVI → `HDR10+DV`, BT.2020 + DOVI → `HDR+DV`, DOVI sin transferencia HDR → `DV`. También detecta HDR10+ vía la entrada SMPTE 2094‑40 del mismo `side_data_list`. Devuelve uno de: `DV`, `HDR10+DV`, `HDR+DV`, `HDR10+`, `HDR10`, `HLG`, `HDR`, o nada (SDR).
+- **Backend (parser de nombres en `parser.rs`).** Antes el parser devolvía solo el primer token HDR que encontraba (`HDR_RE.find`). Ahora `combine_hdr_from` recorre todos los matches, reconoce `Dolby Vision` / `Dolby.Vision` / `DV`, y los combina con el mismo criterio que ffprobe: un fichero llamado `Inception.2010.2160p.UHD.BluRay.DV.HDR10.DTS-HD.MA-REMUX.mkv` ahora devuelve `HDR10+DV` en lugar de solo `DV`.
+- **Frontend (`UploadPrepareModal`).** Se sustituye el `??` por `mergeHdr(info?.hdr, sug?.detected_hdr)` para que ninguna de las dos fuentes pueda eclipsar a la otra: si ffprobe ve HDR10 y el parser ve DV el resultado final es `HDR10+DV`.
+- **Frontend (selector HDR en modo temporada).** El grid de Fuente / Resolución / Códec en `AnalysisRow` pasa de 3 a 4 columnas e incluye un nuevo selector HDR. El estado `seasonHdr` se siembra con `mergeHdr` y se actualiza cuando llegan datos del ffprobe principal, del primer episodio probado o del análisis por nombre de fichero (cuando ffprobe no está disponible). `buildEpisodeFilename` ahora acepta `hdr` como parámetro y emite los tokens `HDR10`, `HDR`, etc. más un sufijo `DV` cuando corresponde, en cada episodio renombrado.
+- **Frontend (selectores tolerantes).** Todos los desplegables relevantes (Fuente / Resolución / Códec / HDR / Audio) añaden automáticamente una opción extra cuando el valor sembrado por ffprobe o el parser no coincide con ninguno del listado canónico, de modo que un token desconocido nunca se descarta en silencio. El listado de HDR gana `HDR10 + Dolby Vision`, y el de audio gana `EAC3 + Atmos` (antes solo lo tenía la rama de temporada).
+- **Refactor: módulo `src/features/uploads/quality.ts`.** Se centralizan las enumeraciones (`SOURCE_OPTIONS`, `RESOLUTIONS`, `CODECS`, `AUDIO_CODECS`, `HDR_OPTIONS`) y los helpers (`normalizeHdr`, `mergeHdr`, `hdrFilenameToken`, `isDV`, `mapReleaseType`, `normalizeResolution`, `parseQualityFromFilename`, `formatChannels`) que antes vivían duplicados en `FilenameBuilder.tsx` y `AnalysisRow.tsx`. Una sola fuente de verdad evita que las dos pantallas vuelvan a divergir.
+
+#### Reglas de detección consolidadas
+
+```
+side_data_list contiene "DOVI configuration record"     → DV
+color_transfer == "smpte2084"                           → HDR10
+color_transfer == "smpte2084" + SMPTE 2094-40 side data → HDR10+
+color_transfer == "arib-std-b67"                        → HLG
+color_primaries == "bt2020" (y ninguna de las anteriores) → HDR
+DV + HDR10  → HDR10+DV
+DV + HDR    → HDR+DV
+DV solo     → DV
+```
+
+Cobertura de tests: 7 nuevos tests en `analysis.rs` (SDR, HDR10, HLG, HDR-only, DV-only, HDR10+, HDR10+DV) y 3 nuevos en `parser.rs` (`DV` solo, `Dolby.Vision`, `HDR10+ DV` combinado), más una aserción actualizada en el test existente de Inception que ahora espera `HDR10+DV` en lugar de solo `DV`.
+
+---
+
 ## Versión 0.8.11 — 16 de mayo de 2026
 
 ### 🐧 Compilación nativa para Linux en GitHub Actions

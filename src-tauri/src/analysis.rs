@@ -55,6 +55,17 @@ struct FfprobeStream {
     tags: Option<FfprobeTags>,
     channels: Option<u32>,
     bit_rate: Option<String>,
+    // Dolby Vision and HDR10+ are surfaced by ffprobe as `side_data_list`
+    // entries on the video stream (DOVI configuration record / HDR Dynamic
+    // Metadata SMPTE2094-40 respectively). Without this field DV is silently
+    // dropped — see detect_hdr.
+    #[serde(default)]
+    side_data_list: Vec<FfprobeSideData>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct FfprobeSideData {
+    side_data_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -488,18 +499,121 @@ fn normalize_audio_codec(codec: &str) -> String {
     }
 }
 
+/// Detect the HDR format of a video stream from ffprobe color metadata + side
+/// data. Returns one of: "DV", "HDR10+DV", "HDR+DV", "HDR10+", "HDR10",
+/// "HLG", "HDR", or None when the stream is SDR.
+///
+/// DV detection requires `side_data_list` to be populated by ffprobe (it is
+/// by default — `-show_streams` includes side data). HDR10+ detection
+/// follows the same pattern via the SMPTE 2094-40 side data type.
 fn detect_hdr(stream: &FfprobeStream) -> Option<String> {
     let transfer = stream.color_transfer.as_deref().unwrap_or("");
     let primaries = stream.color_primaries.as_deref().unwrap_or("");
 
-    if transfer == "smpte2084" {
-        return Some("HDR10".to_string());
+    let has_dovi = stream.side_data_list.iter().any(|sd| {
+        sd.side_data_type
+            .as_deref()
+            .map(|t| {
+                let up = t.to_ascii_uppercase();
+                up.contains("DOVI") || up.contains("DOLBY VISION")
+            })
+            .unwrap_or(false)
+    });
+
+    let has_hdr10_plus = stream.side_data_list.iter().any(|sd| {
+        sd.side_data_type
+            .as_deref()
+            .map(|t| {
+                let up = t.to_ascii_uppercase();
+                up.contains("HDR DYNAMIC METADATA")
+                    || up.contains("SMPTE 2094")
+                    || up.contains("SMPTE2094")
+            })
+            .unwrap_or(false)
+    });
+
+    let base = if has_hdr10_plus {
+        Some("HDR10+")
+    } else if transfer == "smpte2084" {
+        Some("HDR10")
+    } else if transfer == "arib-std-b67" {
+        Some("HLG")
+    } else if primaries == "bt2020" {
+        Some("HDR")
+    } else {
+        None
+    };
+
+    match (has_dovi, base) {
+        (true, Some("HDR10")) | (true, Some("HDR10+")) => Some("HDR10+DV".to_string()),
+        (true, Some("HDR")) => Some("HDR+DV".to_string()),
+        (true, _) => Some("DV".to_string()),
+        (false, Some(b)) => Some(b.to_string()),
+        (false, None) => None,
     }
-    if transfer == "arib-std-b67" {
-        return Some("HLG".to_string());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_stream(json: &str) -> FfprobeStream {
+        serde_json::from_str(json).expect("valid stream JSON")
     }
-    if primaries == "bt2020" {
-        return Some("HDR".to_string());
+
+    #[test]
+    fn detects_plain_sdr() {
+        let s = parse_stream(r#"{"codec_type":"video","color_transfer":"bt709"}"#);
+        assert_eq!(detect_hdr(&s), None);
     }
-    None
+
+    #[test]
+    fn detects_hdr10_from_pq_transfer() {
+        let s = parse_stream(r#"{"codec_type":"video","color_transfer":"smpte2084","color_primaries":"bt2020"}"#);
+        assert_eq!(detect_hdr(&s).as_deref(), Some("HDR10"));
+    }
+
+    #[test]
+    fn detects_hlg() {
+        let s = parse_stream(r#"{"codec_type":"video","color_transfer":"arib-std-b67"}"#);
+        assert_eq!(detect_hdr(&s).as_deref(), Some("HLG"));
+    }
+
+    #[test]
+    fn detects_hdr_from_bt2020_only() {
+        let s = parse_stream(r#"{"codec_type":"video","color_primaries":"bt2020"}"#);
+        assert_eq!(detect_hdr(&s).as_deref(), Some("HDR"));
+    }
+
+    #[test]
+    fn detects_dv_from_side_data() {
+        // Pure DV (profile 5) with no PQ transfer — typical of DV-only releases.
+        let s = parse_stream(r#"{
+            "codec_type":"video",
+            "side_data_list":[{"side_data_type":"DOVI configuration record"}]
+        }"#);
+        assert_eq!(detect_hdr(&s).as_deref(), Some("DV"));
+    }
+
+    #[test]
+    fn detects_hdr10_plus_dv_combined() {
+        // The common UHD remux case: HDR10 base layer + Dolby Vision enhancement.
+        let s = parse_stream(r#"{
+            "codec_type":"video",
+            "color_transfer":"smpte2084",
+            "color_primaries":"bt2020",
+            "side_data_list":[{"side_data_type":"DOVI configuration record"}]
+        }"#);
+        assert_eq!(detect_hdr(&s).as_deref(), Some("HDR10+DV"));
+    }
+
+    #[test]
+    fn detects_hdr10_plus_from_side_data() {
+        let s = parse_stream(r#"{
+            "codec_type":"video",
+            "color_transfer":"smpte2084",
+            "side_data_list":[{"side_data_type":"HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}]
+        }"#);
+        assert_eq!(detect_hdr(&s).as_deref(), Some("HDR10+"));
+    }
 }

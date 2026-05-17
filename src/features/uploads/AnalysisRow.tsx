@@ -27,39 +27,46 @@ import type {
 import { formatBytes, formatDuration, formatLanguages } from "../../lib/format";
 import { formInputCompact, formSelectCompact } from "../../lib/formStyles";
 import { foldForSearch } from "../../utils/textSearch";
+import {
+  SOURCE_OPTIONS as SHARED_SOURCE_OPTIONS,
+  RESOLUTIONS as SHARED_RESOLUTIONS,
+  CODECS as SHARED_CODECS,
+  AUDIO_CODECS as SHARED_AUDIO_CODECS,
+  HDR_OPTIONS,
+  hdrFilenameToken,
+  isDV as isDVHdr,
+  mapReleaseType,
+  normalizeResolution,
+  mergeHdr,
+  parseQualityFromFilename,
+} from "./quality";
 
 const TMDB_IMG = "https://image.tmdb.org/t/p/w92";
 
 // ─── Season upload helpers ─────────────────────────────────────────────────────
 
-const SEASON_SOURCES = [
-  "",
-  "WEB-DL",
-  "WEB-DL Micro",
-  "WEBRip",
-  "BDREMUX",
-  "BDRip",
-  "BluRay",
-  "HDTV",
-  "REMUX",
-];
-const SEASON_RESOLUTIONS = ["", "2160p", "1080p", "720p", "480p"];
-const SEASON_CODECS = ["", "HEVC", "AVC", "AV1", "VP9", "MPEG2"];
-const SEASON_AUDIO_CODECS = [
-  "",
-  "TrueHD Atmos",
-  "TrueHD",
-  "DTS-HD MA",
-  "DTS:X",
-  "DTS-HD HRA",
-  "DTS",
-  "EAC3 + Atmos",
-  "EAC3",
-  "AC3",
-  "AAC",
-  "FLAC",
-  "MP3",
-];
+// Season-mode dropdowns reuse the same canonical lists as FilenameBuilder.
+const SEASON_SOURCES = SHARED_SOURCE_OPTIONS;
+const SEASON_RESOLUTIONS = SHARED_RESOLUTIONS;
+const SEASON_CODECS = SHARED_CODECS;
+const SEASON_AUDIO_CODECS = SHARED_AUDIO_CODECS;
+
+/** Render `<option>`s for the canonical list plus an extra option for `value`
+ *  when it doesn't match anything in the list — so values seeded by ffprobe
+ *  or the filename parser are never silently dropped. */
+function renderSeasonOptions(options: string[], value: string): React.ReactNode {
+  const has = options.some((o) => o.toLowerCase() === value.toLowerCase());
+  return (
+    <>
+      {options.map((o) => (
+        <option key={o} value={o}>
+          {o || "—"}
+        </option>
+      ))}
+      {value && !has && <option value={value}>{value}</option>}
+    </>
+  );
+}
 
 /** Parse episode number from a filename, e.g. S01E05 → 5. */
 function parseEpisodeNum(name: string): number | null {
@@ -81,22 +88,13 @@ function parseEpisodeNum(name: string): number | null {
   return null;
 }
 
-/** Convert detected_release_type to a SEASON_SOURCES value. */
-function mapDetectedReleaseType(rt: string | null | undefined): string {
-  if (!rt) return "";
-  const r = rt.toUpperCase();
-  if (r === "BDREMUX" || r === "BD REMUX" || r === "REMUX") return "BDREMUX";
-  if (r === "BDRIP" || r === "BRRIP") return "BDRip";
-  if (r === "BLURAY") return "BluRay";
-  if (r === "WEB-DL" || r === "WEBDL") return "WEB-DL";
-  if (r === "WEBRIP") return "WEBRip";
-  if (r === "HDTV") return "HDTV";
-  return "";
-}
+// mapReleaseType lives in ./quality — re-exported here under the old name so
+// the rest of the file (and any other callers) stays unchanged.
+const mapDetectedReleaseType = mapReleaseType;
 
 /**
  * Build a renamed episode filename.
- * e.g. → "Show.Name.S01E05.WEB-DL.1080p.HEVC.SPA.ENG.mkv"
+ * e.g. → "Show.Name.S01E05.WEB-DL.1080p.HEVC.HDR10.DV.AC3.SPA.ENG.mkv"
  */
 function buildEpisodeFilename(
   showName: string,
@@ -105,6 +103,7 @@ function buildEpisodeFilename(
   source: string,
   resolution: string,
   codec: string,
+  hdr: string,
   audioTracks: { codec: string; channels: string; lang: string }[],
   ext: string,
 ): string {
@@ -118,6 +117,9 @@ function buildEpisodeFilename(
     parts.push(source.trim().replace(/\s+/g, ".").toUpperCase());
   if (resolution.trim()) parts.push(resolution.trim());
   if (codec.trim()) parts.push(codec.trim());
+  const hdrCore = hdrFilenameToken(hdr);
+  if (hdrCore) parts.push(hdrCore);
+  if (isDVHdr(hdr)) parts.push("DV");
   audioTracks
     .filter((t) => t.codec.trim())
     .forEach((t) => {
@@ -136,50 +138,7 @@ function buildEpisodeFilename(
   return parts.join(".") + (ext ? `.${ext}` : "");
 }
 
-/** Normalise a raw resolution string (e.g. "4K", "4k", "UHD", "2160P") to
- * one of the canonical lowercase dropdown values ("2160p", "1080p", etc.). */
-function normalizeResolution(raw: string | null | undefined): string {
-  if (!raw) return "";
-  const u = raw.trim().toUpperCase();
-  if (u === "2160P" || u === "4K" || u === "UHD") return "2160p";
-  if (u === "1080P" || u === "1080I") return "1080p";
-  if (u === "720P" || u === "720I") return "720p";
-  if (u === "480P") return "480p";
-  // Already a canonical value?
-  const lower = raw.toLowerCase();
-  if (SEASON_RESOLUTIONS.includes(lower)) return lower;
-  return "";
-}
-
-/** Parse resolution, codec and source from a media filename or folder path. */
-function parseQualityFromFilename(name: string): {
-  source: string;
-  resolution: string;
-  codec: string;
-} {
-  const u = name.toUpperCase();
-  // Check explicit tags first (4K / UHD map to 2160p)
-  let resolution = "";
-  if (/\b(2160P|4K|UHD)\b/.test(u)) resolution = "2160p";
-  else if (/\b(1080P|1080I)\b/.test(u)) resolution = "1080p";
-  else if (/\b720P\b/.test(u)) resolution = "720p";
-  else if (/\b480P\b/.test(u)) resolution = "480p";
-  // Detect codec — handle x265/x264 aliases in addition to HEVC/AVC
-  let codec = "";
-  if (/\bHEVC\b|\bX265\b|\bH\.?265\b/.test(u)) codec = "HEVC";
-  else if (/\bAVC\b|\bX264\b|\bH\.?264\b/.test(u)) codec = "AVC";
-  else
-    codec = SEASON_CODECS.find((c) => c && u.includes(c.toUpperCase())) ?? "";
-  let source = "";
-  if (/BDREMUX|BD[\s._-]?REMUX/.test(u)) source = "BDREMUX";
-  else if (/BDRIP|BRRIP/.test(u)) source = "BDRip";
-  else if (/BLURAY|BLU-RAY/.test(u)) source = "BluRay";
-  else if (/WEB[\s._-]?DL/.test(u)) source = "WEB-DL";
-  else if (/WEBRIP/.test(u)) source = "WEBRip";
-  else if (/HDTV/.test(u)) source = "HDTV";
-  else if (/REMUX/.test(u)) source = "REMUX";
-  return { source, resolution, codec };
-}
+// normalizeResolution + parseQualityFromFilename now live in ./quality.
 
 // Language options for the audio-track lang selector.
 // code = short ISO-639-2/B tag used in filenames; label = display name in Spanish.
@@ -441,6 +400,12 @@ export default function AnalysisRow({
   const [seasonCodec, setSeasonCodec] = useState(
     info?.codec ?? suggestion?.detected_codec ?? "",
   );
+  // HDR / Dolby Vision — combined from ffprobe + filename parser so DV files
+  // detected by either source land in the dropdown. Normalised so values like
+  // "DOLBYVISION" or "4K" map to canonical dropdown entries.
+  const [seasonHdr, setSeasonHdr] = useState(() =>
+    mergeHdr(info?.hdr, suggestion?.detected_hdr),
+  );
   // TV audio tracks — one entry per physical track (codec + channels + lang)
   type SeasonAudioTrackEntry = {
     codec: string;
@@ -519,6 +484,9 @@ export default function AnalysisRow({
     if (info.resolution && !seasonResolution)
       setSeasonResolution(normalizeResolution(info.resolution));
     if (info.codec && !seasonCodec) setSeasonCodec(info.codec);
+    // Merge ffprobe HDR with whatever's already set (parser hint or user pick).
+    const merged = mergeHdr(seasonHdr, info.hdr);
+    if (merged && merged !== seasonHdr) setSeasonHdr(merged);
     if (info.audio_tracks && info.audio_tracks.length > 0) {
       const detectedLangs = info.languages
         .filter(Boolean)
@@ -556,6 +524,8 @@ export default function AnalysisRow({
         if (epInfo.resolution && !seasonResolution)
           setSeasonResolution(epInfo.resolution);
         if (epInfo.codec && !seasonCodec) setSeasonCodec(epInfo.codec);
+        const mergedHdr = mergeHdr(seasonHdr, epInfo.hdr);
+        if (mergedHdr && mergedHdr !== seasonHdr) setSeasonHdr(mergedHdr);
         if (epInfo.audio_tracks && epInfo.audio_tracks.length > 0) {
           const detectedLangs = epInfo.languages
             .filter(Boolean)
@@ -589,6 +559,12 @@ export default function AnalysisRow({
         if (!seasonResolution)
           setSeasonResolution(fromFolder.resolution || fromEp.resolution);
         if (!seasonCodec) setSeasonCodec(fromFolder.codec || fromEp.codec);
+        const mergedFallback = mergeHdr(
+          mergeHdr(seasonHdr, fromFolder.hdr),
+          fromEp.hdr,
+        );
+        if (mergedFallback && mergedFallback !== seasonHdr)
+          setSeasonHdr(mergedFallback);
 
         let langs = parseLanguagesFromPath(first);
         if (langs.length === 0) {
@@ -661,6 +637,7 @@ export default function AnalysisRow({
           seasonSource,
           seasonResolution,
           seasonCodec,
+          seasonHdr,
           seasonAudioTracks,
           ext,
         ),
@@ -678,6 +655,7 @@ export default function AnalysisRow({
     seasonSource,
     seasonResolution,
     seasonCodec,
+    seasonHdr,
     seasonAudioTracks,
     rename,
   ]);
@@ -700,6 +678,7 @@ export default function AnalysisRow({
           seasonSource,
           seasonResolution,
           seasonCodec,
+          seasonHdr,
           seasonAudioTracks,
           epExt,
         ),
@@ -714,6 +693,7 @@ export default function AnalysisRow({
     seasonSource,
     seasonResolution,
     seasonCodec,
+    seasonHdr,
     seasonAudioTracks,
     rename,
   ]);
@@ -1456,7 +1436,7 @@ export default function AnalysisRow({
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "1fr 1fr 1fr",
+                      gridTemplateColumns: "1fr 1fr 1fr 1fr",
                       gap: "8px 10px",
                     }}
                   >
@@ -1482,11 +1462,7 @@ export default function AnalysisRow({
                         onChange={(e) => setSeasonSource(e.target.value)}
                         style={formSelectCompact}
                       >
-                        {SEASON_SOURCES.map((s) => (
-                          <option key={s} value={s}>
-                            {s || "—"}
-                          </option>
-                        ))}
+                        {renderSeasonOptions(SEASON_SOURCES, seasonSource)}
                       </select>
                     </div>
                     <div
@@ -1511,11 +1487,7 @@ export default function AnalysisRow({
                         onChange={(e) => setSeasonResolution(e.target.value)}
                         style={formSelectCompact}
                       >
-                        {SEASON_RESOLUTIONS.map((r) => (
-                          <option key={r} value={r}>
-                            {r || "—"}
-                          </option>
-                        ))}
+                        {renderSeasonOptions(SEASON_RESOLUTIONS, seasonResolution)}
                       </select>
                     </div>
                     <div
@@ -1540,11 +1512,40 @@ export default function AnalysisRow({
                         onChange={(e) => setSeasonCodec(e.target.value)}
                         style={formSelectCompact}
                       >
-                        {SEASON_CODECS.map((c) => (
-                          <option key={c} value={c}>
-                            {c || "—"}
+                        {renderSeasonOptions(SEASON_CODECS, seasonCodec)}
+                      </select>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 3,
+                      }}
+                    >
+                      <label
+                        style={{
+                          fontSize: 10,
+                          color: "var(--color-text-muted)",
+                          fontWeight: 600,
+                          letterSpacing: "0.04em",
+                        }}
+                      >
+                        HDR
+                      </label>
+                      <select
+                        value={seasonHdr}
+                        onChange={(e) => setSeasonHdr(e.target.value)}
+                        style={formSelectCompact}
+                      >
+                        {HDR_OPTIONS.map((h) => (
+                          <option key={h.value} value={h.value}>
+                            {h.label}
                           </option>
                         ))}
+                        {seasonHdr &&
+                          !HDR_OPTIONS.some((h) => h.value === seasonHdr) && (
+                            <option value={seasonHdr}>{seasonHdr}</option>
+                          )}
                       </select>
                     </div>
                   </div>
@@ -1600,11 +1601,7 @@ export default function AnalysisRow({
                           }
                           style={formSelectCompact}
                         >
-                          {SEASON_AUDIO_CODECS.map((a) => (
-                            <option key={a} value={a}>
-                              {a || "—"}
-                            </option>
-                          ))}
+                          {renderSeasonOptions(SEASON_AUDIO_CODECS, track.codec)}
                         </select>
                         <input
                           value={track.channels}
@@ -1872,6 +1869,7 @@ export default function AnalysisRow({
                               seasonSource,
                               seasonResolution,
                               seasonCodec,
+                              seasonHdr,
                               seasonAudioTracks,
                               ext,
                             )

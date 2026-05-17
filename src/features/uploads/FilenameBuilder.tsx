@@ -3,6 +3,19 @@ import { Copy, FolderOpen, FileVideo } from "lucide-react";
 import type { LocalMediaInfo, MediaType } from "./types";
 import { formInputCompact, formSelectCompact } from "../../lib/formStyles";
 import Toggle from "../../components/Toggle";
+import {
+  SOURCE_OPTIONS as SHARED_SOURCE_OPTIONS,
+  RESOLUTIONS,
+  CODECS,
+  AUDIO_CODECS,
+  HDR_OPTIONS,
+  hdrFilenameToken,
+  isDV,
+  mapReleaseType,
+  normalizeHdr,
+  normalizeResolution,
+  formatChannels,
+} from "./quality";
 
 interface FilenameBuilderProps {
   info: LocalMediaInfo | null;
@@ -20,44 +33,9 @@ interface FilenameBuilderProps {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const SOURCE_OPTIONS = [
-  "",
-  "CUSTOM",
-  "WEB-DL",
-  "WEB-DL Micro",
-  "WEBRip",
-  "BDREMUX",
-  "BDRip",
-  "BluRay",
-  "HDTV",
-  "REMUX",
-];
-const RESOLUTIONS = ["", "2160p", "1080p", "720p", "480p"];
-const CODECS = ["", "HEVC", "AVC", "AV1", "VP9", "MPEG2"];
-const AUDIO_CODECS = [
-  "",
-  "TrueHD Atmos",
-  "TrueHD",
-  "DTS-HD MA",
-  "DTS:X",
-  "DTS-HD HRA",
-  "DTS",
-  "EAC3",
-  "AC3",
-  "AAC",
-  "FLAC",
-  "MP3",
-];
-const HDR_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "—" },
-  { value: "HDR", label: "HDR" },
-  { value: "HDR10", label: "HDR10" },
-  { value: "HDR10+", label: "HDR10+" },
-  { value: "HLG", label: "HLG" },
-  { value: "DV", label: "Dolby Vision" },
-  { value: "HDR+DV", label: "HDR + Dolby Vision" },
-  { value: "SDR", label: "SDR" },
-];
+// Sources / resolutions / codecs / audio / HDR are defined in ./quality so
+// AnalysisRow and FilenameBuilder share the same canonical lists.
+const SOURCE_OPTIONS = SHARED_SOURCE_OPTIONS;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -69,39 +47,22 @@ function stripDash(s: string): string {
     .trim();
 }
 
-/** Channel count → display string (6 → "5.1", 8 → "7.1", 2 → "2.0"). */
-function formatChannels(n: number | null): string {
-  if (!n) return "";
-  if (n <= 2) return `${n}.0`;
-  if (n === 6) return "5.1";
-  if (n === 8) return "7.1";
-  return `${n}.0`;
-}
-
-/** The HDR label to embed in the metadata parens (empty when DV-only). */
-function hdrCore(h: string): string {
-  if (!h || h === "DV") return "";
-  if (h === "HDR+DV") return "HDR";
-  return h;
-}
-
-/** Whether to append [Dolby Vision] bracket. */
-function isDV(h: string): boolean {
-  return h === "DV" || h === "HDR+DV";
-}
-
-/** Map a parser release_type string to a SOURCE_OPTIONS value. */
-function mapReleaseType(rt: string | null | undefined): string {
-  if (!rt) return "";
-  const r = rt.toUpperCase();
-  if (r === "BDREMUX" || r === "BD REMUX" || r === "REMUX") return "BDREMUX";
-  if (r === "BDRIP") return "BDRip";
-  if (r === "BRRIP") return "BDRip";
-  if (r === "BLURAY") return "BluRay";
-  if (r === "WEB-DL" || r === "WEBDL") return "WEB-DL";
-  if (r === "WEBRIP") return "WEBRip";
-  if (r === "HDTV") return "HDTV";
-  return "";
+/** Render a `<select>` whose options are the canonical list, plus an extra
+ *  option for `value` when it is non-empty and not already in `options`.
+ *  This means a value seeded by ffprobe/parser that doesn't match the
+ *  dropdown is preserved rather than silently dropped to blank. */
+function renderOptions(options: string[], value: string): React.ReactNode {
+  const has = options.some((o) => o.toLowerCase() === value.toLowerCase());
+  return (
+    <>
+      {options.map((o) => (
+        <option key={o} value={o}>
+          {o || "—"}
+        </option>
+      ))}
+      {value && !has && <option value={value}>{value}</option>}
+    </>
+  );
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -119,10 +80,13 @@ export default function FilenameBuilder({
   dest,
   onChange,
 }: FilenameBuilderProps) {
-  // Shared fields
-  const [resolution, setResolution] = useState(info?.resolution ?? "");
+  // Shared fields. Seeded values are normalised so the dropdowns can match
+  // them against the canonical lists (e.g. "4K" → "2160p", "DOLBYVISION" → "DV").
+  const [resolution, setResolution] = useState(
+    normalizeResolution(info?.resolution) || (info?.resolution ?? ""),
+  );
   const [codec, setCodec] = useState(info?.codec ?? "");
-  const [hdr, setHdr] = useState(info?.hdr ?? "");
+  const [hdr, setHdr] = useState(normalizeHdr(info?.hdr) || (info?.hdr ?? ""));
   // Audio tracks — one entry per physical track in the file
   type AudioTrackEntry = { codec: string; channels: string };
   const [audioTracks, setAudioTracks] = useState<AudioTrackEntry[]>(() => {
@@ -195,7 +159,7 @@ export default function FilenameBuilder({
       if (source.trim()) parts.push(source.trim().toUpperCase());
       if (resolution.trim()) parts.push(resolution.trim());
       if (codec.trim()) parts.push(codec.trim());
-      const core = hdrCore(hdr);
+      const core = hdrFilenameToken(hdr);
       if (core) parts.push(core);
       if (isDV(hdr)) parts.push("DV");
       audioTracks
@@ -220,7 +184,7 @@ export default function FilenameBuilder({
     if (source.trim()) tags.push(source.trim().toUpperCase());
     if (resolution.trim()) tags.push(resolution.trim().toUpperCase());
     if (codec.trim()) tags.push(codec.trim().toUpperCase());
-    const core = hdrCore(hdr);
+    const core = hdrFilenameToken(hdr);
     if (core) tags.push(core.toUpperCase());
     const langList = langs
       .split(/[,\s]+/)
@@ -390,11 +354,7 @@ export default function FilenameBuilder({
             }}
             style={selectStyle}
           >
-            {SOURCE_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s || "—"}
-              </option>
-            ))}
+            {renderOptions(SOURCE_OPTIONS, source)}
           </select>
         </Field>
         <Field label="Resolución">
@@ -406,11 +366,7 @@ export default function FilenameBuilder({
             }}
             style={selectStyle}
           >
-            {RESOLUTIONS.map((r) => (
-              <option key={r} value={r}>
-                {r || "—"}
-              </option>
-            ))}
+            {renderOptions(RESOLUTIONS, resolution)}
           </select>
         </Field>
         <Field label="Códec vídeo">
@@ -422,11 +378,7 @@ export default function FilenameBuilder({
             }}
             style={selectStyle}
           >
-            {CODECS.map((c) => (
-              <option key={c} value={c}>
-                {c || "—"}
-              </option>
-            ))}
+            {renderOptions(CODECS, codec)}
           </select>
         </Field>
       </div>
@@ -446,6 +398,9 @@ export default function FilenameBuilder({
               {h.label}
             </option>
           ))}
+          {hdr && !HDR_OPTIONS.some((h) => h.value === hdr) && (
+            <option value={hdr}>{hdr}</option>
+          )}
         </select>
       </Field>
 
@@ -476,11 +431,7 @@ export default function FilenameBuilder({
               onChange={(e) => updateAudioTrack(idx, "codec", e.target.value)}
               style={selectStyle}
             >
-              {AUDIO_CODECS.map((a) => (
-                <option key={a} value={a}>
-                  {a || "—"}
-                </option>
-              ))}
+              {renderOptions(AUDIO_CODECS, track.codec)}
             </select>
             <input
               value={track.channels}

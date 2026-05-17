@@ -80,8 +80,60 @@ static AUDIO_CODEC_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static HDR_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(DV|Dolby\.?Vision|HDR10\+?|HDR)\b").expect("valid HDR regex")
+    Regex::new(r"(?i)\b(DV|Dolby[\s._]?Vision|HDR10\+|HDR10|HLG|HDR|SDR)\b")
+        .expect("valid HDR regex")
 });
+
+/// Normalise a single matched HDR token (case-insensitive raw match) to one of
+/// the canonical labels: DV, HDR10+, HDR10, HLG, HDR, SDR.
+fn canonicalize_hdr_token(raw: &str) -> Option<&'static str> {
+    let up = raw.to_uppercase();
+    let stripped: String = up.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '+').collect();
+    match stripped.as_str() {
+        "DV" | "DOLBYVISION" => Some("DV"),
+        "HDR10+" => Some("HDR10+"),
+        "HDR10" => Some("HDR10"),
+        "HLG" => Some("HLG"),
+        "HDR" => Some("HDR"),
+        "SDR" => Some("SDR"),
+        _ => None,
+    }
+}
+
+/// Scan a string for every HDR token and combine them into one canonical
+/// label, preserving Dolby Vision when seen alongside HDR/HDR10/HDR10+.
+fn combine_hdr_from(text: &str) -> Option<String> {
+    let mut has_dv = false;
+    let mut base: Option<&'static str> = None;
+    for m in HDR_RE.find_iter(text) {
+        if let Some(tok) = canonicalize_hdr_token(m.as_str()) {
+            if tok == "DV" {
+                has_dv = true;
+                continue;
+            }
+            // Specificity ranking: HDR10+ > HDR10 > HLG > HDR > SDR.
+            let rank = |t: &str| match t {
+                "HDR10+" => 4,
+                "HDR10" => 3,
+                "HLG" => 2,
+                "HDR" => 1,
+                "SDR" => 0,
+                _ => -1,
+            };
+            base = match base {
+                Some(prev) if rank(prev) >= rank(tok) => Some(prev),
+                _ => Some(tok),
+            };
+        }
+    }
+    match (has_dv, base) {
+        (true, Some("HDR10") | Some("HDR10+")) => Some("HDR10+DV".to_string()),
+        (true, Some("HDR")) => Some("HDR+DV".to_string()),
+        (true, _) => Some("DV".to_string()),
+        (false, Some(b)) => Some(b.to_string()),
+        (false, None) => None,
+    }
+}
 
 /// Season inference patterns for path-based season detection (checked in order).
 static SEASON_PATH_RES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -334,10 +386,8 @@ fn parse_with_context(ftp_path: Option<&str>, filename: &str) -> ParsedMedia {
             .find(&clean)
             .map(|m| m.as_str().to_uppercase())
             .or_else(|| ancestor_find!(|a| AUDIO_CODEC_RE.find(a).map(|m| m.as_str().to_uppercase()))),
-        hdr: HDR_RE
-            .find(&clean)
-            .map(|m| m.as_str().to_uppercase())
-            .or_else(|| ancestor_find!(|a| HDR_RE.find(a).map(|m| m.as_str().to_uppercase()))),
+        hdr: combine_hdr_from(&clean)
+            .or_else(|| ancestor_find!(|a| combine_hdr_from(a))),
         languages,
         release_type,
         release_group,
@@ -604,9 +654,27 @@ mod tests {
         assert_eq!(p.title, "Inception");
         assert_eq!(p.year, Some(2010));
         assert_eq!(p.resolution.as_deref(), Some("2160P"));
-        // DV comes before HDR10 in this filename; HDR_RE should match DV
-        assert_eq!(p.hdr.as_deref(), Some("DV"));
+        // Both DV and HDR10 are present — combine_hdr_from merges them.
+        assert_eq!(p.hdr.as_deref(), Some("HDR10+DV"));
         assert_eq!(p.audio_codec.as_deref(), Some("DTS-HD"));
+    }
+
+    #[test]
+    fn parses_dv_only() {
+        let p = parse_media_path("", "Movie.2023.2160p.WEB-DL.DV.mkv");
+        assert_eq!(p.hdr.as_deref(), Some("DV"));
+    }
+
+    #[test]
+    fn parses_dolby_vision_long_form() {
+        let p = parse_media_path("", "Movie.2023.2160p.Dolby.Vision.x265.mkv");
+        assert_eq!(p.hdr.as_deref(), Some("DV"));
+    }
+
+    #[test]
+    fn parses_hdr10_plus_dv_combined() {
+        let p = parse_media_path("", "Movie.2023.2160p.WEB-DL.HDR10+.DV.x265.mkv");
+        assert_eq!(p.hdr.as_deref(), Some("HDR10+DV"));
     }
 
     #[test]

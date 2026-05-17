@@ -895,6 +895,9 @@ mod tests {
             poster_path_en: None,
             vote_average,
             genre_ids: vec![],
+            genres: vec![],
+            origin_country: None,
+            runtime_mins: None,
         }
     }
 

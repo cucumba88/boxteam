@@ -2796,7 +2796,11 @@ mod tests {
     fn in_memory_db() -> Db {
         let conn = Connection::open_in_memory().expect("in-memory db");
         Db::apply_migrations(&conn).expect("migrations");
-        Db(Arc::new(Mutex::new(conn)))
+        Db {
+            conn: Arc::new(Mutex::new(conn)),
+            data_dir: std::path::PathBuf::from("/tmp/oscata-test"),
+            is_portable: false,
+        }
     }
 
     /// Minimal ParsedMedia for inserting test rows.
