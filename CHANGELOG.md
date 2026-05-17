@@ -1,5 +1,80 @@
 # Novedades de Oscata
 
+## Versión 0.9.0 — 17 de mayo de 2026
+
+### 🎨 Rediseño completo de la interfaz — shell nativo, páginas de detalle, cohesión total
+
+Esta versión es una revisión integral del UX de Oscata. Cada pantalla que toca el usuario se ha reescrito o realineado para que la app se sienta como una aplicación de escritorio cohesionada en lugar de una colección de vistas separadas. Los cambios se ejecutaron como un plan en fases (`UX_REVAMP_PLAN.md`) tras una auditoría completa del código y de cómo se usa hoy.
+
+#### 1. Shell nativo por plataforma
+
+- **macOS**: la barra de título usa `titleBarStyle: Overlay` con `hiddenTitle: true`. Los semáforos (rojo / amarillo / verde) flotan sobre la sidebar y el contenido se extiende hasta el borde, igual que en apps nativas. El sidebar reserva el padding necesario para que los botones no tapen el wordmark.
+- **Windows + Linux**: `tauri.windows.conf.json` y `tauri.linux.conf.json` desactivan las decoraciones del sistema. Una franja superior de 36px (`data-tauri-drag-region`) permite arrastrar la ventana, y un nuevo componente `CaptionControls` dibuja minimizar / maximizar / cerrar con los iconos de Lucide y las llamadas correspondientes de `@tauri-apps/api/window`. Las capabilities (`core:window:allow-minimize`, `toggle-maximize`, `close`, `start-dragging`) están abiertas para que esos botones funcionen.
+- **Sidebar colapsable** (`240px ↔ 64px`, preferencia persistida en `localStorage`) con dos secciones: **Librería** (Todo / Películas / Series / Documentales / Seguimiento) y **Transferencias** (Descargas / Subidas). En modo colapsado solo se ven los iconos y el botón de Ajustes + avatar comprimido.
+- **Barra de estado** inferior (28px) con tres bloques: estado de conexión FTP (verde/ámbar/rojo + host), progreso de indexación, contadores de transferencias activas. El icono de actividad abre el log inline.
+- **Command palette** global (`⌘K` en macOS, `Ctrl+K` en Win/Linux). Busca en navegación, acciones (Cambiar idioma, Empezar indexación, Abrir Ajustes, etc.) y los primeros 4.000 títulos de la librería con coincidencia *accent-insensitive* (`foldForSearch`). Flechas + Enter para confirmar, Esc para cerrar.
+
+#### 2. Páginas de detalle como takeover del área de contenido
+
+Antes los detalles abrían como paneles laterales superpuestos al grid. Ahora son **páginas completas** dentro del área de contenido — el sidebar y la barra de estado permanecen visibles, hay un botón "Atrás" con migas de pan, y la página entera tiene scroll natural.
+
+- **`DetailPage`** (películas, 770 líneas): atmósfera con póster desenfocado que aparece con fade-in vía `<img onLoad>`, héroe (póster grande + título grande + año / fecha / rating / calidad / tamaño / géneros), sección de descarga (oculta en vista agrupada — el usuario elige una versión), sinopsis, "Versiones disponibles" con la versión actual marcada, ficha técnica (calidad, codec, HDR, idiomas) y enlaces externos.
+- **`TVShowPage`** (series + documentales, ~880 líneas, reemplaza un `TVShowPanel` de 2.082): selector de temporada con chips, **episodios agrupados por release-group dentro de cada temporada**, cada grupo con un botón "Descargar N" propio (en lugar de un único botón ambiguo de "Descargar todo"). Cada grupo se identifica por la carpeta del FTP y se ordena por calidad descendente.
+- **`WatchlistDetailPanel` (rediseñado como página)**: misma estructura de héroe, sección de configuración (cobertura por temporada, auto-descarga, perfil de calidad), cobertura de archivos / temporadas, y una "zona de riesgo" con el botón de quitar.
+- **`Settings` como página**: se eliminó el modal con backdrop, ahora ocupa el área de contenido como cualquier otra sección. El botón de Ajustes en el sidebar se ilumina cuando estás en la página.
+- **URLs deep-linkables** (modo web): `/peliculas/<tmdb>`, `/series/<tmdb>`, `/documentales/<tmdb>`, `/watchlist/<tmdb>`. Recargar la página vuelve a abrir el detalle correcto; back/forward del navegador funciona.
+
+#### 3. Cohesión entre pestañas
+
+Todas las pestañas no-librería (Seguimiento, Descargas, Subidas) tenían su propio `<h1>` + subtítulo + acciones a la derecha — un patrón visual distinto al de Películas/Series/Documentales. Se eliminó esa cabecera bespoke:
+
+- La barra superior de Library (que ya muestra "Seguimiento N titles", "Descargas N titles", etc.) es la única fuente del título.
+- Cada pestaña expone un chip-row debajo con el mismo patrón: filtros / chips a la izquierda, acciones primarias a la derecha de la fila del título.
+- **Multi-select en Seguimiento** vive ahora en la barra superior de Library, **en el mismo sitio que en Películas/Series/Documentales**. El botón "Agregar" se sitúa a la izquierda de "Seleccionar" para que la acción primaria sea la primera del cluster. La acción masiva es "Quitar (N)" en rojo con confirmación.
+- Filtros: nuevo componente `FilterChipRow` (reemplaza el rail lateral de 320px que competía con el sidebar) con búsqueda + ordenamiento + chips de filtros activos + botón "Filtros" que abre un `FilterSheet` (drawer derecho de 380px) bajo demanda.
+- Atajos de teclado globales: `Esc` cierra la superficie abierta de mayor prioridad, `/` enfoca la búsqueda.
+
+#### 4. Tarjetas de media menos saturadas
+
+`MediaCard` antes mostraba hasta 6 badges simultáneos (release type, resolución, HDR, codec, descargado, in-Plex, in-Emby) que tapaban el póster. Ahora:
+
+- Tipo de release + resolución se combinan en un solo chip (`WEB-DL · 1080p`).
+- El badge de HDR solo aparece para HDR10+ y Dolby Vision (los formatos que realmente justifican un badge).
+- El idioma se mueve a la fila de metadatos debajo del póster (`2024 · 7.8 · ES/EN`).
+- En hover aparece un botón circular de descarga directa (suprimido en vistas agrupadas donde la acción sería ambigua).
+- La fila de metadatos usa truncado con ellipsis en una sola línea — antes se rompía a mitad de palabra cuando había demasiados campos en cards estrechas.
+
+#### 5. Auditoría móvil
+
+Cada superficie se revisó a 430px de ancho:
+
+- **Páginas de detalle** colapsan a una sola columna (héroe vertical, contenido sin sidebar). El padding inferior incluye `env(safe-area-inset-bottom)` + 80px para que la barra de tabs móvil no tape el último contenido.
+- **Watchlist**: la grid de 3 columnas hardcodeadas pasó a `repeat(auto-fill, minmax(140px, 1fr))` (las cards a 3 columnas en 430px eran ilegibles). El badge "soup" de cinco chips se redujo a dos.
+- **Bug crítico de clipping en detalle de películas**: las versiones disponibles con `whiteSpace: nowrap` hacían que la columna del grid se expandiera más allá del viewport, lo que envolvía la sinopsis a un ancho mayor que el del móvil — y `overflow-x: hidden` cortaba el texto a mitad de palabra en el lado derecho. La solución es `minWidth: 0` en las columnas del grid del cuerpo (las grid columns por defecto tienen `min-width: auto` que impide encoger por debajo del contenido natural).
+- Toolbar de Watchlist: input de búsqueda a fila completa en móvil; chips + acciones debajo. Sin overflow ni envoltura rara.
+
+#### 6. Watchlist unificada entre escritorio y web
+
+Antes los watchlists del modo Tauri (user_id=0) y del modo web (`u.id` del usuario logueado) vivían en filas distintas de la misma tabla — el dueño desktop y el admin web veían listas diferentes pese a apuntar al mismo backend. Se cambiaron los cinco handlers HTTP (`get_watchlist`, `add`, `remove`, `update`, `check`) para usar `user_id=0` siempre: una sola "watchlist de la casa", compartida entre todos los usuarios autenticados.
+
+#### 7. Otras superficies pulidas
+
+- **Activity Log**: nuevo botón X explícito (antes solo se podía cerrar volviendo al icono de la barra de estado).
+- **WebUsers**: barra superior con back + breadcrumb, tarjetas de acción para Crear / Invitar, lista de usuarios con avatar circular, role pills (Admin / Editor / Usuario), indicador activo/inactivo. Antes era una página de 561 líneas sin chrome ni back button — entrar te dejaba atrapado.
+- **Empty states**: el grid vacío ahora muestra un icono + mensaje + CTAs contextuales (`Refrescar librería` / `Abrir ajustes` cuando no hay items, `Limpiar filtros` cuando hay items pero no resultados).
+- **Fondo**: se eliminó el grid overlay y el stack de tres gradientes radiales. Ahora hay un solo glow tintado de primary en la esquina superior izquierda fundiéndose con el fondo. Menos ruido, el contenido se lleva la atención.
+- **Sidebar footer en un solo row** cuando está expandido: Ajustes + selector de idioma + tema + avatar (web) en una fila horizontal en lugar de tres filas apiladas.
+
+#### 8. Plan de revamp documentado
+
+`UX_REVAMP_PLAN.md` en la raíz captura la auditoría inicial y el plan de 8 fases que guió este trabajo. Las fases 0-7 están entregadas; la fase 8 (rediseño del Wizard de primera ejecución) queda como trabajo futuro.
+
+#### Memoria de cohesión
+
+Tras varios ciclos del usuario pidiendo que reutilizara los patrones existentes (`feedback_ui_cohesion.md`), se interiorizó la regla: **no construir interfaces paralelas para superficies nuevas**. Cada nueva pantalla debe reusar `Library` (toolbar), `FilterChipRow`, `FilterSheet`, `MediaCard`, `DetailPage` y los tokens visuales existentes antes que aproximarlos. Esta versión se hizo con esa regla como restricción.
+
+---
+
 ## Versión 0.8.12 — 17 de mayo de 2026
 
 ### 🎞️ Detección y selección manual de Dolby Vision (y resto de variantes HDR) en el flujo de subida
