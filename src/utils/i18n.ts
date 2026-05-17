@@ -946,6 +946,28 @@ const messages = {
     es: "Siempre usa modo claro independientemente del ajuste del SO.",
     en: "Always use light mode regardless of OS setting.",
   },
+  "settings.preferencesTitle": { es: "Preferencias", en: "Preferences" },
+  "settings.preferencesDescription": {
+    es: "Elige la pestaña inicial, el orden por defecto de cada pestaña y la vista predeterminada de Películas y Series.",
+    en: "Pick the landing tab, the default sort for each tab, and the default Movies and TV views.",
+  },
+  "settings.defaultTab": { es: "Pestaña inicial", en: "Default tab" },
+  "settings.defaultSort": { es: "Orden por defecto", en: "Default sort" },
+  "settings.defaultMovieView": {
+    es: "Vista de Películas",
+    en: "Movies view",
+  },
+  "settings.defaultTvView": { es: "Vista de Series", en: "TV view" },
+  "settings.movieViewGrouped": { es: "Agrupada", en: "Grouped" },
+  "settings.movieViewFiles": { es: "Archivos", en: "Files" },
+  "settings.tvViewShows": { es: "Series", en: "Shows" },
+  "settings.tvViewEpisodes": { es: "Episodios", en: "Episodes" },
+  "settings.resetDefaults": {
+    es: "Restablecer valores",
+    en: "Reset to defaults",
+  },
+  "nav.alphaJump": { es: "Saltar a letra", en: "Jump to letter" },
+
   "settings.desktopTitle": { es: "Escritorio", en: "Desktop" },
   "settings.desktopDescription": {
     es: "Comportamiento de la ventana de la aplicación de escritorio.",

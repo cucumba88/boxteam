@@ -2,11 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Activity,
-  Bookmark,
   CheckSquare,
   ChevronRight,
   Clapperboard,
-  Download,
   FileText,
   Filter,
   LayoutGrid,
@@ -18,8 +16,6 @@ import {
   RefreshCw,
   Settings as SettingsIcon,
   Tv2,
-  Upload,
-  type LucideIcon,
 } from "lucide-react";
 import { call, isTauri } from "../lib/transport";
 import { getConfig, prefetchConfig } from "../lib/configCache";
@@ -63,54 +59,49 @@ import { useUploads } from "../features/uploads/useUploads";
 import DownloadFeedbackToast from "../components/DownloadFeedbackToast";
 import IndexErrorToast from "../components/IndexErrorToast";
 import { useQuitHandler } from "../hooks/useQuitHandler";
-import VirtualMediaGrid from "../components/VirtualMediaGrid";
+import VirtualMediaGrid, {
+  type JumpRequest,
+} from "../components/VirtualMediaGrid";
+import AlphaJumpRail from "../components/AlphaJumpRail";
+import {
+  buildAlphaIndex,
+  firstCharBucket,
+  titleSortKey,
+} from "../utils/alphaJump";
 import ThemeToggle from "../components/ThemeToggle";
 import { AppLanguage, getLocalizedTitle } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
 import { formatBytes } from "../lib/format";
+import {
+  SLUG_TO_TAB,
+  TAB_SLUGS,
+  TABS,
+  type SortableTab,
+  type TabId,
+} from "../utils/tabs";
+import { usePrefs, type UserPrefs } from "../utils/userPrefs";
 
-type TabId =
-  | "all"
-  | "movie"
-  | "tv"
-  | "documentary"
-  | "downloads"
-  | "watchlist"
-  | "uploads";
+function isSortableTab(tab: TabId): tab is SortableTab {
+  return (
+    tab === "all" ||
+    tab === "movie" ||
+    tab === "tv" ||
+    tab === "documentary" ||
+    tab === "watchlist"
+  );
+}
 
-const TABS: { id: TabId; labelKey: string; icon: LucideIcon }[] = [
-  { id: "all", labelKey: "nav.all", icon: LayoutGrid },
-  { id: "movie", labelKey: "nav.movies", icon: Clapperboard },
-  { id: "tv", labelKey: "nav.tv", icon: Tv2 },
-  { id: "documentary", labelKey: "nav.docs", icon: FileText },
-  { id: "watchlist", labelKey: "nav.watchlist", icon: Bookmark },
-  { id: "downloads", labelKey: "nav.downloads", icon: Download },
-  ...(isTauri()
-    ? [{ id: "uploads" as const, labelKey: "nav.uploads", icon: Upload }]
-    : []),
-];
-
-// ─── URL slug ↔ tab mapping (web mode only) ──────────────────────────────────
-const TAB_SLUGS: Record<TabId, string> = {
-  all: "/",
-  movie: "/peliculas",
-  tv: "/series",
-  documentary: "/documentales",
-  downloads: "/descargas",
-  watchlist: "/watchlist",
-  uploads: "/subidas",
-};
-const SLUG_TO_TAB: Record<string, TabId> = Object.fromEntries(
-  Object.entries(TAB_SLUGS).map(([k, v]) => [v, k as TabId]),
-) as Record<string, TabId>;
-function tabFromPathname(): TabId {
-  if (isTauri()) return "all";
+function tabFromPathname(prefs: UserPrefs): TabId {
+  if (isTauri()) return prefs.defaultTab;
   const path = window.location.pathname || "/";
   // Exact match first (covers "/"). Then fall back to the first path segment
   // so nested URLs like "/watchlist/12345" still map to the watchlist tab.
-  if (SLUG_TO_TAB[path]) return SLUG_TO_TAB[path];
+  // For "/" with no slug match we honour the user's default-tab preference.
+  if (SLUG_TO_TAB[path]) {
+    return path === "/" ? prefs.defaultTab : SLUG_TO_TAB[path];
+  }
   const first = "/" + (path.split("/").filter(Boolean)[0] ?? "");
-  return SLUG_TO_TAB[first] ?? "all";
+  return SLUG_TO_TAB[first] ?? prefs.defaultTab;
 }
 
 /** Parses a `/peliculas/<id>`, `/series/<id>` or `/documentales/<id>` URL
@@ -127,34 +118,30 @@ function detailIdFromPath(): number | null {
   return Number.isFinite(id) && id > 0 ? id : null;
 }
 
-const defaultFilters = (): Filters => ({
+const defaultFilters = (tab: TabId, prefs: UserPrefs): Filters => ({
   search: "",
   releaseType: "",
   resolution: "",
   hdr: "",
   codec: "",
   genre: "",
-  sort: "added-desc",
+  sort: isSortableTab(tab) ? prefs.defaultSort[tab] : "added-desc",
 });
-const ITEMS_PER_PAGE = 48;
 
-// ─── URL ↔ filter/page helpers (web mode only) ────────────────────────────────
-function filtersFromSearchParams(): { filters: Filters; page: number } {
+// ─── URL ↔ filter helpers (web mode only) ─────────────────────────────────────
+function filtersFromSearchParams(fallbackSort: string): Filters {
   const p = new URLSearchParams(window.location.search);
-  const filters: Filters = {
+  return {
     search: p.get("q") ?? "",
     releaseType: p.get("type") ?? "",
     resolution: p.get("res") ?? "",
     hdr: p.get("hdr") ?? "",
     codec: p.get("codec") ?? "",
     genre: p.get("genre") ?? "",
-    sort: p.get("sort") ?? "added-desc",
+    sort: p.get("sort") ?? fallbackSort,
   };
-  const pageRaw = parseInt(p.get("page") ?? "1", 10);
-  const page = isNaN(pageRaw) || pageRaw < 1 ? 1 : pageRaw;
-  return { filters, page };
 }
-function filtersToSearchParams(filters: Filters, page: number): string {
+function filtersToSearchParams(filters: Filters, defaultSort: string): string {
   const p = new URLSearchParams();
   if (filters.search) p.set("q", filters.search);
   if (filters.releaseType) p.set("type", filters.releaseType);
@@ -162,9 +149,7 @@ function filtersToSearchParams(filters: Filters, page: number): string {
   if (filters.hdr) p.set("hdr", filters.hdr);
   if (filters.codec) p.set("codec", filters.codec);
   if (filters.genre) p.set("genre", filters.genre);
-  if (filters.sort && filters.sort !== "added-desc")
-    p.set("sort", filters.sort);
-  if (page > 1) p.set("page", String(page));
+  if (filters.sort && filters.sort !== defaultSort) p.set("sort", filters.sort);
   const qs = p.toString();
   return qs ? "?" + qs : "";
 }
@@ -412,13 +397,27 @@ export default function Library({
     () => new Map(downloads.map((d) => [d.ftp_path, d])),
     [downloads],
   );
-  const [activeTab, setActiveTab] = useState<TabId>(() => tabFromPathname());
+  const prefs = usePrefs();
+  // Capture a stable snapshot of prefs at mount so the initial state lookups
+  // below match the values we'll read in switchTab / popstate. `usePrefs`
+  // keeps the live ref updated; we only need a one-shot read at mount.
+  const initialPrefsRef = useRef<UserPrefs>(prefs);
+  const [activeTab, setActiveTab] = useState<TabId>(() =>
+    tabFromPathname(initialPrefsRef.current),
+  );
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const isMobile = useIsMobile();
-  const [filters, setFilters] = useState<Filters>(() =>
-    isTauri() ? defaultFilters() : filtersFromSearchParams().filters,
-  );
+  const [filters, setFilters] = useState<Filters>(() => {
+    const initialPrefs = initialPrefsRef.current;
+    const initialTab = tabFromPathname(initialPrefs);
+    const tabDefaultSort = isSortableTab(initialTab)
+      ? initialPrefs.defaultSort[initialTab]
+      : "added-desc";
+    return isTauri()
+      ? defaultFilters(initialTab, initialPrefs)
+      : filtersFromSearchParams(tabDefaultSort);
+  });
   const [showSettings, setShowSettings] = useState<boolean>(
     () => !isTauri() && typeof window !== "undefined" && window.location.pathname === "/ajustes",
   );
@@ -459,11 +458,26 @@ export default function Library({
     initialQuery: string;
     initialMediaType: "movie" | "tv" | "documentary";
   } | null>(null);
-  const [page, setPage] = useState(() =>
-    isTauri() ? 1 : filtersFromSearchParams().page,
+  const [movieView, setMovieView] = useState<"grouped" | "files">(
+    () => initialPrefsRef.current.defaultMovieView,
   );
-  const [movieView, setMovieView] = useState<"grouped" | "files">("grouped");
-  const [tvView, setTvView] = useState<"shows" | "episodes">("shows");
+  const [tvView, setTvView] = useState<"shows" | "episodes">(
+    () => initialPrefsRef.current.defaultTvView,
+  );
+  const [jumpRequest, setJumpRequest] = useState<JumpRequest | undefined>(
+    undefined,
+  );
+  const [visibleRange, setVisibleRange] = useState<{
+    start: number;
+    end: number;
+  }>({ start: 0, end: 0 });
+  const [firstVisibleIndex, setFirstVisibleIndex] = useState(0);
+  // After a rail click we lock the highlight to the clicked letter so the
+  // user always sees their click confirmed — the row containing the first
+  // L item may have column-0 in K, which otherwise leaves the highlight
+  // stuck on K. The lock clears the moment the user scrolls.
+  const [pinnedLetter, setPinnedLetter] = useState<string | null>(null);
+  const pinnedAtIndexRef = useRef<number | null>(null);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [showMobileNavMenu, setShowMobileNavMenu] = useState(false);
   const mobileNavMenuRef = useRef<HTMLDivElement>(null);
@@ -486,7 +500,6 @@ export default function Library({
   const [badgeRefreshTick, setBadgeRefreshTick] = useState(0);
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const paginationInitRef = useRef(false);
   const hasStartedInitialIndexRef = useRef(false);
   const badgeRequestIdRef = useRef(0);
 
@@ -584,7 +597,7 @@ export default function Library({
       // /usuarios is handled by the outer WebRouter; don't reset library
       // state (tab/filters/selection) while the users takeover is active.
       if (window.location.pathname === "/usuarios") return;
-      const tab = tabFromPathname();
+      const tab = tabFromPathname(prefs);
       setActiveTab(tab);
       // Resolve any detail segment in the URL to the matching item — leaves
       // selected/tvShow null when the URL is a list view.
@@ -615,16 +628,17 @@ export default function Library({
       }
       setSelecting(false);
       setCheckedIds(new Set());
-      const { filters: urlFilters, page: urlPage } = filtersFromSearchParams();
-      setFilters(urlFilters);
-      setPage(urlPage);
-      setMovieView("grouped");
-      setTvView("shows");
+      const fallbackSort = isSortableTab(tab)
+        ? prefs.defaultSort[tab]
+        : "added-desc";
+      setFilters(filtersFromSearchParams(fallbackSort));
+      setMovieView(prefs.defaultMovieView);
+      setTvView(prefs.defaultTvView);
       setFilterDrawerOpen(false);
     };
     window.addEventListener("popstate", handlePop);
     return () => window.removeEventListener("popstate", handlePop);
-  }, [items]);
+  }, [items, prefs]);
 
   // Initial deep link — when the URL contains a detail id but items haven't
   // resolved yet, this effect fires once they do and opens the right page.
@@ -655,9 +669,12 @@ export default function Library({
     // neither page has filter state of its own.
     if (window.location.pathname === "/ajustes") return;
     if (window.location.pathname === "/usuarios") return;
-    const qs = filtersToSearchParams(filters, page);
+    const tabDefaultSort = isSortableTab(activeTab)
+      ? prefs.defaultSort[activeTab]
+      : "added-desc";
+    const qs = filtersToSearchParams(filters, tabDefaultSort);
     window.history.replaceState({}, "", window.location.pathname + qs);
-  }, [filters, page]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filters, activeTab, prefs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync showSettings state → URL (web mode). Opening pushes /ajustes;
   // closing pops back to the previous entry so the browser back button
@@ -670,8 +687,12 @@ export default function Library({
     } else if (!showSettings && onSettingsUrl) {
       // We were on /ajustes and someone closed Settings without using the
       // back button — restore the active tab in the URL.
+      const tabDefaultSort = isSortableTab(activeTab)
+        ? prefs.defaultSort[activeTab]
+        : "added-desc";
       const target =
-        TAB_SLUGS[activeTab] + filtersToSearchParams(filters, page);
+        TAB_SLUGS[activeTab] +
+        filtersToSearchParams(filters, tabDefaultSort);
       window.history.pushState({}, "", target);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -790,10 +811,9 @@ export default function Library({
     setSelecting(false);
     setCheckedIds(new Set());
     exitWatchlistSelect();
-    setFilters(defaultFilters());
-    setPage(1);
-    setMovieView("grouped");
-    setTvView("shows");
+    setFilters(defaultFilters(tab, prefs));
+    setMovieView(prefs.defaultMovieView);
+    setTvView(prefs.defaultTvView);
     setFilterDrawerOpen(false);
   };
 
@@ -992,7 +1012,7 @@ export default function Library({
     const keyed = matchingItems.map((item) => ({
       item,
       titleKey: needsTitleKey
-        ? getLocalizedTitle(item, language).toLowerCase()
+        ? titleSortKey(getLocalizedTitle(item, language))
         : "",
     }));
     keyed.sort((a, b) => {
@@ -1029,17 +1049,60 @@ export default function Library({
     return useGroupedMovies ? deduplicateByTitle(sortedItems) : sortedItems;
   }, [filterableItems, filters, language, parsedGenreMap, useGroupedMovies]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
-  const currentPage = Math.min(page, pageCount);
   const viewResetKey = `${activeTab}:${filters.search}:${filters.releaseType}:${filters.resolution}:${filters.hdr}:${filters.codec}:${filters.genre}:${filters.sort}:${tvView}:${movieView}`;
-  const pageResetKey = `${viewResetKey}:${currentPage}`;
-  const paginatedItems = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filtered.slice(start, start + ITEMS_PER_PAGE);
-  }, [currentPage, filtered]);
+
+  const isAlphaSort =
+    filters.sort === "title-asc" || filters.sort === "title-desc";
+  const showAlphaRail =
+    isAlphaSort &&
+    filtered.length > 0 &&
+    activeTab !== "downloads" &&
+    activeTab !== "uploads" &&
+    activeTab !== "watchlist";
+  const alphaIndex = useMemo(
+    () => (showAlphaRail ? buildAlphaIndex(filtered, language) : null),
+    [filtered, language, showAlphaRail],
+  );
+  const handleAlphaJump = (letter: string) => {
+    if (!alphaIndex) return;
+    const idx = alphaIndex[letter];
+    if (idx == null) return;
+    setJumpRequest({ index: idx, tick: Date.now() });
+    setPinnedLetter(letter);
+    // Remember which row this jump landed on. The virtualizer will fire
+    // onFirstVisibleIndexChange a few times during the smooth scroll; we
+    // unpin only when the user scrolls past that row.
+    pinnedAtIndexRef.current = idx;
+  };
+
+  // Clear the pinned letter as soon as the user actively scrolls away from
+  // the jump target. We treat any first-visible-index change outside the
+  // jumped row as user-driven scroll.
+  useEffect(() => {
+    if (pinnedAtIndexRef.current == null) return;
+    if (alphaIndex == null) return;
+    const pinnedIdx = pinnedAtIndexRef.current;
+    // Allow a small tolerance: column-0 of the jumped row, or anywhere up to
+    // a row above/below.
+    const drift = Math.abs(firstVisibleIndex - pinnedIdx);
+    if (drift > 14) {
+      // User has clearly scrolled away — drop the pin.
+      pinnedAtIndexRef.current = null;
+      setPinnedLetter(null);
+    }
+  }, [firstVisibleIndex, alphaIndex]);
+
+  // Visible-window items drive badge fetching — only request badges for what
+  // the user can see (or recently scrolled past). `badgeMap` caches results
+  // by id, so previously-seen cards keep their badges while we refetch the
+  // current window.
+  const visibleItems = useMemo(
+    () => filtered.slice(visibleRange.start, visibleRange.end),
+    [filtered, visibleRange],
+  );
   const badgePayload = useMemo(
     () =>
-      paginatedItems.map((item) => ({
+      visibleItems.map((item) => ({
         id: item.id,
         ftpPath: item.ftp_path,
         filename: item.filename,
@@ -1050,11 +1113,11 @@ export default function Library({
         tmdbId: item.tmdb_id ?? null,
         mediaType: item.media_type ?? item.tmdb_type ?? null,
       })),
-    [paginatedItems],
+    [visibleItems],
   );
-  const badgePageIdsKey = useMemo(
-    () => paginatedItems.map((item) => item.id).join(","),
-    [paginatedItems],
+  const badgeWindowKey = useMemo(
+    () => visibleItems.map((item) => item.id).join(","),
+    [visibleItems],
   );
 
   const ghostBtn: React.CSSProperties = {
@@ -1113,20 +1176,6 @@ export default function Library({
   };
 
   useEffect(() => {
-    if (page > pageCount) {
-      setPage(pageCount);
-    }
-  }, [page, pageCount]);
-
-  useEffect(() => {
-    if (!paginationInitRef.current) {
-      paginationInitRef.current = true;
-      return;
-    }
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [currentPage]);
-
-  useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [viewResetKey]);
 
@@ -1142,16 +1191,6 @@ export default function Library({
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, []);
-
-  useEffect(() => {
-    setPage(1);
-  }, [
-    filters.search,
-    filters.releaseType,
-    filters.resolution,
-    filters.hdr,
-    filters.sort,
-  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1266,27 +1305,13 @@ export default function Library({
         return;
       }
 
-      if (activeTab !== "downloads" && pageCount > 1) {
-        if (event.key === "ArrowLeft" && currentPage > 1) {
-          event.preventDefault();
-          setPage((prev) => Math.max(1, prev - 1));
-          return;
-        }
-        if (event.key === "ArrowRight" && currentPage < pageCount) {
-          event.preventDefault();
-          setPage((prev) => Math.min(pageCount, prev + 1));
-          return;
-        }
-      }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     activeTab,
-    currentPage,
     fixMatchRequest,
-    pageCount,
     selected,
     selecting,
     showActionsMenu,
@@ -1404,15 +1429,15 @@ export default function Library({
       const inEmbyCount = mergedResults.filter(
         (result) => result.emby_in_library,
       ).length;
-      const withImdb = paginatedItems.filter(
+      const withImdb = visibleItems.filter(
         (item) => (item.imdb_id ?? "").trim().length > 0,
       ).length;
-      const withTmdb = paginatedItems.filter(
+      const withTmdb = visibleItems.filter(
         (item) => item.tmdb_id != null,
       ).length;
       const elapsedMs = Date.now() - startedAt;
       appendLog(
-        `🏷 Badge auto-check (${activeTab}) — page ${currentPage}: ${mergedResults.length} items | local ${downloadedCount} | in_library ${inServerCount} | plex ${inPlexCount} | emby ${inEmbyCount} | imdb ${withImdb} | tmdb ${withTmdb} | ${elapsedMs}ms`,
+        `🏷 Badge auto-check (${activeTab}) — items ${visibleRange.start}–${visibleRange.end}: ${mergedResults.length} items | local ${downloadedCount} | in_library ${inServerCount} | plex ${inPlexCount} | emby ${inEmbyCount} | imdb ${withImdb} | tmdb ${withTmdb} | ${elapsedMs}ms`,
       );
     };
 
@@ -1423,13 +1448,13 @@ export default function Library({
           ? error.message
           : String(error ?? "unknown error");
       appendLog(
-        `⚠ Badge check failed (${activeTab}) — page ${currentPage}: ${message}`,
+        `⚠ Badge check failed (${activeTab}) — items ${visibleRange.start}–${visibleRange.end}: ${message}`,
       );
     });
-  }, [activeTab, appendLog, badgePageIdsKey, badgeRefreshTick, currentPage]);
+  }, [activeTab, appendLog, badgeWindowKey, badgeRefreshTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When TVShowPanel is open, check badges for ALL its episodes (not just the
-  // deduplicated show card that appears in paginatedItems).
+  // deduplicated show card that appears in the visible window).
   const tvShowEpisodesKey = useMemo(() => {
     if (!tvShow) return "";
     return getTvEpisodes(tvShow)
@@ -1640,32 +1665,55 @@ export default function Library({
   const mediaContent = useEpisodeList ? (
     <EpisodeListView
       key={viewResetKey}
-      items={paginatedItems}
+      items={filtered}
       onSelect={handleCardSelect}
-      resetKey={pageResetKey}
+      resetKey={viewResetKey}
       language={language}
     />
   ) : (
-    <VirtualMediaGrid
-      key={viewResetKey}
-      items={paginatedItems}
-      selecting={selecting}
-      checkedIds={checkedIds}
-      onToggleCheck={toggleCheck}
-      onCardSelect={handleCardSelect}
-      onDownload={startDownload}
-      resetKey={pageResetKey}
-      language={language}
-      badgeMap={badgeMap}
-      downloadMap={downloadMap}
-      hideEpisodeBadge={isSeriesTab && !useEpisodeList}
-      showFileSize={
-        activeTab === "all" || (activeTab === "movie" && movieView === "files")
-      }
-      disableQuickAction={
-        useGroupedMovies || (isSeriesTab && !useEpisodeList)
-      }
-    />
+    <>
+      <VirtualMediaGrid
+        key={viewResetKey}
+        items={filtered}
+        selecting={selecting}
+        checkedIds={checkedIds}
+        onToggleCheck={toggleCheck}
+        onCardSelect={handleCardSelect}
+        onDownload={startDownload}
+        resetKey={viewResetKey}
+        language={language}
+        badgeMap={badgeMap}
+        downloadMap={downloadMap}
+        hideEpisodeBadge={isSeriesTab && !useEpisodeList}
+        showFileSize={
+          activeTab === "all" ||
+          (activeTab === "movie" && movieView === "files")
+        }
+        disableQuickAction={
+          useGroupedMovies || (isSeriesTab && !useEpisodeList)
+        }
+        jumpRequest={jumpRequest}
+        onVisibleRangeChange={(start, end) =>
+          setVisibleRange({ start, end })
+        }
+        onFirstVisibleIndexChange={setFirstVisibleIndex}
+      />
+      {showAlphaRail && alphaIndex && (
+        <AlphaJumpRail
+          alphaIndex={alphaIndex}
+          onJump={handleAlphaJump}
+          language={language}
+          activeLetter={
+            pinnedLetter ??
+            (filtered[firstVisibleIndex]
+              ? firstCharBucket(
+                  getLocalizedTitle(filtered[firstVisibleIndex], language),
+                )
+              : null)
+          }
+        />
+      )}
+    </>
   );
 
   // Sidebar footer slot: language + theme + (web) avatar menu
@@ -2448,22 +2496,32 @@ export default function Library({
                   textOverflow: "ellipsis",
                 }}
               >
-                {sectionTitle[activeTab]}
-                {activeTab !== "downloads" && (
-                  <span
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 400,
-                      color: "var(--color-text-muted)",
-                      marginLeft: 10,
-                    }}
-                  >
-                    {activeTab === "watchlist"
-                      ? watchlist.items.length
-                      : filtered.length}{" "}
-                    titles
-                  </span>
-                )}
+                {isMobile && (selecting || watchlistSelecting)
+                  ? t(language, "library.selectedCount", {
+                      count: selecting
+                        ? checkedIds.size
+                        : watchlistCheckedIds.size,
+                    })
+                  : (
+                    <>
+                      {sectionTitle[activeTab]}
+                      {activeTab !== "downloads" && (
+                        <span
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 400,
+                            color: "var(--color-text-muted)",
+                            marginLeft: 10,
+                          }}
+                        >
+                          {activeTab === "watchlist"
+                            ? watchlist.items.length
+                            : filtered.length}{" "}
+                          titles
+                        </span>
+                      )}
+                    </>
+                  )}
               </h1>
 
               {/* Desktop-only view toggles — mobile renders them in the sub-row below */}
@@ -2486,10 +2544,7 @@ export default function Library({
                     return (
                       <button
                         key={mode}
-                        onClick={() => {
-                          setTvView(mode);
-                          setPage(1);
-                        }}
+                        onClick={() => setTvView(mode)}
                         style={{
                           padding: "6px 12px",
                           borderRadius: "var(--radius-full)",
@@ -2533,10 +2588,7 @@ export default function Library({
                     return (
                       <button
                         key={mode}
-                        onClick={() => {
-                          setMovieView(mode);
-                          setPage(1);
-                        }}
+                        onClick={() => setMovieView(mode)}
                         style={{
                           padding: "6px 12px",
                           borderRadius: "var(--radius-full)",
@@ -2588,13 +2640,18 @@ export default function Library({
               {activeTab === "watchlist" ? (
                 watchlistSelecting ? (
                   <>
-                    <span
-                      style={{ color: "var(--color-text-muted)", fontSize: 13 }}
-                    >
-                      {t(language, "library.selectedCount", {
-                        count: watchlistCheckedIds.size,
-                      })}
-                    </span>
+                    {!isMobile && (
+                      <span
+                        style={{
+                          color: "var(--color-text-muted)",
+                          fontSize: 13,
+                        }}
+                      >
+                        {t(language, "library.selectedCount", {
+                          count: watchlistCheckedIds.size,
+                        })}
+                      </span>
+                    )}
                     <button
                       onClick={() =>
                         setWatchlistCheckedIds(
@@ -2602,6 +2659,8 @@ export default function Library({
                         )
                       }
                       disabled={watchlist.items.length === 0}
+                      title={t(language, "library.selectAll")}
+                      aria-label={t(language, "library.selectAll")}
                       style={{
                         ...ghostBtn,
                         opacity: watchlist.items.length === 0 ? 0.5 : 1,
@@ -2609,7 +2668,13 @@ export default function Library({
                           watchlist.items.length === 0 ? "default" : "pointer",
                       }}
                     >
-                      {t(language, "library.selectAll")}
+                      <CheckSquare
+                        size={14}
+                        strokeWidth={2.2}
+                        aria-hidden="true"
+                        style={{ display: "block", flexShrink: 0 }}
+                      />
+                      {!isMobile && t(language, "library.selectAll")}
                     </button>
                     <button
                       onClick={() => {
@@ -2626,6 +2691,8 @@ export default function Library({
                         exitWatchlistSelect();
                       }}
                       disabled={watchlistCheckedIds.size === 0}
+                      title={language === "es" ? "Quitar" : "Remove"}
+                      aria-label={language === "es" ? "Quitar" : "Remove"}
                       style={{
                         ...primaryBtn,
                         background:
@@ -2643,11 +2710,30 @@ export default function Library({
                         aria-hidden="true"
                         style={{ display: "block", flexShrink: 0 }}
                       />
-                      {language === "es" ? "Quitar" : "Remove"} (
-                      {watchlistCheckedIds.size})
+                      {isMobile
+                        ? `(${watchlistCheckedIds.size})`
+                        : `${language === "es" ? "Quitar" : "Remove"} (${watchlistCheckedIds.size})`}
                     </button>
-                    <button onClick={exitWatchlistSelect} style={ghostBtn}>
-                      {t(language, "library.cancel")}
+                    <button
+                      onClick={exitWatchlistSelect}
+                      title={t(language, "library.cancel")}
+                      aria-label={t(language, "library.cancel")}
+                      style={ghostBtn}
+                    >
+                      {isMobile ? (
+                        <Plus
+                          size={14}
+                          strokeWidth={2.2}
+                          aria-hidden="true"
+                          style={{
+                            display: "block",
+                            flexShrink: 0,
+                            transform: "rotate(45deg)",
+                          }}
+                        />
+                      ) : (
+                        t(language, "library.cancel")
+                      )}
                     </button>
                   </>
                 ) : (
@@ -2689,29 +2775,44 @@ export default function Library({
               ) : activeTab === "downloads" ||
                 activeTab === "uploads" ? null : selecting ? (
                 <>
-                  <span
-                    style={{ color: "var(--color-text-muted)", fontSize: 13 }}
-                  >
-                    {t(language, "library.selectedCount", {
-                      count: checkedIds.size,
-                    })}
-                  </span>
+                  {!isMobile && (
+                    <span
+                      style={{
+                        color: "var(--color-text-muted)",
+                        fontSize: 13,
+                      }}
+                    >
+                      {t(language, "library.selectedCount", {
+                        count: checkedIds.size,
+                      })}
+                    </span>
+                  )}
                   <button
                     onClick={() =>
                       setCheckedIds(new Set(filtered.map((item) => item.id)))
                     }
                     disabled={filtered.length === 0}
+                    title={t(language, "library.selectAll")}
+                    aria-label={t(language, "library.selectAll")}
                     style={{
                       ...ghostBtn,
                       opacity: filtered.length === 0 ? 0.5 : 1,
                       cursor: filtered.length === 0 ? "default" : "pointer",
                     }}
                   >
-                    {t(language, "library.selectAll")}
+                    <CheckSquare
+                      size={14}
+                      strokeWidth={2.2}
+                      aria-hidden="true"
+                      style={{ display: "block", flexShrink: 0 }}
+                    />
+                    {!isMobile && t(language, "library.selectAll")}
                   </button>
                   <button
                     onClick={() => setShowBulkFix(true)}
                     disabled={checkedIds.size === 0}
+                    title={t(language, "library.fixMatch")}
+                    aria-label={t(language, "library.fixMatch")}
                     style={{
                       ...primaryBtn,
                       opacity: checkedIds.size === 0 ? 0.5 : 1,
@@ -2724,10 +2825,30 @@ export default function Library({
                       aria-hidden="true"
                       style={{ display: "block", flexShrink: 0 }}
                     />
-                    {t(language, "library.fixMatch")} ({checkedIds.size})
+                    {isMobile
+                      ? `(${checkedIds.size})`
+                      : `${t(language, "library.fixMatch")} (${checkedIds.size})`}
                   </button>
-                  <button onClick={exitSelect} style={ghostBtn}>
-                    {t(language, "library.cancel")}
+                  <button
+                    onClick={exitSelect}
+                    title={t(language, "library.cancel")}
+                    aria-label={t(language, "library.cancel")}
+                    style={ghostBtn}
+                  >
+                    {isMobile ? (
+                      <Plus
+                        size={14}
+                        strokeWidth={2.2}
+                        aria-hidden="true"
+                        style={{
+                          display: "block",
+                          flexShrink: 0,
+                          transform: "rotate(45deg)",
+                        }}
+                      />
+                    ) : (
+                      t(language, "library.cancel")
+                    )}
                   </button>
                 </>
               ) : (
@@ -3003,10 +3124,7 @@ export default function Library({
                 return (
                   <button
                     key={mode}
-                    onClick={() => {
-                      setTvView(mode);
-                      setPage(1);
-                    }}
+                    onClick={() => setTvView(mode)}
                     style={{
                       padding: "6px 12px",
                       borderRadius: "var(--radius-full)",
@@ -3050,10 +3168,7 @@ export default function Library({
                 return (
                   <button
                     key={mode}
-                    onClick={() => {
-                      setMovieView(mode);
-                      setPage(1);
-                    }}
+                    onClick={() => setMovieView(mode)}
                     style={{
                       padding: "6px 12px",
                       borderRadius: "var(--radius-full)",
@@ -3246,10 +3361,9 @@ export default function Library({
                       ) : (
                         <button
                           type="button"
-                          onClick={() => {
-                            setFilters(defaultFilters());
-                            setPage(1);
-                          }}
+                          onClick={() =>
+                            setFilters(defaultFilters(activeTab, prefs))
+                          }
                           style={{
                             padding: "8px 16px",
                             borderRadius: 999,
@@ -3347,84 +3461,6 @@ export default function Library({
           onOpenSettings={() => setShowSettings(true)}
           onDismiss={clearIndexError}
         />
-      )}
-
-      {!selected && !tvShow && !showSettings && !showUsers &&
-        activeTab !== "downloads" && activeTab !== "watchlist" &&
-        activeTab !== "uploads" && filtered.length > 0 && pageCount > 1 && (
-        <div
-          style={{
-            position: "fixed",
-            left: "50%",
-            bottom: isMobile
-              ? "calc(64px + env(safe-area-inset-bottom, 0px) + 12px)"
-              : 18,
-            transform: "translateX(-50%)",
-            display: "flex",
-            justifyContent: "center",
-            padding: "0 16px",
-            pointerEvents: "none",
-            zIndex: 110,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              minHeight: 50,
-              padding: "0.25rem",
-              borderRadius: "var(--radius-full)",
-              border:
-                "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
-              background:
-                "color-mix(in srgb, var(--color-surface) 90%, transparent)",
-              backdropFilter: "blur(18px) saturate(155%)",
-              WebkitBackdropFilter: "blur(18px) saturate(155%)",
-              boxShadow:
-                "0 16px 38px color-mix(in srgb, black 32%, transparent)",
-              pointerEvents: "auto",
-            }}
-          >
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              style={{
-                ...ghostBtn,
-                padding: "6px 12px",
-                minHeight: 40,
-                opacity: currentPage === 1 ? 0.5 : 1,
-                cursor: currentPage === 1 ? "default" : "pointer",
-              }}
-            >
-              {t(language, "library.prev")}
-            </button>
-            <span
-              style={{
-                fontSize: 13,
-                color: "var(--color-text-muted)",
-                minWidth: 132,
-                textAlign: "center",
-              }}
-            >
-              {t(language, "library.page")} {currentPage}{" "}
-              {t(language, "library.of")} {pageCount}
-            </span>
-            <button
-              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-              disabled={currentPage === pageCount}
-              style={{
-                ...ghostBtn,
-                padding: "6px 12px",
-                minHeight: 40,
-                opacity: currentPage === pageCount ? 0.5 : 1,
-                cursor: currentPage === pageCount ? "default" : "pointer",
-              }}
-            >
-              {t(language, "library.next")}
-            </button>
-          </div>
-        </div>
       )}
 
       {/* DetailPanel + TVShowPanel renders moved inline into MAIN CONTENT

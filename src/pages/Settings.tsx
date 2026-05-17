@@ -16,6 +16,19 @@ import { useAuth } from "../lib/AuthContext";
 import { useTheme } from "../hooks/useTheme";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { GENRE_LIST } from "../utils/genres";
+import {
+  SORTABLE_TABS,
+  TABS,
+  type SortableTab,
+  type TabId,
+} from "../utils/tabs";
+import {
+  resetPrefs,
+  usePrefs,
+  writePrefs,
+  type SortKey,
+} from "../utils/userPrefs";
+import { SORT_OPTIONS } from "../components/FilterBar";
 
 interface Config {
   ftp_host: string;
@@ -553,6 +566,174 @@ function ProfileEditor({
         </div>
       </div>
     </div>
+  );
+}
+
+function PreferencesSection({ language }: { language: AppLanguage }) {
+  const prefs = usePrefs();
+  const sortableTabIds: SortableTab[] = SORTABLE_TABS;
+  const tabLabel = (id: TabId) => {
+    const def = TABS.find((tab) => tab.id === id);
+    return def ? t(language, def.labelKey as never) : id;
+  };
+
+  const pillButton = (active: boolean): React.CSSProperties => ({
+    padding: "9px 18px",
+    borderRadius: "var(--radius-full)",
+    border: active
+      ? "1px solid var(--color-primary)"
+      : "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
+    background: active
+      ? "color-mix(in srgb, var(--color-primary) 18%, transparent)"
+      : "color-mix(in srgb, var(--color-surface-2) 84%, transparent)",
+    color: active ? "var(--color-primary)" : "var(--color-text-muted)",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: active ? 700 : 600,
+    fontFamily: "inherit",
+    transition:
+      "background 0.15s ease, color 0.15s ease, border-color 0.15s ease",
+  });
+
+  return (
+    <SectionCard
+      icon="settings"
+      title={t(language, "settings.preferencesTitle")}
+      description={t(language, "settings.preferencesDescription")}
+      defaultOpen={false}
+    >
+      <div style={{ display: "grid", gap: 18 }}>
+        <div style={fieldStyle}>
+          <label style={labelStyle}>{t(language, "settings.defaultTab")}</label>
+          <select
+            style={selectStyle}
+            value={prefs.defaultTab}
+            onChange={(e) =>
+              writePrefs({ defaultTab: e.target.value as TabId })
+            }
+          >
+            {TABS.map((tab) => (
+              <option key={tab.id} value={tab.id}>
+                {t(language, tab.labelKey as never)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={fieldStyle}>
+          <label style={labelStyle}>
+            {t(language, "settings.defaultSort")}
+          </label>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: 10,
+            }}
+          >
+            {sortableTabIds.map((tab) => (
+              <div
+                key={tab}
+                style={{ display: "flex", flexDirection: "column", gap: 4 }}
+              >
+                <span style={{ ...subtextStyle, fontWeight: 600 }}>
+                  {tabLabel(tab)}
+                </span>
+                <select
+                  style={selectStyle}
+                  value={prefs.defaultSort[tab]}
+                  onChange={(e) =>
+                    writePrefs({
+                      defaultSort: { [tab]: e.target.value as SortKey } as Record<
+                        SortableTab,
+                        SortKey
+                      >,
+                    })
+                  }
+                >
+                  {SORT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {t(language, opt.labelKey)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={fieldStyle}>
+          <label style={labelStyle}>
+            {t(language, "settings.defaultMovieView")}
+          </label>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {(["grouped", "files"] as const).map((mode) => {
+              const active = prefs.defaultMovieView === mode;
+              const label =
+                mode === "grouped"
+                  ? t(language, "settings.movieViewGrouped")
+                  : t(language, "settings.movieViewFiles");
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => writePrefs({ defaultMovieView: mode })}
+                  style={pillButton(active)}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={fieldStyle}>
+          <label style={labelStyle}>
+            {t(language, "settings.defaultTvView")}
+          </label>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {(["shows", "episodes"] as const).map((mode) => {
+              const active = prefs.defaultTvView === mode;
+              const label =
+                mode === "shows"
+                  ? t(language, "settings.tvViewShows")
+                  : t(language, "settings.tvViewEpisodes");
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => writePrefs({ defaultTvView: mode })}
+                  style={pillButton(active)}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            onClick={() => resetPrefs()}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--color-text-muted)",
+              fontSize: 12.5,
+              fontWeight: 600,
+              cursor: "pointer",
+              padding: "4px 6px",
+              textDecoration: "underline",
+              fontFamily: "inherit",
+            }}
+          >
+            {t(language, "settings.resetDefaults")}
+          </button>
+        </div>
+      </div>
+    </SectionCard>
   );
 }
 
@@ -1597,6 +1778,9 @@ export default function Settings({
                     : t(language, "settings.themeLightDesc")}
               </div>
             </SectionCard>
+
+            {/* ── Preferences (default tab/sort/view) ───────────────────────── */}
+            <PreferencesSection language={language} />
 
             {/* ── Quality Profiles ──────────────────────────────────────────── */}
             <QualityProfilesSection language={language} />

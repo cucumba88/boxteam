@@ -1,5 +1,62 @@
 # Novedades de Oscata
 
+## Versión 0.10.0 — 17 de mayo de 2026
+
+Esta versión añade tres mejoras grandes de navegación y rendimiento sobre la biblioteca, más un pulido importante del modo multi-selección en móvil. La biblioteca de miles de elementos ya no se mueve "a saltos de 48 por página": ahora hay un único scroll infinito con virtualización real, una columna A-Z lateral estilo Plex/iOS para saltar a cualquier letra, y una nueva sección de Preferencias para fijar cómo quieres que arranque cada pestaña.
+
+### ⚙️ Nueva sección de Preferencias en Ajustes
+
+Cada pestaña de la biblioteca arrancaba con valores fijos en el código: `Todo` como pestaña inicial, `Recién añadidos` como orden, `Agrupada` para Películas, `Series` para TV. No había manera de decir "yo siempre quiero entrar en Seguimiento ordenado por valoración". La nueva tarjeta **Preferencias** (entre Apariencia y Perfiles de calidad) cubre cuatro ajustes:
+
+- **Pestaña inicial** — sobre qué tab arranca la app (al volver de un enlace directo de web mode la URL sigue ganando).
+- **Orden por defecto por pestaña** — un selector independiente para Todo / Películas / Series / Documentales / Seguimiento, reutilizando las cinco opciones de la barra de filtros.
+- **Vista por defecto de Películas** — Agrupada o Archivos.
+- **Vista por defecto de Series** — Series o Episodios.
+
+Los ajustes viven en `localStorage` con la clave `oscata.prefs.v1` (mismo patrón que el tema y la sidebar plegada — por dispositivo, no por usuario). El hook `usePrefs` escucha cambios cruzados de pestaña, así que si abres Ajustes en una segunda pestaña del navegador y cambias la pestaña inicial, la primera se actualiza en cuanto cambias de tab. Hay un enlace discreto de "Restablecer valores" al final de la tarjeta.
+
+### 🔠 Columna lateral A-Z para saltar a cualquier letra
+
+Con cientos de películas y orden alfabético, ir a la M significaba antes saltar páginas a mano. Ahora aparece una columna fina de letras en el borde derecho del grid (estilo Plex / Contactos de iOS) cuando el orden es Título A-Z o Z-A. Cada letra es un botón pulsable que lleva el scroll directamente al primer título de esa letra.
+
+- **Buckets por idioma** — el bucket de cada item se calcula con el título que se está mostrando (`getLocalizedTitle`), así que si cambias entre español e inglés todo se reordena en su sitio sin estados intermedios.
+- **Letras desactivadas atenuadas** — las letras que no tienen ningún título quedan a ~45% de opacidad y sin eventos de puntero (no se pueden pulsar, no muestran preview). Visibles para que sepas que existen, pero claramente distintas.
+- **Letra activa resaltada** — la letra correspondiente al primer item realmente visible (no al de overscan) se ilumina en color primario con un fondo suave. Mientras haces scroll, el resalte sigue tu posición.
+- **Pin al hacer clic** — pulsar una letra fija el resalte sobre esa letra hasta que empieces a hacer scroll a mano. Sirve para confirmar visualmente que el salto se ejecutó incluso cuando la fila de aterrizaje empieza con un item de la letra anterior.
+- **Preview tipo Plex** — al pasar el cursor sobre una letra activa aparece una píldora grande con esa letra junto al cursor.
+
+### ⚡ Scroll infinito virtualizado en lugar de paginación
+
+`VirtualMediaGrid` por fin hace honor a su nombre: ahora usa `@tanstack/react-virtual` para renderizar sólo las filas visibles (más cuatro de overscan a cada lado). Con bibliotecas de miles de elementos el DOM se mantiene en torno a 8 filas × N columnas independientemente de cuánto bajes; la sensación es la del catálogo de Plex / Emby.
+
+- **Se elimina la paginación** — fuera la barra flotante "Página 1 de N" / botones prev-next, fuera los atajos ⬅/➡ de teclado, fuera el parámetro `?page=N` de la URL. Queda un único scroll continuo.
+- **Carga de "badges" por ventana visible** — antes pedíamos los iconos de "ya está en Plex/Emby" para los 48 ítems de la página actual. Ahora se piden sólo para el rango de filas que el virtualizador está renderizando (con un debounce de 150 ms para evitar ráfagas durante el scroll rápido). El `badgeMap` sigue siendo persistente por id: al volver a ver una tarjeta ya cacheada los iconos están ahí sin pedirla otra vez.
+- **El A-Z salta a la fila exacta** — el `JumpRequest` pasó de "letra" a "índice de item". El virtualizador hace `scrollToIndex(row, { align: "start" })`, así que no hay flicker de página intermedia.
+- **Re-mide al cambiar de tamaño** — un `ResizeObserver` sobre el contenedor recalcula columnas y altura de fila cuando ajustas la ventana; las cartas mantienen la proporción 2:3 del póster.
+
+### 📱 Multi-selección utilizable en móvil
+
+La barra de selección (`N seleccionados` + Seleccionar todo + Corregir match + Cancelar) se desbordaba en 430 px y dejaba "Cancelar" fuera de pantalla. Se reorganiza para móvil:
+
+- El título de la pestaña se reemplaza por el contador (`N seleccionados`) durante la selección, recuperando el espacio que ocupaba.
+- Los botones de la toolbar pasan a modo icon-only en móvil — ☑ para Seleccionar todo, ✏ con `(N)` para Corregir match, ✕ para Cancelar. Todos tienen `title` + `aria-label` con el texto completo.
+- Mismo tratamiento para la toolbar equivalente del **Seguimiento** (Quitar 🗑 + contador, Cancelar X).
+- La casilla de cada tarjeta vive ahora dentro de un wrapper 32×32 con fondo translúcido (mejor target táctil) y `stopPropagation` para que un toque preciso sobre la casilla no dispare a la vez el click de la carta — que provocaba un doble toggle = nada cambia.
+
+### 🪟 FixMatchModal usable en móvil
+
+El modal de "Corregir match" tenía un layout fijo de `280px + 1fr` que en una pantalla de 430 px dejaba 150 px para los resultados. Ahora en móvil el panel lateral (búsqueda + tipo) se apila encima del listado de resultados con un divisor horizontal en vez de vertical.
+
+### 🧹 Bajo el capó
+
+- Extracción de `TabId`, `TABS`, `TAB_SLUGS` a `src/utils/tabs.ts` para que Settings los consuma sin importar de `Library.tsx`.
+- `SORT_OPTIONS` ahora se exporta desde `FilterBar` (única fuente de verdad para los dropdowns de orden y la nueva sección de Preferencias).
+- Nuevos utilitarios: `src/utils/userPrefs.ts` (lectura/escritura + hook), `src/utils/alphaJump.ts` (`buildAlphaIndex`, `firstCharBucket`, `titleSortKey`).
+- Nuevo componente: `src/components/AlphaJumpRail.tsx` (40 LOC, sin dependencias extra).
+- Nueva dependencia: `@tanstack/react-virtual` (~3 kB gz).
+
+---
+
 ## Versión 0.9.2 — 17 de mayo de 2026
 
 Esta versión cierra cuatro defectos del modo web que quedaron tras el rediseño de v0.9.0 / v0.9.1. Tres son bugs concretos que el usuario reportó; el cuarto es una pulida estructural del shell para que la gestión de usuarios deje de comportarse como un "salida del shell" y pase a ser una página más dentro de la app.

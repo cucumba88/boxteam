@@ -4,6 +4,7 @@ import { call } from "../lib/transport";
 import AppIcon from "./AppIcon";
 import type { AppLanguage } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 interface TmdbResult {
   id: number;
@@ -46,6 +47,7 @@ export default function FixMatchModal({
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const isMobile = useIsMobile();
 
   const search = async (nextQuery = query, nextType = mediaType) => {
     if (!nextQuery.trim()) return;
@@ -109,7 +111,8 @@ export default function FixMatchModal({
           maxWidth: 860,
           maxHeight: "calc(100dvh - 2.5rem)",
           display: "grid",
-          gridTemplateColumns: "280px minmax(0, 1fr)",
+          gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "280px minmax(0, 1fr)",
+          gridTemplateRows: isMobile ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)",
           overflow: "hidden",
           borderRadius: "calc(var(--radius-lg) + 4px)",
           border:
@@ -122,14 +125,18 @@ export default function FixMatchModal({
       >
         <aside
           style={{
-            padding: "1.4rem",
-            borderRight:
-              "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+            padding: isMobile ? "1rem" : "1.4rem",
+            borderRight: isMobile
+              ? "none"
+              : "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+            borderBottom: isMobile
+              ? "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)"
+              : "none",
             background:
               "linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 92%, transparent), color-mix(in srgb, var(--color-surface-2) 82%, transparent))",
             display: "flex",
             flexDirection: "column",
-            gap: 18,
+            gap: isMobile ? 10 : 18,
           }}
         >
           <div
