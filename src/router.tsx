@@ -271,14 +271,18 @@ function UserMenu({
 
   useEffect(() => {
     if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
+    // Use `click` (not `mousedown`) so the menu doesn't close before the
+    // click on a menu item can complete its handler. Also `mousedown` raced
+    // against the menu-item click which made "Gestionar usuarios" appear to
+    // do nothing.
+    const onClick = (e: MouseEvent) => {
       const target = e.target as Node;
       if (buttonRef.current?.contains(target)) return;
       if (portalRef.current?.contains(target)) return;
       setMenuOpen(false);
     };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
   }, [menuOpen, setMenuOpen]);
 
   return (
@@ -368,7 +372,11 @@ function UserMenu({
                   }}
                 />
                 <button
-                  onClick={onGoToUsers}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onGoToUsers();
+                  }}
                   style={{
                     display: "flex",
                     alignItems: "center",
