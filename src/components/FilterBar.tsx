@@ -28,7 +28,7 @@ const CODEC_OPTIONS = [
   { value: "VP9", label: "VP9" },
 ] as const;
 
-const SORT_OPTIONS = [
+export const SORT_OPTIONS = [
   { value: "release-desc", labelKey: "filter.sort.releaseDesc" },
   { value: "added-desc", labelKey: "filter.sort.addedDesc" },
   { value: "rating-desc", labelKey: "filter.sort.ratingDesc" },
