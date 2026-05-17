@@ -405,7 +405,9 @@ export default function Library({
   const [filters, setFilters] = useState<Filters>(() =>
     isTauri() ? defaultFilters() : filtersFromSearchParams().filters,
   );
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState<boolean>(
+    () => !isTauri() && typeof window !== "undefined" && window.location.pathname === "/ajustes",
+  );
   const [showLog, setShowLog] = useState(false);
   const [selected, setSelected] = useState<MediaItem | null>(null);
   const [selectedGroupedView, setSelectedGroupedView] = useState(false);
@@ -561,6 +563,10 @@ export default function Library({
   useEffect(() => {
     if (isTauri()) return;
     const handlePop = () => {
+      // /ajustes deep-link → show settings overlay. Any other path closes it.
+      const onSettingsUrl = window.location.pathname === "/ajustes";
+      setShowSettings(onSettingsUrl);
+      if (onSettingsUrl) return;
       const tab = tabFromPathname();
       setActiveTab(tab);
       // Resolve any detail segment in the URL to the matching item — leaves
@@ -628,9 +634,30 @@ export default function Library({
   // the tab pushState history is not polluted with every filter keystroke).
   useEffect(() => {
     if (isTauri()) return;
+    // Don't pollute /ajustes with filter query strings — settings has no
+    // filter state of its own.
+    if (window.location.pathname === "/ajustes") return;
     const qs = filtersToSearchParams(filters, page);
     window.history.replaceState({}, "", window.location.pathname + qs);
   }, [filters, page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync showSettings state → URL (web mode). Opening pushes /ajustes;
+  // closing pops back to the previous entry so the browser back button
+  // returns to wherever the user came from.
+  useEffect(() => {
+    if (isTauri()) return;
+    const onSettingsUrl = window.location.pathname === "/ajustes";
+    if (showSettings && !onSettingsUrl) {
+      window.history.pushState({}, "", "/ajustes");
+    } else if (!showSettings && onSettingsUrl) {
+      // We were on /ajustes and someone closed Settings without using the
+      // back button — restore the active tab in the URL.
+      const target =
+        TAB_SLUGS[activeTab] + filtersToSearchParams(filters, page);
+      window.history.pushState({}, "", target);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSettings]);
 
   useEffect(() => {
     if (!startIndexingOnMount || hasStartedInitialIndexRef.current) {

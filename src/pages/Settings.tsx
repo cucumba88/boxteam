@@ -1519,26 +1519,21 @@ export default function Settings({
         </span>
       </div>
 
-      {/* Single content wrapper — the sticky bar above already announces
-          the page; the verbose subtitle row was creating dead whitespace. */}
+      {/* Scroll area is full width so the bottom footer can span edge-to-edge.
+          Content is centred via an inner max-width wrapper. */}
       <div
         className="settings-panel"
         style={{
-          width: "100%",
-          maxWidth: 1200,
-          margin: "0 auto",
           flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
+          overflowY: "auto",
           background: "transparent",
         }}
       >
-
         <div
           style={{
-            flex: 1,
-            overflowY: "auto",
+            width: "100%",
+            maxWidth: 1200,
+            margin: "0 auto",
             padding: isMobile
               ? "10px 0.875rem 1.5rem"
               : "16px 1.5rem 1.5rem",
@@ -3926,22 +3921,27 @@ export default function Settings({
             </SectionCard>
           </div>
         </div>
+      </div>
 
-        <div
-          style={{
-            padding: isMobile ? "0.875rem 1rem" : "1rem 1.5rem",
-            borderTop:
-              "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
-            background:
-              "color-mix(in srgb, var(--color-surface-2) 46%, transparent)",
-            display: "flex",
-            flexDirection: isMobile ? "column" : "row",
-            alignItems: isMobile ? "stretch" : "center",
-            justifyContent: "space-between",
-            gap: isMobile ? 10 : 12,
-            flexShrink: 0,
-          }}
-        >
+      {/* Footer — full-width sibling of the scroll area so the divider line
+          runs edge-to-edge of the content area, matching the sticky back bar
+          above. The buttons stay aligned to the right (or stretched on
+          mobile). */}
+      <div
+        style={{
+          padding: isMobile ? "0.875rem 1rem" : "1rem 1.5rem",
+          borderTop:
+            "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+          background:
+            "color-mix(in srgb, var(--color-surface-2) 46%, transparent)",
+          display: "flex",
+          flexDirection: isMobile ? "column" : "row",
+          alignItems: isMobile ? "stretch" : "center",
+          justifyContent: "space-between",
+          gap: isMobile ? 10 : 12,
+          flexShrink: 0,
+        }}
+      >
           <div style={subtextStyle}>
             {!isMobile && t(language, "settings.footerHelp")}
           </div>
@@ -3985,7 +3985,6 @@ export default function Settings({
             </button>
           </div>
         </div>
-      </div>
     </div>
   );
 }
