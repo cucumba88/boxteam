@@ -635,21 +635,25 @@ pub async fn search_tmdb_handler(
 // ── Watchlist ─────────────────────────────────────────────────────────────────
 
 pub async fn get_watchlist_handler(
-    AuthUser(u): AuthUser,
+    AuthUser(_u): AuthUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<crate::db::WatchlistItem>>> {
-    let items = state.db.get_watchlist(u.id).map_err(ApiError::from)?;
+    // Watchlist is shared across the Tauri "house" account (user_id=0) and
+    // every authenticated web user, so the desktop app and the web UI see the
+    // same titles. Auth is still required to access the endpoint.
+    let items = state.db.get_watchlist(0).map_err(ApiError::from)?;
     Ok(Json(items))
 }
 
 pub async fn add_watchlist_handler(
-    AuthUser(u): AuthUser,
+    AuthUser(_u): AuthUser,
     State(state): State<AppState>,
     Json(body): Json<AddWatchlistRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let auto_download = body.auto_download.unwrap_or(false);
     let id = state.db.add_watchlist_item(
-        u.id,
+        // Shared house watchlist — see get_watchlist_handler.
+        0,
         body.tmdb_id,
         &body.tmdb_type,
         &body.title,
@@ -681,21 +685,23 @@ pub async fn add_watchlist_handler(
 }
 
 pub async fn remove_watchlist_handler(
-    AuthUser(u): AuthUser,
+    AuthUser(_u): AuthUser,
     Path(id): Path<i64>,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Value>> {
-    state.db.remove_watchlist_item(id, u.id).map_err(ApiError::from)?;
+    // Shared house watchlist — see get_watchlist_handler.
+    state.db.remove_watchlist_item(id, 0).map_err(ApiError::from)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 pub async fn update_watchlist_handler(
-    AuthUser(u): AuthUser,
+    AuthUser(_u): AuthUser,
     Path(id): Path<i64>,
     State(state): State<AppState>,
     Json(body): Json<UpdateWatchlistRequest>,
 ) -> ApiResult<Json<Value>> {
-    state.db.update_watchlist_item(id, u.id, &body.scope, body.auto_download, body.profile_id.unwrap_or(1)).map_err(ApiError::from)?;
+    // Shared house watchlist — see get_watchlist_handler.
+    state.db.update_watchlist_item(id, 0, &body.scope, body.auto_download, body.profile_id.unwrap_or(1)).map_err(ApiError::from)?;
     // If auto-download was just enabled, immediately scan for matching indexed files.
     if body.auto_download {
         let db = state.db.clone();
@@ -710,11 +716,12 @@ pub async fn update_watchlist_handler(
 }
 
 pub async fn check_watchlist_handler(
-    AuthUser(u): AuthUser,
+    AuthUser(_u): AuthUser,
     Path(tmdb_id): Path<i64>,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Option<crate::db::WatchlistItem>>> {
-    let item = state.db.check_watchlist_item(tmdb_id, u.id).map_err(ApiError::from)?;
+    // Shared house watchlist — see get_watchlist_handler.
+    let item = state.db.check_watchlist_item(tmdb_id, 0).map_err(ApiError::from)?;
     Ok(Json(item))
 }
 

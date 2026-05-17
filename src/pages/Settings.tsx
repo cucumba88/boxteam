@@ -1431,148 +1431,117 @@ export default function Settings({
     <div
       className="settings-overlay"
       style={{
-        position: "fixed",
-        inset: 0,
-        background: isMobile
-          ? "var(--color-bg)"
-          : "color-mix(in srgb, black 58%, transparent)",
-        backdropFilter: isMobile ? "none" : "blur(8px)",
+        position: "relative",
+        height: "100%",
+        width: "100%",
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 200,
-        padding: isMobile ? 0 : "1.5rem",
+        flexDirection: "column",
+        background: "var(--color-bg)",
+        animation: "detail-page-in 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
       }}
-      onClick={(event) => event.target === event.currentTarget && onClose()}
     >
+      {/* Sticky back bar — matches DetailPage / TVShowPage pattern. The
+          settings page already gets a Settings indicator in the sidebar; this
+          bar provides the back action + page identity. */}
       <div
-        className="modal-panel-enter settings-panel"
         style={{
-          width: isMobile ? "100vw" : 980,
-          maxWidth: isMobile ? "100vw" : "calc(100vw - 3rem)",
-          maxHeight: isMobile ? "100dvh" : "calc(100dvh - 3rem)",
-          height: isMobile ? "100dvh" : undefined,
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 24px",
+          background: "color-mix(in srgb, var(--color-bg) 92%, transparent)",
+          backdropFilter: "blur(14px) saturate(140%)",
+          WebkitBackdropFilter: "blur(14px) saturate(140%)",
+          borderBottom:
+            "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
+          flexShrink: 0,
+        }}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t(language, "settings.close")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 12px 6px 10px",
+            borderRadius: 999,
+            border:
+              "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+            background:
+              "color-mix(in srgb, var(--color-surface) 85%, transparent)",
+            color: "var(--color-text)",
+            fontSize: 12.5,
+            fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          <AppIcon name="arrow-left" size={14} strokeWidth={2.2} />
+          <span>{language === "es" ? "Atrás" : "Back"}</span>
+        </button>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            color: "var(--color-text-muted)",
+            fontSize: 12.5,
+            minWidth: 0,
+          }}
+        >
+          <span style={{ color: "var(--color-text)", fontWeight: 700 }}>
+            {t(language, "settings.title")}
+          </span>
+        </div>
+        <div style={{ flex: 1 }} />
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "4px 10px",
+            borderRadius: 999,
+            background:
+              "color-mix(in srgb, var(--color-surface) 70%, transparent)",
+            border:
+              "1px solid color-mix(in srgb, var(--color-border) 55%, transparent)",
+            color: "var(--color-text-muted)",
+            fontSize: 11.5,
+            fontWeight: 600,
+          }}
+        >
+          v{appVersion}
+        </span>
+      </div>
+
+      {/* Single content wrapper — the sticky bar above already announces
+          the page; the verbose subtitle row was creating dead whitespace. */}
+      <div
+        className="settings-panel"
+        style={{
+          width: "100%",
+          maxWidth: 1200,
+          margin: "0 auto",
+          flex: 1,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          borderRadius: isMobile ? 0 : "calc(var(--radius-lg) + 6px)",
-          border: isMobile
-            ? "none"
-            : "1px solid color-mix(in srgb, var(--color-border) 82%, transparent)",
-          background:
-            "linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 97%, transparent), color-mix(in srgb, var(--color-surface-2) 94%, transparent))",
-          boxShadow: "0 24px 80px color-mix(in srgb, black 34%, transparent)",
+          background: "transparent",
         }}
       >
-        <div
-          style={{
-            padding: isMobile ? "0.875rem 1rem 0.75rem" : "1.25rem 1.5rem 1rem",
-            borderBottom:
-              "1px solid color-mix(in srgb, var(--color-border) 72%, transparent)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 16,
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-            {!isMobile && (
-              <div
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 14,
-                  background:
-                    "color-mix(in srgb, var(--color-primary) 16%, transparent)",
-                  color: "var(--color-primary)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <AppIcon name="settings" size={20} strokeWidth={2.1} />
-              </div>
-            )}
-            <div>
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: isMobile ? 17 : 20,
-                  fontWeight: 800,
-                  color: "var(--color-text)",
-                  letterSpacing: "-0.02em",
-                }}
-              >
-                {t(language, "settings.title")}
-              </h2>
-              {!isMobile && (
-                <p
-                  style={{
-                    margin: "0.35rem 0 0",
-                    ...subtextStyle,
-                    maxWidth: 560,
-                  }}
-                >
-                  {t(language, "settings.subtitle")}
-                </p>
-              )}
-              <div
-                style={{
-                  marginTop: 10,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "0.3rem 0.65rem",
-                  borderRadius: "var(--radius-full)",
-                  border:
-                    "1px solid color-mix(in srgb, var(--color-border) 78%, transparent)",
-                  background:
-                    "color-mix(in srgb, var(--color-surface) 92%, transparent)",
-                  color: "var(--color-text-muted)",
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
-                <span>{t(language, "settings.currentVersion")}</span>
-                <span style={{ color: "var(--color-text)" }}>
-                  v{appVersion}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <button
-            onClick={onClose}
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 999,
-              border:
-                "1px solid color-mix(in srgb, var(--color-border) 76%, transparent)",
-              background:
-                "color-mix(in srgb, var(--color-surface) 90%, transparent)",
-              color: "var(--color-text-muted)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              flexShrink: 0,
-            }}
-            aria-label={t(language, "settings.close")}
-          >
-            <AppIcon name="close" size={16} strokeWidth={2.2} />
-          </button>
-        </div>
 
         <div
           style={{
             flex: 1,
             overflowY: "auto",
             padding: isMobile
-              ? "1rem 0.875rem 1.5rem"
-              : "1.25rem 1.5rem 1.5rem",
+              ? "10px 0.875rem 1.5rem"
+              : "16px 1.5rem 1.5rem",
           }}
         >
           <div style={{ display: "grid", gap: 16 }}>

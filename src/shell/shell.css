@@ -1,0 +1,619 @@
+/* ── App shell layout ─────────────────────────────────────────────────── */
+
+.shell-root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Top drag strip — provides window dragging on every platform.
+   On macOS it also acts as spacer for the inset traffic-light buttons. */
+.shell-titlebar {
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--color-bg) 98%, black);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--color-border) 60%, transparent);
+  position: relative;
+  z-index: 60;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.shell-titlebar[data-platform="macos"] {
+  /* Reserve room for traffic-light buttons (top-left). */
+  padding-left: 78px;
+}
+
+.shell-titlebar-title {
+  flex: 1;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+.shell-titlebar-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid
+    color-mix(in srgb, var(--color-border) 80%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.shell-titlebar-hint:hover {
+  color: var(--color-text);
+  border-color: color-mix(in srgb, var(--color-primary) 50%, transparent);
+}
+
+.shell-titlebar-hint kbd {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--color-surface-2) 90%, transparent);
+  border-radius: 4px;
+  padding: 1px 5px;
+  letter-spacing: 0.02em;
+}
+
+/* Caption controls (Windows/Linux only) */
+.shell-caption-controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  margin-left: 8px;
+}
+
+.shell-caption-btn {
+  width: 44px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  -webkit-app-region: no-drag;
+}
+
+.shell-caption-btn:hover {
+  background: color-mix(in srgb, var(--color-surface-2) 90%, transparent);
+  color: var(--color-text);
+}
+
+.shell-caption-btn.close:hover {
+  background: var(--color-danger);
+  color: #fff;
+}
+
+/* Shell body: sidebar + content */
+.shell-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────── */
+
+.shell-sidebar {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 240px;
+  background: color-mix(in srgb, var(--color-bg) 96%, black 4%);
+  border-right: 1px solid
+    color-mix(in srgb, var(--color-border) 55%, transparent);
+  transition: width 0.18s ease;
+  overflow: hidden;
+}
+
+.shell-sidebar.collapsed {
+  width: 64px;
+}
+
+.shell-sidebar-header {
+  display: flex;
+  align-items: center;
+  padding: 14px 18px 16px;
+  gap: 10px;
+  min-height: 56px;
+}
+
+.shell-sidebar.collapsed .shell-sidebar-header {
+  padding: 14px 0 16px;
+  justify-content: center;
+}
+
+.shell-sidebar-wordmark {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.shell-sidebar-wordmark .accent {
+  color: var(--color-primary);
+}
+
+.shell-sidebar-collapse {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.shell-sidebar-collapse:hover {
+  background: color-mix(in srgb, var(--color-surface-2) 90%, transparent);
+  color: var(--color-text);
+}
+
+.shell-sidebar.collapsed .shell-sidebar-collapse {
+  margin-left: 0;
+}
+
+.shell-sidebar-section {
+  padding: 6px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shell-sidebar-section + .shell-sidebar-section {
+  border-top: 1px solid
+    color-mix(in srgb, var(--color-border) 35%, transparent);
+  margin-top: 4px;
+  padding-top: 10px;
+}
+
+.shell-sidebar-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  padding: 8px 12px 4px;
+  opacity: 0.8;
+}
+
+.shell-sidebar.collapsed .shell-sidebar-section-label {
+  display: none;
+}
+
+.shell-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  width: 100%;
+  position: relative;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.shell-sidebar-item:hover {
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+  color: var(--color-text);
+}
+
+.shell-sidebar-item.active {
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.shell-sidebar-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--color-primary);
+}
+
+.shell-sidebar.collapsed .shell-sidebar-item {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.shell-sidebar.collapsed .shell-sidebar-item-label,
+.shell-sidebar.collapsed .shell-sidebar-item-count {
+  display: none;
+}
+
+.shell-sidebar-item-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shell-sidebar-item-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shell-sidebar-item-count {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-surface-2) 96%, transparent);
+  color: var(--color-text-muted);
+  min-width: 22px;
+  text-align: center;
+}
+
+.shell-sidebar-item.active .shell-sidebar-item-count {
+  background: color-mix(in srgb, var(--color-primary) 25%, transparent);
+  color: var(--color-primary);
+}
+
+.shell-sidebar-spacer {
+  flex: 1;
+}
+
+.shell-sidebar-footer {
+  padding: 10px;
+  border-top: 1px solid
+    color-mix(in srgb, var(--color-border) 35%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shell-sidebar-footer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shell-sidebar.collapsed .shell-sidebar-footer-row {
+  flex-direction: column;
+}
+
+/* ── Content area ─────────────────────────────────────────────────────── */
+
+.shell-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+/* ── Status bar ───────────────────────────────────────────────────────── */
+
+.shell-statusbar {
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 16px;
+  background: color-mix(in srgb, var(--color-bg) 96%, black 4%);
+  border-top: 1px solid
+    color-mix(in srgb, var(--color-border) 55%, transparent);
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+  z-index: 30;
+}
+
+.shell-statusbar-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shell-statusbar-section.center {
+  flex: 1;
+  justify-content: center;
+  min-width: 0;
+}
+
+.shell-statusbar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.shell-statusbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.shell-statusbar-btn:hover {
+  background: color-mix(in srgb, var(--color-surface-2) 80%, transparent);
+  color: var(--color-text);
+}
+
+.shell-statusbar-progress {
+  width: 110px;
+  height: 4px;
+  background: color-mix(in srgb, var(--color-surface-2) 80%, transparent);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.shell-statusbar-progress > div {
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 0.25s ease;
+}
+
+/* ── Command palette ──────────────────────────────────────────────────── */
+
+.cmdk-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, black 55%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  z-index: 200;
+}
+
+.cmdk-panel {
+  width: min(620px, 92vw);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+}
+
+.cmdk-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.cmdk-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 500;
+  font-family: inherit;
+}
+
+.cmdk-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.cmdk-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.cmdk-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  padding: 10px 12px 6px;
+}
+
+.cmdk-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 13.5px;
+  text-align: left;
+  width: 100%;
+}
+
+.cmdk-item.active {
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-text);
+}
+
+.cmdk-item-icon {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-surface-2) 80%, transparent);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cmdk-item.active .cmdk-item-icon {
+  background: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  color: var(--color-primary);
+}
+
+.cmdk-item-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cmdk-item-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmdk-item-subtitle {
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmdk-item-hint {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-surface-2) 70%, transparent);
+}
+
+.cmdk-empty {
+  padding: 28px 18px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.cmdk-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-top: 1px solid var(--color-border);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  gap: 14px;
+}
+
+.cmdk-footer-keys {
+  display: flex;
+  gap: 10px;
+}
+
+.cmdk-footer kbd {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--color-surface-2) 90%, transparent);
+  border-radius: 4px;
+  padding: 1px 5px;
+  letter-spacing: 0.02em;
+  margin-right: 4px;
+}
+
+/* ── Activity log drawer ──────────────────────────────────────────────── */
+
+.shell-activity-drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 28px; /* sit above the status bar */
+  max-height: 280px;
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  border-top: 1px solid var(--color-border);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -10px 30px color-mix(in srgb, black 30%, transparent);
+}
+
+/* Filter sheet slide-in */
+@keyframes filter-sheet-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Detail page fade-up */
+@keyframes detail-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Mobile (≤767px) ──────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .shell-titlebar,
+  .shell-sidebar,
+  .shell-statusbar {
+    display: none;
+  }
+
+  .shell-root {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .shell-body {
+    flex: 1 1 auto;
+  }
+}

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Activity,
   Check,
@@ -702,112 +703,141 @@ export default function DownloadsTab({
     .filter((item) => item.status === "downloading" && item.speed_bps != null)
     .reduce((sum, item) => sum + (item.speed_bps ?? 0), 0);
 
+  type Filter = "all" | "active" | "queued" | "done" | "failed";
+  const [filter, setFilter] = useState<Filter>("all");
+
+  const filteredActive =
+    filter === "all" || filter === "active"
+      ? activeDownloads
+      : filter === "queued"
+        ? activeDownloads.filter((d) => d.status === "queued")
+        : [];
+  const filteredHistory =
+    filter === "all"
+      ? historyDownloads
+      : filter === "done"
+        ? historyDownloads.filter((d) => d.status === "done")
+        : filter === "failed"
+          ? historyDownloads.filter((d) => d.status === "error")
+          : [];
+
   return (
     <div
       style={{
-        padding: "0.35rem 0 2rem",
+        height: "100%",
+        overflowY: "auto",
         display: "flex",
         flexDirection: "column",
-        gap: 18,
       }}
     >
-      <section
+      {/* Toolbar — same chip-row pattern as Watchlist / Movies. Library's
+          outer toolbar already renders "Descargas N titles", so no duplicate
+          header here. */}
+      <div
         style={{
-          borderRadius: "calc(var(--radius-lg) + 4px)",
-          border:
-            "1px solid color-mix(in srgb, var(--color-border) 76%, transparent)",
-          background:
-            "linear-gradient(160deg, color-mix(in srgb, var(--color-surface) 94%, var(--color-bg) 6%), color-mix(in srgb, var(--color-surface-2) 88%, var(--color-bg) 12%))",
-          boxShadow:
-            "0 18px 38px color-mix(in srgb, black 18%, transparent), inset 0 1px 0 color-mix(in srgb, white 4%, transparent)",
-          padding: "1.1rem",
+          padding: "10px 1.5rem",
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          flexShrink: 0,
+          borderBottom:
+            "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
         }}
       >
         <div
           style={{
             display: "flex",
-            justifyContent: "space-between",
-            gap: 16,
-            alignItems: "flex-start",
+            alignItems: "center",
+            gap: 8,
             flexWrap: "wrap",
+            width: "100%",
           }}
         >
-          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-            <div
+          {/* Filter chips */}
+          <FilterChip
+            label={language === "es" ? "Todo" : "All"}
+            count={downloads.length}
+            active={filter === "all"}
+            onClick={() => setFilter("all")}
+          />
+          <FilterChip
+            label={language === "es" ? "Activos" : "Active"}
+            count={downloading + queued}
+            active={filter === "active"}
+            onClick={() => setFilter("active")}
+          />
+          <FilterChip
+            label={language === "es" ? "En cola" : "Queued"}
+            count={queued}
+            active={filter === "queued"}
+            onClick={() => setFilter("queued")}
+          />
+          <FilterChip
+            label={language === "es" ? "Completados" : "Done"}
+            count={done}
+            active={filter === "done"}
+            onClick={() => setFilter("done")}
+          />
+          <FilterChip
+            label={language === "es" ? "Errores" : "Failed"}
+            count={errors}
+            active={filter === "failed"}
+            onClick={() => setFilter("failed")}
+          />
+
+          <div style={{ flex: 1 }} />
+
+          {totalSpeed > 0 && (
+            <span
               style={{
-                width: 42,
-                height: 42,
-                borderRadius: 14,
-                display: "flex",
+                display: "inline-flex",
                 alignItems: "center",
-                justifyContent: "center",
+                gap: 5,
+                padding: "5px 10px",
+                borderRadius: 999,
                 background:
-                  "color-mix(in srgb, var(--color-primary) 16%, transparent)",
+                  "color-mix(in srgb, var(--color-primary) 14%, transparent)",
                 color: "var(--color-primary)",
-                flexShrink: 0,
+                fontSize: 12,
+                fontWeight: 700,
+                whiteSpace: "nowrap",
               }}
             >
-              <Download
-                size={18}
-                strokeWidth={2.1}
-                aria-hidden="true"
-                style={{ display: "block" }}
-              />
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: 17,
-                  fontWeight: 800,
-                  color: "var(--color-text)",
-                  marginBottom: 4,
-                }}
-              >
-                {t(language, "nav.downloads")}
-              </div>
-              <div
-                style={{
-                  fontSize: 13,
-                  color: "var(--color-text-muted)",
-                  lineHeight: 1.55,
-                }}
-              >
-                {t(language, "downloads.subtitle")}
-              </div>
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 10,
-              alignItems: "center",
-            }}
-          >
-            {totalSpeed > 0 && (
-              <span style={{ ...metaPill, color: "var(--color-primary)" }}>
-                ↓ {formatSpeed(totalSpeed)}
-              </span>
-            )}
-            {historyDownloads.length > 0 && (
-              <ActionButton
-                icon={X}
-                label={t(language, "downloads.clearCompleted")}
-                onClick={() => {
-                  void clearCompleted();
-                }}
-              />
-            )}
-          </div>
+              ↓ {formatSpeed(totalSpeed)}
+            </span>
+          )}
+          {historyDownloads.length > 0 && (
+            <ActionButton
+              icon={X}
+              label={t(language, "downloads.clearCompleted")}
+              onClick={() => {
+                void clearCompleted();
+              }}
+            />
+          )}
         </div>
-      </section>
+      </div>
 
+      {/* Content body */}
+      <div
+        style={{
+          padding: "16px 1.5rem calc(80px + env(safe-area-inset-bottom, 0px))",
+          maxWidth: 1100,
+          margin: "0 auto",
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+          gap: 18,
+        }}
+      >
+
+      {/* Stat cards */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 12,
+          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+          gap: 10,
         }}
       >
         <StatCard
@@ -902,11 +932,11 @@ export default function DownloadsTab({
               title={t(language, "downloads.activeSection")}
               subtitle={t(language, "downloads.activeSectionBody")}
             />
-            {activeDownloads.length > 0 ? (
+            {filteredActive.length > 0 ? (
               <div
                 style={{ display: "flex", flexDirection: "column", gap: 10 }}
               >
-                {activeDownloads.map((item) => (
+                {filteredActive.map((item) => (
                   <DownloadRow
                     key={item.id}
                     item={item}
@@ -945,11 +975,11 @@ export default function DownloadsTab({
               title={t(language, "downloads.historySection")}
               subtitle={t(language, "downloads.historySectionBody")}
             />
-            {historyDownloads.length > 0 ? (
+            {filteredHistory.length > 0 ? (
               <div
                 style={{ display: "flex", flexDirection: "column", gap: 10 }}
               >
-                {historyDownloads.map((item) => (
+                {filteredHistory.map((item) => (
                   <DownloadRow
                     key={item.id}
                     item={item}
@@ -983,6 +1013,7 @@ export default function DownloadsTab({
           </section>
         </>
       )}
+      </div>{/* /content body */}
     </div>
   );
 }
@@ -1012,3 +1043,44 @@ const emptySectionStyle: React.CSSProperties = {
   color: "var(--color-text-muted)",
   fontSize: 13,
 };
+
+
+function FilterChip({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "6px 12px",
+        borderRadius: 999,
+        border: active
+          ? "1px solid color-mix(in srgb, var(--color-primary) 50%, transparent)"
+          : "1px solid color-mix(in srgb, var(--color-border) 60%, transparent)",
+        background: active
+          ? "color-mix(in srgb, var(--color-primary) 18%, transparent)"
+          : "color-mix(in srgb, var(--color-surface) 70%, transparent)",
+        color: active ? "var(--color-primary)" : "var(--color-text)",
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "inherit",
+      }}
+    >
+      <span>{label}</span>
+      <span style={{ opacity: 0.7, fontSize: 11, fontWeight: 600 }}>{count}</span>
+    </button>
+  );
+}

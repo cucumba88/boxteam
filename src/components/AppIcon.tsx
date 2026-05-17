@@ -1,5 +1,6 @@
 import {
   Activity,
+  ArrowLeft,
   Bookmark,
   Check,
   CheckSquare,
@@ -56,7 +57,8 @@ export type IconName =
   | "sun"
   | "monitor"
   | "filter"
-  | "bookmark";
+  | "bookmark"
+  | "arrow-left";
 
 const ICON_MAP: Record<IconName, React.ComponentType<LucideProps>> = {
   grid: LayoutGrid,
@@ -86,6 +88,7 @@ const ICON_MAP: Record<IconName, React.ComponentType<LucideProps>> = {
   monitor: Monitor,
   filter: Filter,
   bookmark: Bookmark,
+  "arrow-left": ArrowLeft,
 };
 
 export default function AppIcon({

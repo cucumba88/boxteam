@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { X } from "lucide-react";
 import type { AppLanguage } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
 
@@ -81,10 +82,14 @@ export default function ActivityLog({
   language,
   entries,
   onClear,
+  onClose,
 }: {
   language: AppLanguage;
   entries: LogEntry[];
   onClear: () => void;
+  /** Hide the log drawer. Without this, the only way out is the Activity
+   *  button in the status bar — easy to miss when the log fills the bottom. */
+  onClose?: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -129,18 +134,46 @@ export default function ActivityLog({
         >
           {t(language, "activity.title", { count: entries.length })}
         </span>
-        <button
-          onClick={onClear}
-          style={{
-            background: "none",
-            border: "none",
-            color: "#475569",
-            cursor: "pointer",
-            fontSize: 11,
-          }}
-        >
-          {t(language, "activity.clear")}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <button
+            onClick={onClear}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#475569",
+              cursor: "pointer",
+              fontSize: 11,
+              fontFamily: "inherit",
+              padding: "4px 8px",
+              borderRadius: 6,
+            }}
+          >
+            {t(language, "activity.clear")}
+          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close activity log"
+              title="Close"
+              style={{
+                background: "none",
+                border: "none",
+                color: "#475569",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 22,
+                height: 22,
+                borderRadius: 6,
+                padding: 0,
+              }}
+            >
+              <X size={13} strokeWidth={2.4} aria-hidden="true" />
+            </button>
+          )}
+        </div>
       </div>
       <div style={{ overflowY: "auto", flex: 1, padding: "6px 12px" }}>
         {entries.map((e) => (

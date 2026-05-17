@@ -1,18 +1,38 @@
-import { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Search, X } from "lucide-react";
 import type { UseWatchlistReturn } from "./useWatchlist";
 import type { WatchlistItem } from "./types";
 import type { AppLanguage } from "../../utils/mediaLanguage";
 import { useIsMobile } from "../../hooks/useIsMobile";
+import { isTauri } from "../../lib/transport";
 import WatchlistCard from "./WatchlistCard";
-import WatchlistAddModal from "./WatchlistAddModal";
 import WatchlistDetailPanel from "./WatchlistDetailPanel";
 import { foldForSearch } from "../../utils/textSearch";
+
+/** Reads a watchlist detail tmdb_id from "/watchlist/<id>". Returns null on
+ *  bad input or when running inside Tauri (no URL bar there). */
+function detailTmdbIdFromPath(): number | null {
+  if (isTauri()) return null;
+  if (typeof window === "undefined") return null;
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  if (parts[0] !== "watchlist" || !parts[1]) return null;
+  const id = Number(parts[1]);
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
 
 interface WatchlistTabProps {
   watchlist: UseWatchlistReturn;
   language: AppLanguage;
   onNavigateToItem?: (tmdbId: number, mediaType: string) => void;
+  /** Multi-select state is lifted into Library so the page toolbar can
+   *  render the controls in the same place as Movies/TV. */
+  selecting?: boolean;
+  checkedIds?: Set<number>;
+  onToggleCheck?: (id: number) => void;
+  /** Opens the Add dialog. Lifted to Library so the Add button can live in
+   *  the outer toolbar (same row as the Select / bulk controls). The empty
+   *  state's "Add a title" CTA invokes this too. */
+  onOpenAdd?: () => void;
 }
 
 type TypeFilter = "all" | "movie" | "tv";
@@ -22,13 +42,57 @@ export default function WatchlistTab({
   watchlist,
   language,
   onNavigateToItem,
+  selecting = false,
+  checkedIds,
+  onToggleCheck,
+  onOpenAdd,
 }: WatchlistTabProps) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [showAdd, setShowAdd] = useState(false);
   const [selected, setSelected] = useState<WatchlistItem | null>(null);
   const isMobile = useIsMobile();
+
+  const effectiveCheckedIds = checkedIds ?? new Set<number>();
+
+  /** Resolve selected from the URL whenever items load or the path changes
+   *  (browser back/forward, deep links). Web-only — Tauri has no URL bar. */
+  useEffect(() => {
+    if (isTauri()) return;
+    const sync = () => {
+      const tmdbId = detailTmdbIdFromPath();
+      if (tmdbId == null) {
+        setSelected(null);
+        return;
+      }
+      const match = watchlist.items.find((item) => item.tmdb_id === tmdbId);
+      // If items haven't loaded yet, leave selected alone; this effect will
+      // fire again once items arrive.
+      if (match) setSelected(match);
+    };
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, [watchlist.items]);
+
+  /** Open detail: pushes /watchlist/<tmdbId> so the URL is shareable and
+   *  back/forward navigation works. */
+  const openDetail = (item: WatchlistItem) => {
+    setSelected(item);
+    if (!isTauri() && item.tmdb_id) {
+      const target = `/watchlist/${item.tmdb_id}`;
+      if (window.location.pathname !== target) {
+        window.history.pushState({}, "", target);
+      }
+    }
+  };
+
+  const closeDetail = () => {
+    setSelected(null);
+    if (!isTauri() && window.location.pathname.startsWith("/watchlist/")) {
+      window.history.pushState({}, "", "/watchlist");
+    }
+  };
 
   const filtered = useMemo(() => {
     return watchlist.items.filter((item) => {
@@ -68,134 +132,192 @@ export default function WatchlistTab({
     );
   };
 
+  // Detail takeover: when a watchlist item is selected, the whole tab area
+  // becomes the detail page (same pattern as DetailPage / TVShowPage). The
+  // sidebar + status bar remain visible because we're still inside MAIN
+  // CONTENT in Library.
+  if (selected) {
+    return (
+      <WatchlistDetailPanel
+        item={selected}
+        language={language}
+        onClose={closeDetail}
+        onRemove={handleRemove}
+        onUpdate={handleUpdate}
+        getCoverage={watchlist.getCoverage}
+        getSeasons={watchlist.getSeasons}
+        onNavigateToItem={(tmdbId, mediaType) => {
+          closeDetail();
+          onNavigateToItem?.(tmdbId, mediaType);
+        }}
+      />
+    );
+  }
+
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 0,
         height: "100%",
+        overflowY: "auto",
       }}
     >
-      {/* Toolbar */}
+      {/* Library's outer toolbar already renders "Seguimiento N titles", so
+          no bespoke header here — we just show the chip row, same layout as
+          the movies/tv pages. */}
       <div
         style={{
+          padding: "10px 1.5rem",
+          width: "100%",
           display: "flex",
           flexDirection: "column",
-          gap: 8,
-          padding: isMobile ? "10px 1.5rem" : "12px 16px",
-          borderBottom: "1px solid var(--color-border)",
-          background: "var(--color-surface)",
+          gap: isMobile ? 8 : 14,
           flexShrink: 0,
+          // Matches the desktop FilterChipRow separator used on Movies/TV.
+          borderBottom:
+            "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
         }}
       >
-        {/* Row 1: Search + Add */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={language === "es" ? "Buscar…" : "Search…"}
+        {/* Toolbar — desktop fits everything on one row; on mobile the
+            search input takes its own row (full width) and the chips +
+            actions sit below in a horizontally-scrollable strip so nothing
+            wraps into a broken multi-line stack. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+            width: "100%",
+          }}
+        >
+          {/* Search input — matches FilterChipRow */}
+          <div
             style={{
-              flex: 1,
-              background: "var(--color-surface-2)",
-              border: "1px solid var(--color-border)",
-              borderRadius: "var(--radius)",
-              color: "var(--color-text)",
-              padding: "7px 12px",
-              fontSize: 13,
-              outline: "none",
-            }}
-          />
-          <button
-            onClick={() => setShowAdd(true)}
-            style={{
-              background: "var(--color-primary)",
-              border: "none",
-              color: "#fff",
-              borderRadius: "var(--radius)",
-              padding: isMobile ? "7px 10px" : "7px 14px",
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 600,
               display: "flex",
               alignItems: "center",
-              gap: 5,
-              whiteSpace: "nowrap",
-              flexShrink: 0,
+              gap: 8,
+              minHeight: 34,
+              padding: "0 10px",
+              width: isMobile ? "100%" : 280,
+              maxWidth: "100%",
+              borderRadius: "var(--radius)",
+              border:
+                "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
+              background:
+                "color-mix(in srgb, var(--color-surface) 90%, transparent)",
+              flex: isMobile ? "1 1 100%" : "none",
             }}
           >
-            <Plus size={14} strokeWidth={2.5} aria-hidden="true" />
-            {!isMobile && (language === "es" ? "Agregar" : "Add")}
-          </button>
-        </div>
+            <Search
+              size={13}
+              strokeWidth={2.2}
+              aria-hidden="true"
+              style={{ color: "var(--color-text-muted)", flexShrink: 0 }}
+            />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={language === "es" ? "Buscar…" : "Search…"}
+              aria-label={language === "es" ? "Buscar" : "Search"}
+              style={{
+                width: "100%",
+                border: "none",
+                outline: "none",
+                background: "transparent",
+                color: "var(--color-text)",
+                fontSize: 13,
+                fontFamily: "inherit",
+              }}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Clear"
+                style={{
+                  flexShrink: 0,
+                  background: "none",
+                  border: "none",
+                  padding: 2,
+                  cursor: "pointer",
+                  color: "var(--color-text-muted)",
+                  lineHeight: 0,
+                }}
+              >
+                <X size={12} strokeWidth={2.2} aria-hidden="true" />
+              </button>
+            )}
+          </div>
 
-        {/* Row 2: Filter chips — scrollable on mobile */}
-        <div
-          style={
-            {
-              display: "flex",
-              gap: 6,
-              overflowX: "auto",
-              scrollbarWidth: "none",
-              WebkitOverflowScrolling: "touch",
-            } as React.CSSProperties
-          }
-        >
-          {/* Type chips */}
-          {(["all", "movie", "tv"] as TypeFilter[]).map((t) => (
-            <button
-              key={`type-${t}`}
-              onClick={() => setTypeFilter(t)}
-              style={chipStyle(typeFilter === t)}
-            >
-              {t === "all"
-                ? language === "es"
-                  ? "Todos"
-                  : "All"
-                : t === "movie"
+          {/* Type filter chips */}
+          {(["all", "movie", "tv"] as TypeFilter[]).map((tf) => (
+            <FilterChip
+              key={`type-${tf}`}
+              label={
+                tf === "all"
                   ? language === "es"
-                    ? "Películas"
-                    : "Movies"
-                  : "TV"}
-            </button>
+                    ? "Todos"
+                    : "All"
+                  : tf === "movie"
+                    ? language === "es"
+                      ? "Películas"
+                      : "Movies"
+                    : "TV"
+              }
+              active={typeFilter === tf}
+              onClick={() => setTypeFilter(tf)}
+            />
           ))}
+
+          {/* Divider */}
           <div
             style={{
               width: 1,
-              background: "var(--color-border)",
-              flexShrink: 0,
+              alignSelf: "stretch",
+              background:
+                "color-mix(in srgb, var(--color-border) 70%, transparent)",
               margin: "0 2px",
             }}
           />
-          {/* Status chips */}
+
+          {/* Status filter chips */}
           {(["all", "pending", "available"] as StatusFilter[]).map((s) => (
-            <button
+            <FilterChip
               key={`status-${s}`}
-              onClick={() => setStatusFilter(s)}
-              style={chipStyle(statusFilter === s)}
-            >
-              {s === "all"
-                ? language === "es"
-                  ? "Todo"
-                  : "All"
-                : s === "pending"
+              label={
+                s === "all"
                   ? language === "es"
-                    ? "Pendiente"
-                    : "Pending"
-                  : language === "es"
-                    ? "Disponible"
-                    : "Available"}
-            </button>
+                    ? "Todo"
+                    : "All"
+                  : s === "pending"
+                    ? language === "es"
+                      ? "Pendiente"
+                      : "Pending"
+                    : language === "es"
+                      ? "Disponible"
+                      : "Available"
+              }
+              active={statusFilter === s}
+              onClick={() => setStatusFilter(s)}
+            />
           ))}
+
+          {/* The right-side actions (Add, Select / bulk controls) live in
+              Library's outer toolbar — same place as Movies/TV. */}
         </div>
       </div>
 
-      {/* Grid */}
+      {/* Grid — matches VirtualMediaGrid spacing/padding so the watchlist
+          tab feels like the library tabs. `mobile-content-area` adds the
+          safe-area padding for the bottom tab bar. */}
       <div
+        className={isMobile ? "mobile-content-area" : undefined}
         style={{
           flex: 1,
           overflowY: "auto",
-          padding: isMobile ? "12px 1.5rem 80px" : 16,
+          padding: isMobile ? "16px 1.5rem 6.5rem" : "1.5rem",
         }}
       >
         {watchlist.loading ? (
@@ -232,9 +354,9 @@ export default function WatchlistTab({
                   ? "No hay resultados"
                   : "No results"}
             </span>
-            {watchlist.items.length === 0 && (
+            {watchlist.items.length === 0 && onOpenAdd && (
               <button
-                onClick={() => setShowAdd(true)}
+                onClick={onOpenAdd}
                 style={{
                   background: "var(--color-primary)",
                   border: "none",
@@ -254,10 +376,11 @@ export default function WatchlistTab({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: isMobile
-                ? "repeat(3, 1fr)"
-                : "repeat(auto-fill, minmax(140px, 1fr))",
-              gap: isMobile ? 10 : 16,
+              // Same min-width grid as VirtualMediaGrid so cards stay
+              // legible across the breakpoint instead of being crammed
+              // into 3 narrow columns on phones.
+              gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+              gap: 14,
             }}
           >
             {filtered.map((item) => (
@@ -265,54 +388,63 @@ export default function WatchlistTab({
                 key={item.id}
                 item={item}
                 language={language}
-                onOpen={setSelected}
+                onOpen={openDetail}
                 onRemove={handleRemove}
+                selecting={selecting}
+                checked={effectiveCheckedIds.has(item.id)}
+                onToggleCheck={onToggleCheck}
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* Add modal */}
-      {showAdd && (
-        <WatchlistAddModal
-          language={language}
-          watchlistedTmdbIds={watchlist.watchlistedTmdbIds}
-          onAdd={watchlist.add}
-          onClose={() => setShowAdd(false)}
-        />
-      )}
+      {/* Add modal is rendered by Library now — see the watchlist toolbar
+          actions there. */}
 
-      {/* Detail panel */}
-      {selected && (
-        <WatchlistDetailPanel
-          item={selected}
-          language={language}
-          onClose={() => setSelected(null)}
-          onRemove={handleRemove}
-          onUpdate={handleUpdate}
-          getCoverage={watchlist.getCoverage}
-          getSeasons={watchlist.getSeasons}
-          onNavigateToItem={(tmdbId, mediaType) => {
-            setSelected(null);
-            onNavigateToItem?.(tmdbId, mediaType);
-          }}
-        />
-      )}
+      {/* Detail page is rendered as a takeover at the top of the function
+          when `selected` is set — no overlay here. */}
     </div>
   );
 }
 
-function chipStyle(active: boolean): React.CSSProperties {
-  return {
-    border: "none",
-    borderRadius: "var(--radius-full)",
-    padding: "4px 12px",
-    cursor: "pointer",
-    fontSize: 12,
-    fontWeight: 500,
-    background: active ? "var(--color-primary)" : "var(--color-surface-2)",
-    color: active ? "#fff" : "var(--color-text-muted)",
-    transition: "background 0.15s ease",
-  };
+/**
+ * Same visual chip used by the Library filter row — shared style so the
+ * watchlist toolbar and the media filters feel like the same system.
+ */
+function FilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "6px 12px",
+        borderRadius: 999,
+        border: active
+          ? "1px solid color-mix(in srgb, var(--color-primary) 50%, transparent)"
+          : "1px solid color-mix(in srgb, var(--color-border) 60%, transparent)",
+        background: active
+          ? "color-mix(in srgb, var(--color-primary) 18%, transparent)"
+          : "color-mix(in srgb, var(--color-surface) 70%, transparent)",
+        color: active ? "var(--color-primary)" : "var(--color-text)",
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "inherit",
+      }}
+    >
+      {label}
+    </button>
+  );
 }

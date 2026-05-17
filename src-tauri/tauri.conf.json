@@ -13,7 +13,8 @@
     "windows": [
       {
         "title": "Oscata FTP Client",
-        "titleBarStyle": "Visible",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "backgroundColor": "#0d0d0f",
         "width": 1440,
         "height": 960,
