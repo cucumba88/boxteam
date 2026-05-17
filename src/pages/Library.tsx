@@ -815,6 +815,13 @@ export default function Library({
     setMovieView(prefs.defaultMovieView);
     setTvView(prefs.defaultTvView);
     setFilterDrawerOpen(false);
+    // Reset jump + active-letter state so the next grid mounts at the top
+    // instead of re-running a stale scrollToIndex from the previous tab.
+    setJumpRequest(undefined);
+    setPinnedLetter(null);
+    pinnedAtIndexRef.current = null;
+    setFirstVisibleIndex(0);
+    setVisibleRange({ start: 0, end: 0 });
   };
 
   const handleCardSelect = (item: MediaItem) => {
@@ -2390,6 +2397,7 @@ export default function Library({
             shouldn't both be set, but if they were we'd want the show view. */}
         {!showSettings && !showUsers && tvShow && (
           <TVShowPage
+            key={tvShow.id}
             show={tvShow}
             allEpisodes={getTvEpisodes(tvShow)}
             language={language}
@@ -2420,6 +2428,7 @@ export default function Library({
 
         {!showSettings && !showUsers && !tvShow && selected && (
           <DetailPage
+            key={selected.id}
             item={selected}
             language={language}
             relatedItems={
