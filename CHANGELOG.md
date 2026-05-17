@@ -1,5 +1,19 @@
 # Novedades de Oscata
 
+## Versión 0.10.1 — 17 de mayo de 2026
+
+Dos arreglos de scroll que se colaron en v0.10.0:
+
+### 🐛 Cambiar de pestaña aterrizaba a mitad del grid
+
+Al pulsar una letra del A-Z en una pestaña y luego cambiar a otra, el nuevo grid se montaba con el `jumpRequest` heredado y ejecutaba un `scrollToIndex` con el índice del salto anterior — la nueva pestaña aparecía a mitad o al fondo, no arriba. Se añade un `mountTickRef` en `VirtualMediaGrid` que ignora cualquier `jumpRequest` cuyo `tick` sea anterior al montaje actual, así cualquier remount (cambio de tab, filtro, orden, vista) arranca limpio en `scrollTop=0`. `switchTab` también limpia el estado de salto y la letra fijada por defensa en profundidad.
+
+### 🐛 Detalle reciclaba la posición de scroll al cambiar de item
+
+`DetailPage` y `TVShowPage` no estaban *keyed* por id, así que abrir un item, hacer scroll y navegar a otro relacionado (botón "Versions" / episodios) mantenía la misma instancia del componente — el scroll quedaba donde estaba en lugar de empezar arriba. Ahora ambos llevan `key={item.id}` / `key={show.id}`, así que cambiar de item desmonta y vuelve a montar el panel: animación de entrada limpia y scroll a cero garantizado.
+
+---
+
 ## Versión 0.10.0 — 17 de mayo de 2026
 
 Esta versión añade tres mejoras grandes de navegación y rendimiento sobre la biblioteca, más un pulido importante del modo multi-selección en móvil. La biblioteca de miles de elementos ya no se mueve "a saltos de 48 por página": ahora hay un único scroll infinito con virtualización real, una columna A-Z lateral estilo Plex/iOS para saltar a cualquier letra, y una nueva sección de Preferencias para fijar cómo quieres que arranque cada pestaña.

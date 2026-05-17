@@ -130,9 +130,20 @@ export default memo(function VirtualMediaGrid({
     rowVirtualizer.measure();
   }, [rowHeight, rowVirtualizer]);
 
+  // Track mount time so we ignore any `jumpRequest` whose `tick` predates
+  // this mount. Without this, tab / filter / sort changes (which remount
+  // the grid via `key={viewResetKey}`) would re-run a stale scrollToIndex
+  // from the previous tab's last A-Z click and land the new grid
+  // mid-content instead of at the top.
+  const mountTickRef = useRef<number>(0);
+  useEffect(() => {
+    mountTickRef.current = Date.now();
+  }, []);
+
   // A-Z jump: scroll the row containing `index` into view.
   useLayoutEffect(() => {
     if (!jumpRequest) return;
+    if (jumpRequest.tick < mountTickRef.current) return;
     if (columns <= 0) return;
     const targetRow = Math.floor(jumpRequest.index / columns);
     if (Number.isNaN(targetRow) || targetRow < 0) return;
