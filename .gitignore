@@ -29,3 +29,6 @@ oscata-windows-portable-*.zip
 
 # Dev FTP server media (local test files, not committed)
 docker/ftp-dev/media/
+
+# Claude Code workspace metadata (per-clone)
+.claude/

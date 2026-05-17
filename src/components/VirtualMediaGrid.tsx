@@ -17,6 +17,7 @@ export default memo(function VirtualMediaGrid({
   downloadMap,
   hideEpisodeBadge = false,
   showFileSize = false,
+  disableQuickAction = false,
 }: {
   items: MediaItem[];
   selecting: boolean;
@@ -40,6 +41,7 @@ export default memo(function VirtualMediaGrid({
   downloadMap: Map<string, DownloadItem>;
   hideEpisodeBadge?: boolean;
   showFileSize?: boolean;
+  disableQuickAction?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -51,7 +53,7 @@ export default memo(function VirtualMediaGrid({
     <div
       ref={scrollRef}
       style={{
-        flex: 1,
+        height: "100%",
         overflowY: "auto",
         padding: "1.5rem 1.5rem 6.5rem 1.5rem",
       }}
@@ -88,6 +90,7 @@ export default memo(function VirtualMediaGrid({
               downloadItem={downloadMap.get(item.ftp_path)}
               hideEpisodeBadge={hideEpisodeBadge}
               showFileSize={showFileSize}
+              disableQuickAction={disableQuickAction}
               onDownload={onDownload}
               onSelect={(selected) => {
                 if (selecting) onToggleCheck(selected.id);

@@ -13,19 +13,33 @@ import {
   Menu,
   MoreHorizontal,
   Pencil,
+  Plus,
+  Trash2,
+  RefreshCw,
   Settings as SettingsIcon,
   Tv2,
   Upload,
   type LucideIcon,
 } from "lucide-react";
 import { call, isTauri } from "../lib/transport";
-import { prefetchConfig } from "../lib/configCache";
+import { getConfig, prefetchConfig } from "../lib/configCache";
+import AppShell from "../shell/AppShell";
+import AppSidebar, {
+  type SidebarSection,
+} from "../shell/AppSidebar";
+import AppStatusBar from "../shell/AppStatusBar";
+import CommandPalette, {
+  type CommandItem,
+} from "../shell/CommandPalette";
+import { useCommandKey } from "../shell/usePlatform";
 import { invoke } from "@tauri-apps/api/core";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useIndexing, MediaItem } from "../hooks/useIndexing";
 import { useDownload } from "../hooks/useDownload";
 import { useDownloads } from "../hooks/useDownloads";
 import FilterBar, { type Filters } from "../components/FilterBar";
+import FilterChipRow from "../components/FilterChipRow";
+import FilterSheet from "../components/FilterSheet";
 import {
   normalizeHdr,
   normalizeReleaseType,
@@ -36,16 +50,17 @@ import { foldForSearch } from "../utils/textSearch";
 import IndexStatus from "../components/IndexStatus";
 import Settings from "./Settings";
 import ActivityLog from "../components/ActivityLog";
-import DetailPanel from "../components/DetailPanel";
+import DetailPage from "../components/DetailPage";
+import TVShowPage from "../components/TVShowPage";
 import FixMatchModal from "../components/FixMatchModal";
 import DownloadsTab from "../components/DownloadsTab";
 import WatchlistTab from "../features/watchlist/WatchlistTab";
+import WatchlistAddModal from "../features/watchlist/WatchlistAddModal";
 import { useWatchlist } from "../features/watchlist/useWatchlist";
 import UploadsTab from "../features/uploads/UploadsTab";
 import { useUploads } from "../features/uploads/useUploads";
 import DownloadFeedbackToast from "../components/DownloadFeedbackToast";
 import IndexErrorToast from "../components/IndexErrorToast";
-import TVShowPanel from "../components/TVShowPanel";
 import { useQuitHandler } from "../hooks/useQuitHandler";
 import VirtualMediaGrid from "../components/VirtualMediaGrid";
 import ThemeToggle from "../components/ThemeToggle";
@@ -90,7 +105,25 @@ const SLUG_TO_TAB: Record<string, TabId> = Object.fromEntries(
 function tabFromPathname(): TabId {
   if (isTauri()) return "all";
   const path = window.location.pathname || "/";
-  return SLUG_TO_TAB[path] ?? "all";
+  // Exact match first (covers "/"). Then fall back to the first path segment
+  // so nested URLs like "/watchlist/12345" still map to the watchlist tab.
+  if (SLUG_TO_TAB[path]) return SLUG_TO_TAB[path];
+  const first = "/" + (path.split("/").filter(Boolean)[0] ?? "");
+  return SLUG_TO_TAB[first] ?? "all";
+}
+
+/** Parses a `/peliculas/<id>`, `/series/<id>` or `/documentales/<id>` URL
+ *  and returns the numeric id (tmdb_id). Returns null for list-only URLs
+ *  or when running inside Tauri (no URL bar there). */
+function detailIdFromPath(): number | null {
+  if (isTauri()) return null;
+  if (typeof window === "undefined") return null;
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  const tabSlug = "/" + (parts[0] ?? "");
+  if (!["/peliculas", "/series", "/documentales"].includes(tabSlug)) return null;
+  if (!parts[1]) return null;
+  const id = Number(parts[1]);
+  return Number.isFinite(id) && id > 0 ? id : null;
 }
 
 const defaultFilters = (): Filters => ({
@@ -367,6 +400,7 @@ export default function Library({
   );
   const [activeTab, setActiveTab] = useState<TabId>(() => tabFromPathname());
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const isMobile = useIsMobile();
   const [filters, setFilters] = useState<Filters>(() =>
     isTauri() ? defaultFilters() : filtersFromSearchParams().filters,
@@ -377,6 +411,27 @@ export default function Library({
   const [selectedGroupedView, setSelectedGroupedView] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
+
+  // Watchlist has its own selecting state — IDs reference watchlist rows
+  // (not media items) and the bulk action is "remove from watchlist", not
+  // "fix match". Lifted here so the Library toolbar can render the
+  // controls in the same place as the Movies/TV tabs.
+  const [watchlistSelecting, setWatchlistSelecting] = useState(false);
+  const [watchlistShowAdd, setWatchlistShowAdd] = useState(false);
+  const [watchlistCheckedIds, setWatchlistCheckedIds] = useState<Set<number>>(
+    new Set(),
+  );
+  const exitWatchlistSelect = () => {
+    setWatchlistSelecting(false);
+    setWatchlistCheckedIds(new Set());
+  };
+  const toggleWatchlistCheck = (id: number) =>
+    setWatchlistCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const [showBulkFix, setShowBulkFix] = useState(false);
   const [rematching, setRematching] = useState(false);
   const [clearingAll, setClearingAll] = useState(false);
@@ -397,6 +452,8 @@ export default function Library({
   const [showMobileNavMenu, setShowMobileNavMenu] = useState(false);
   const mobileNavMenuRef = useRef<HTMLDivElement>(null);
   const [language, setLanguage] = useState<AppLanguage>("es");
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [ftpHost, setFtpHost] = useState<string | null>(null);
   const [badgeMap, setBadgeMap] = useState<
     Record<
       number,
@@ -422,6 +479,71 @@ export default function Library({
     prefetchConfig();
   }, []);
 
+  // Fetch FTP host once to populate the status bar.
+  useEffect(() => {
+    let cancelled = false;
+    getConfig<{ ftp?: { host?: string } | null } | null>()
+      .then((cfg) => {
+        if (cancelled) return;
+        const host = cfg?.ftp?.host;
+        if (typeof host === "string" && host.trim()) {
+          setFtpHost(host.trim());
+        }
+      })
+      .catch(() => {
+        // No config or unauthenticated — leave host null.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Cmd/Ctrl+K opens the command palette globally.
+  useCommandKey(() => setCommandPaletteOpen((open) => !open));
+
+  // Global Esc handler: close the topmost open panel in z-order so users can
+  // always back out without hunting for an × button. Order matches stacking:
+  // bulk fix > fix match > settings > tv show > detail > filter sheet > command
+  // palette. Skip when typing in an input so it doesn't steal expected behavior.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const tag = (event.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (showBulkFix) {
+        setShowBulkFix(false);
+      } else if (fixMatchRequest) {
+        setFixMatchRequest(null);
+      } else if (showSettings) {
+        setShowSettings(false);
+      } else if (tvShow) {
+        setTvShow(null);
+      } else if (selected) {
+        setSelected(null);
+      } else if (filterSheetOpen) {
+        setFilterSheetOpen(false);
+      } else if (commandPaletteOpen) {
+        setCommandPaletteOpen(false);
+      } else if (showLog) {
+        setShowLog(false);
+      } else {
+        return;
+      }
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    showBulkFix,
+    fixMatchRequest,
+    showSettings,
+    tvShow,
+    selected,
+    filterSheetOpen,
+    commandPaletteOpen,
+    showLog,
+  ]);
+
   useEffect(() => {
     if (!isTauri()) return;
     invoke<boolean>("check_ftp_write_permission")
@@ -441,9 +563,33 @@ export default function Library({
     const handlePop = () => {
       const tab = tabFromPathname();
       setActiveTab(tab);
-      setSelected(null);
-      setSelectedGroupedView(false);
-      setTvShow(null);
+      // Resolve any detail segment in the URL to the matching item — leaves
+      // selected/tvShow null when the URL is a list view.
+      const detailId = detailIdFromPath();
+      if (detailId != null) {
+        const match = items.find((i) => i.tmdb_id === detailId);
+        if (match) {
+          const isTV =
+            match.tmdb_type === "tv" ||
+            match.media_type === "tv" ||
+            match.media_type === "documentary";
+          if (isTV) {
+            setTvShow(match);
+            setSelected(null);
+          } else {
+            setSelected(match);
+            setTvShow(null);
+            setSelectedGroupedView(false);
+          }
+        } else {
+          setSelected(null);
+          setTvShow(null);
+        }
+      } else {
+        setSelected(null);
+        setSelectedGroupedView(false);
+        setTvShow(null);
+      }
       setSelecting(false);
       setCheckedIds(new Set());
       const { filters: urlFilters, page: urlPage } = filtersFromSearchParams();
@@ -455,7 +601,28 @@ export default function Library({
     };
     window.addEventListener("popstate", handlePop);
     return () => window.removeEventListener("popstate", handlePop);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items]);
+
+  // Initial deep link — when the URL contains a detail id but items haven't
+  // resolved yet, this effect fires once they do and opens the right page.
+  useEffect(() => {
+    if (isTauri()) return;
+    if (selected || tvShow) return;
+    const detailId = detailIdFromPath();
+    if (detailId == null) return;
+    const match = items.find((i) => i.tmdb_id === detailId);
+    if (!match) return;
+    const isTV =
+      match.tmdb_type === "tv" ||
+      match.media_type === "tv" ||
+      match.media_type === "documentary";
+    if (isTV) {
+      setTvShow(match);
+    } else {
+      setSelected(match);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   // Sync filters + page into URL query string (web mode only, replaceState so
   // the tab pushState history is not polluted with every filter keystroke).
@@ -572,6 +739,7 @@ export default function Library({
     setTvShow(null);
     setSelecting(false);
     setCheckedIds(new Set());
+    exitWatchlistSelect();
     setFilters(defaultFilters());
     setPage(1);
     setMovieView("grouped");
@@ -589,6 +757,29 @@ export default function Library({
     } else {
       setSelectedGroupedView(activeTab === "movie" && movieView === "grouped");
       setSelected(item);
+    }
+    // Push a deep-linkable URL when we have a tmdb_id (web mode only —
+    // Tauri has no URL bar so it's a no-op). Falls back to the file's db
+    // id under `/file/<n>` when there's no tmdb match.
+    if (!isTauri() && item.tmdb_id) {
+      const slug = isTV
+        ? item.media_type === "documentary"
+          ? "/documentales"
+          : "/series"
+        : "/peliculas";
+      const target = `${slug}/${item.tmdb_id}`;
+      if (window.location.pathname !== target) {
+        window.history.pushState({}, "", target);
+      }
+    }
+  };
+
+  /** Pop the detail segment off the URL back to the tab list (web mode). */
+  const popDetailFromUrl = () => {
+    if (isTauri()) return;
+    const tabSlug = TAB_SLUGS[activeTab];
+    if (window.location.pathname !== tabSlug) {
+      window.history.pushState({}, "", tabSlug);
     }
   };
 
@@ -628,62 +819,6 @@ export default function Library({
   const exitSelect = () => {
     setSelecting(false);
     setCheckedIds(new Set());
-  };
-
-  const recheckBadgeForItem = async (item: MediaItem) => {
-    const startedAt = Date.now();
-    try {
-      const results = await call<
-        Array<{
-          id: number;
-          downloaded: boolean;
-          in_emby: boolean;
-          plex_in_library?: boolean;
-          emby_in_library?: boolean;
-          cache?: string;
-          debug?: string;
-        }>
-      >("check_media_badges", {
-        items: [
-          {
-            id: item.id,
-            ftpPath: item.ftp_path,
-            filename: item.filename,
-            title: item.tmdb_title ?? item.title ?? null,
-            titleEn: item.tmdb_title_en ?? null,
-            year: item.year ?? null,
-            imdbId: item.imdb_id ?? null,
-            tmdbId: item.tmdb_id ?? null,
-            mediaType: item.media_type ?? item.tmdb_type ?? null,
-          },
-        ],
-      });
-
-      const [result] = results;
-      if (!result) return;
-
-      setBadgeMap((prev) => ({
-        ...prev,
-        [result.id]: {
-          downloaded: result.downloaded,
-          inEmby: result.in_emby,
-          plexInLibrary: result.plex_in_library,
-          embyInLibrary: result.emby_in_library,
-          cache: result.cache,
-          debug: result.debug,
-        },
-      }));
-
-      appendLog(
-        `🧪 Dev badge recheck: ${item.id} | in_library ${result.in_emby ? "true" : "false"} | plex ${result.plex_in_library ? "true" : "false"} | emby ${result.emby_in_library ? "true" : "false"} | cache ${result.cache ?? "-"} | ${Date.now() - startedAt}ms`,
-      );
-    } catch (error: unknown) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : String(error ?? "unknown error");
-      appendLog(`⚠ Dev badge recheck failed for ${item.id}: ${message}`);
-    }
   };
 
   const isSeriesTab = activeTab === "tv" || activeTab === "documentary";
@@ -1324,6 +1459,134 @@ export default function Library({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tvShowEpisodesKey, badgeRefreshTick]);
 
+  // ─── Sidebar sections ─────────────────────────────────────────────────
+  // Grouped nav for the desktop sidebar — Library tabs above Transfers.
+  const shellLabels =
+    language === "es"
+      ? {
+          library: "Librería",
+          transfers: "Transferencias",
+          navigation: "Navegación",
+          actions: "Acciones",
+        }
+      : {
+          library: "Library",
+          transfers: "Transfers",
+          navigation: "Navigation",
+          actions: "Actions",
+        };
+  const sidebarSections: SidebarSection<TabId>[] = useMemo(() => {
+    const libraryIds: TabId[] = ["all", "movie", "tv", "documentary", "watchlist"];
+    const transferIds: TabId[] = ["downloads", "uploads"];
+    const toItem = (tab: (typeof TABS)[number]) => ({
+      id: tab.id,
+      label: t(language, tab.labelKey as never),
+      icon: tab.icon,
+      count: tabCounts[tab.id] ?? 0,
+    });
+    return [
+      {
+        label: shellLabels.library,
+        items: visibleTabs.filter((tab) => libraryIds.includes(tab.id)).map(toItem),
+      },
+      {
+        label: shellLabels.transfers,
+        items: visibleTabs.filter((tab) => transferIds.includes(tab.id)).map(toItem),
+      },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language, tabCounts, visibleTabs]);
+
+  // ─── Command palette items ────────────────────────────────────────────
+  const commandItems: CommandItem[] = useMemo(() => {
+    const navLabel = shellLabels.navigation;
+    const actionsLabel = shellLabels.actions;
+    const libraryLabel = shellLabels.library;
+
+    const navItems: CommandItem[] = visibleTabs.map((tab) => {
+      const label = t(language, tab.labelKey as never);
+      return {
+        id: `nav:${tab.id}`,
+        title: `${language === "es" ? "Ir a" : "Go to"} ${label}`,
+        icon: tab.icon,
+        section: navLabel,
+        searchKey: foldForSearch(`${label} go to ir a`),
+        onSelect: () => switchTab(tab.id),
+      };
+    });
+
+    const actionItems: CommandItem[] = [
+      {
+        id: "action:settings",
+        title: t(language, "settings.title"),
+        icon: SettingsIcon,
+        section: actionsLabel,
+        searchKey: foldForSearch(
+          `${t(language, "settings.title")} ajustes settings preferences`,
+        ),
+        onSelect: () => setShowSettings(true),
+      },
+      {
+        id: "action:refresh",
+        title: t(language, "library.refresh"),
+        icon: RefreshCw,
+        section: actionsLabel,
+        searchKey: foldForSearch(
+          `${t(language, "library.refresh")} indexar index scan refresh`,
+        ),
+        onSelect: () => {
+          refreshLibrary();
+        },
+      },
+      {
+        id: "action:lang",
+        title: language === "es" ? "Switch to English" : "Cambiar a Español",
+        section: actionsLabel,
+        searchKey: foldForSearch("language idioma english español es en"),
+        onSelect: () => setLanguage(language === "es" ? "en" : "es"),
+      },
+    ];
+
+    // Library item search: cap to a sensible number to keep the palette snappy.
+    const searchItems: CommandItem[] = items.slice(0, 4000).map((item) => {
+      const title = getLocalizedTitle(item, language);
+      const year = item.year ?? "";
+      const tag =
+        item.media_type === "movie"
+          ? language === "es"
+            ? "Película"
+            : "Movie"
+          : item.media_type === "tv"
+            ? language === "es"
+              ? "Serie"
+              : "TV Show"
+            : item.media_type === "documentary"
+              ? language === "es"
+                ? "Documental"
+                : "Documentary"
+              : "";
+      return {
+        id: `lib:${item.id}`,
+        title,
+        subtitle: [tag, year].filter(Boolean).join(" · "),
+        icon:
+          item.media_type === "movie"
+            ? Clapperboard
+            : item.media_type === "documentary"
+              ? FileText
+              : Tv2,
+        section: libraryLabel,
+        searchKey: foldForSearch(
+          `${title} ${item.tmdb_title_en ?? ""} ${item.title ?? ""} ${item.release_group ?? ""} ${item.filename}`,
+        ),
+        onSelect: () => handleCardSelect(item),
+      };
+    });
+
+    return [...navItems, ...actionItems, ...searchItems];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, language, visibleTabs, tabCounts]);
+
   const mediaContent = useEpisodeList ? (
     <EpisodeListView
       key={viewResetKey}
@@ -1349,29 +1612,149 @@ export default function Library({
       showFileSize={
         activeTab === "all" || (activeTab === "movie" && movieView === "files")
       }
+      disableQuickAction={
+        useGroupedMovies || (isSeriesTab && !useEpisodeList)
+      }
+    />
+  );
+
+  // Sidebar footer slot: language + theme + (web) avatar menu
+  const sidebarFooter = (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          padding: "0.18rem",
+          borderRadius: "var(--radius-full)",
+          border:
+            "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+          background:
+            "color-mix(in srgb, var(--color-surface) 90%, transparent)",
+        }}
+      >
+        {(["es", "en"] as const).map((value) => {
+          const active = language === value;
+          return (
+            <button
+              key={value}
+              onClick={() => setLanguage(value)}
+              style={{
+                padding: "4px 8px",
+                borderRadius: "var(--radius-full)",
+                border: "none",
+                background: active
+                  ? "color-mix(in srgb, var(--color-primary) 18%, transparent)"
+                  : "transparent",
+                color: active
+                  ? "var(--color-primary)"
+                  : "var(--color-text-muted)",
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {value.toUpperCase()}
+            </button>
+          );
+        })}
+      </div>
+      {isTauri() && <ThemeToggle />}
+      {headerSlot}
+    </>
+  );
+
+  const sidebarNode = (
+    <AppSidebar<TabId>
+      sections={sidebarSections}
+      activeTab={activeTab}
+      onTabChange={(tab) => {
+        // Clicking a library tab from inside Settings should close Settings
+        // and navigate. Otherwise the active state would never restore.
+        if (showSettings) setShowSettings(false);
+        switchTab(tab);
+      }}
+      onOpenSettings={() => setShowSettings(true)}
+      settingsLabel={t(language, "settings.title")}
+      settingsActive={showSettings}
+      footerSlot={sidebarFooter}
+      collapsedFooterSlot={headerSlot}
+    />
+  );
+
+  const statusBarNode = (
+    <AppStatusBar
+      connection={
+        ftpHost
+          ? {
+              state: ftpWriteOk ? "ok" : "warn",
+              label: `FTP · ${ftpHost}`,
+            }
+          : { state: "unknown", label: "FTP" }
+      }
+      indexing={{
+        isActive: isIndexing,
+        progress,
+        label: isIndexing
+          ? progress
+            ? t(language, "toast.enriching", {
+                current: progress.current,
+                total: progress.total,
+              })
+            : tmdbProgress
+              ? t(language, "toast.tmdbOf", {
+                  done: tmdbProgress.done,
+                  total: tmdbProgress.total,
+                })
+              : t(language, "toast.scanning")
+          : `${items.length} ${language === "es" ? "elementos" : "items"}`,
+      }}
+      transfers={{
+        downloads: tabCounts.downloads ?? 0,
+        uploads: tabCounts.uploads ?? 0,
+      }}
+      onJumpToDownloads={() => switchTab("downloads")}
+      onJumpToUploads={ftpWriteOk ? () => switchTab("uploads") : undefined}
+      onShowActivity={showDevLog ? () => setShowLog((v) => !v) : undefined}
+      activityCount={log.length}
     />
   );
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        position: "relative",
-      }}
-      className="app-shell-bg"
+    <AppShell
+      sidebar={sidebarNode}
+      statusBar={statusBarNode}
+      onOpenCommandPalette={() => setCommandPaletteOpen(true)}
     >
-      {/* Grid overlay */}
+      {/* Grid overlay (no-op since the background was simplified) */}
       <div className="grid-overlay" />
 
-      {/* Settings modal */}
-      {showSettings && (
-        <Settings language={language} onClose={() => setShowSettings(false)} />
-      )}
+      {/* Command palette */}
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        items={commandItems}
+        placeholder={
+          language === "es"
+            ? "Buscar en la librería y acciones…"
+            : "Search library and actions…"
+        }
+        emptyMessage={language === "es" ? "Sin resultados" : "No matches"}
+      />
 
-      {/* TOP NAVBAR */}
-      <nav
+      {/* Filter sheet (desktop) */}
+      <FilterSheet
+        open={filterSheetOpen}
+        onClose={() => setFilterSheetOpen(false)}
+        filters={filters}
+        items={filterableItems}
+        language={language}
+        onChange={setFilters}
+      />
+
+      {/* MOBILE TOP NAVBAR — only rendered on small screens; desktop uses the sidebar. */}
+      {isMobile && (<nav
         style={{
           display: "flex",
           position: "sticky",
@@ -1697,7 +2080,7 @@ export default function Library({
             />
           </button>
         </div>
-      </nav>
+      </nav>)}
 
       {/* BOTTOM TAB BAR — mobile only */}
       {isMobile && (
@@ -1868,6 +2251,7 @@ export default function Library({
                 language={language}
                 searchInputRef={searchInputRef}
                 onChange={setFilters}
+                hideHeader
               />
             </div>
           </div>
@@ -1882,8 +2266,89 @@ export default function Library({
           flexDirection: "column",
           position: "relative",
           zIndex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          overflow: "hidden",
         }}
       >
+        {/* Settings takes precedence over media views — opening it always
+            replaces the current content area. */}
+        {showSettings && (
+          <Settings
+            language={language}
+            onClose={() => setShowSettings(false)}
+          />
+        )}
+
+        {/* Detail / TV show page takes over the content area when an item or
+            show is selected. Sidebar + status bar stay visible; back button
+            returns to the library. tvShow takes priority over selected — they
+            shouldn't both be set, but if they were we'd want the show view. */}
+        {!showSettings && tvShow && (
+          <TVShowPage
+            show={tvShow}
+            allEpisodes={getTvEpisodes(tvShow)}
+            language={language}
+            onClose={() => {
+              setTvShow(null);
+              popDetailFromUrl();
+            }}
+            onDownload={startDownload}
+            onDownloadSeason={handleDownloadSeason}
+            downloadMap={downloadMap}
+            isDownloadPending={isDownloadPending}
+            downloadedBadgeMap={badgeMap}
+            watchlistedTmdbIds={watchlist.watchlistedTmdbIds}
+            onAddToWatchlist={watchlist.add}
+            onOpenWatchlist={() => setActiveTab("watchlist")}
+            onFixMatch={(episodes) => {
+              const [first] = episodes;
+              setFixMatchRequest({
+                itemIds: episodes.map((episode) => episode.id),
+                initialQuery: getLocalizedTitle(first ?? tvShow, language),
+                initialMediaType:
+                  tvShow.media_type === "documentary" ? "documentary" : "tv",
+              });
+            }}
+            sectionLabel={sectionTitle[activeTab]}
+          />
+        )}
+
+        {!showSettings && !tvShow && selected && (
+          <DetailPage
+            item={selected}
+            language={language}
+            relatedItems={
+              selected.media_type === "movie" ? getMovieVersions(selected) : []
+            }
+            groupedView={selectedGroupedView}
+            onClose={() => {
+              setSelected(null);
+              popDetailFromUrl();
+            }}
+            onOpenItem={(item) => {
+              setSelectedGroupedView(false);
+              setSelected(item);
+            }}
+            onUpdated={(id, patch) =>
+              setSelected((s) => (s && s.id === id ? { ...s, ...patch } : s))
+            }
+            downloadItem={downloadMap.get(selected.ftp_path)}
+            downloadMap={downloadMap}
+            downloadedBadgeMap={badgeMap}
+            isDownloaded={!!badgeMap[selected.id]?.downloaded}
+            onDownload={startDownload}
+            isDownloadPending={isDownloadPending}
+            onRetry={retryDownload}
+            watchlistedTmdbIds={watchlist.watchlistedTmdbIds}
+            onAddToWatchlist={watchlist.add}
+            onOpenWatchlist={() => setActiveTab("watchlist")}
+            sectionLabel={sectionTitle[activeTab]}
+          />
+        )}
+
+        {!showSettings && !selected && !tvShow && (
+          <>
         {/* Toolbar row */}
         <div
           style={{
@@ -2061,9 +2526,112 @@ export default function Library({
                     />
                   </button>
                 )}
-              {activeTab === "downloads" ||
-              activeTab === "watchlist" ||
-              activeTab === "uploads" ? null : selecting ? (
+              {/* Watchlist multi-select: same toolbar position + visual
+                  language as the Library tabs. Bulk action is Remove (not
+                  Fix Match) since each watchlist row is a tracked title. */}
+              {activeTab === "watchlist" ? (
+                watchlistSelecting ? (
+                  <>
+                    <span
+                      style={{ color: "var(--color-text-muted)", fontSize: 13 }}
+                    >
+                      {t(language, "library.selectedCount", {
+                        count: watchlistCheckedIds.size,
+                      })}
+                    </span>
+                    <button
+                      onClick={() =>
+                        setWatchlistCheckedIds(
+                          new Set(watchlist.items.map((item) => item.id)),
+                        )
+                      }
+                      disabled={watchlist.items.length === 0}
+                      style={{
+                        ...ghostBtn,
+                        opacity: watchlist.items.length === 0 ? 0.5 : 1,
+                        cursor:
+                          watchlist.items.length === 0 ? "default" : "pointer",
+                      }}
+                    >
+                      {t(language, "library.selectAll")}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const count = watchlistCheckedIds.size;
+                        if (count === 0) return;
+                        const msg =
+                          language === "es"
+                            ? `¿Quitar ${count} título${count === 1 ? "" : "s"} del seguimiento?`
+                            : `Remove ${count} title${count === 1 ? "" : "s"} from the watchlist?`;
+                        if (!confirm(msg)) return;
+                        for (const id of watchlistCheckedIds) {
+                          void watchlist.remove(id);
+                        }
+                        exitWatchlistSelect();
+                      }}
+                      disabled={watchlistCheckedIds.size === 0}
+                      style={{
+                        ...primaryBtn,
+                        background:
+                          watchlistCheckedIds.size === 0
+                            ? "color-mix(in srgb, var(--color-danger) 22%, transparent)"
+                            : "var(--color-danger)",
+                        opacity: watchlistCheckedIds.size === 0 ? 0.6 : 1,
+                        cursor:
+                          watchlistCheckedIds.size === 0 ? "default" : "pointer",
+                      }}
+                    >
+                      <Trash2
+                        size={14}
+                        strokeWidth={2.2}
+                        aria-hidden="true"
+                        style={{ display: "block", flexShrink: 0 }}
+                      />
+                      {language === "es" ? "Quitar" : "Remove"} (
+                      {watchlistCheckedIds.size})
+                    </button>
+                    <button onClick={exitWatchlistSelect} style={ghostBtn}>
+                      {t(language, "library.cancel")}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {/* Add lives to the left of Select so the primary
+                        action sits first in the action cluster, matching
+                        the user's expectation for tap order. */}
+                    <button
+                      onClick={() => setWatchlistShowAdd(true)}
+                      title={language === "es" ? "Agregar título" : "Add title"}
+                      style={{
+                        ...primaryBtn,
+                      }}
+                    >
+                      <Plus
+                        size={14}
+                        strokeWidth={2.4}
+                        aria-hidden="true"
+                        style={{ display: "block", flexShrink: 0 }}
+                      />
+                      {!isMobile && (language === "es" ? "Agregar" : "Add")}
+                    </button>
+                    <button
+                      onClick={() => setWatchlistSelecting(true)}
+                      title={t(language, "library.selectMultiple")}
+                      style={ghostBtn}
+                      disabled={watchlist.items.length === 0}
+                    >
+                      <CheckSquare
+                        size={14}
+                        strokeWidth={2.2}
+                        aria-hidden="true"
+                        style={{ display: "block", flexShrink: 0 }}
+                      />
+                      {!isMobile && t(language, "library.select")}
+                    </button>
+                  </>
+                )
+              ) : activeTab === "downloads" ||
+                activeTab === "uploads" ? null : selecting ? (
                 <>
                   <span
                     style={{ color: "var(--color-text-muted)", fontSize: 13 }}
@@ -2456,75 +3024,65 @@ export default function Library({
           )}
         </div>
 
+        {/* Desktop filter chip row — slim, lives above the grid. Hidden on
+            downloads/uploads/watchlist where filters don't apply. */}
+        {!isMobile &&
+          activeTab !== "downloads" &&
+          activeTab !== "uploads" &&
+          activeTab !== "watchlist" && (
+            <div
+              style={{
+                padding: "10px 1.5rem",
+                borderBottom:
+                  "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
+                flexShrink: 0,
+              }}
+            >
+              <FilterChipRow
+                filters={filters}
+                items={filterableItems}
+                language={language}
+                onChange={setFilters}
+                onOpenFilters={() => setFilterSheetOpen(true)}
+                searchInputRef={searchInputRef}
+              />
+            </div>
+          )}
+
         <div
           className={isMobile ? "mobile-content-area" : undefined}
           style={{ flex: 1, display: "flex", minHeight: 0 }}
         >
-          {activeTab !== "downloads" &&
-            activeTab !== "uploads" &&
-            !isMobile && (
-              <div
-                style={{
-                  width: 320,
-                  flexShrink: 0,
-                  padding: "1.5rem 0 1.5rem 1.5rem",
-                  borderRight:
-                    "1px solid color-mix(in srgb, var(--color-border) 60%, transparent)",
-                }}
-              >
-                <div
-                  style={{
-                    height: "100%",
-                    overflowY: "auto",
-                    paddingRight: "1rem",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 12,
-                  }}
-                >
-                  <FilterBar
-                    filters={filters}
-                    items={filterableItems}
-                    language={language}
-                    searchInputRef={searchInputRef}
-                    onChange={setFilters}
-                  />
-                </div>
-              </div>
-            )}
-
           {/* Scrollable content grid */}
           <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
             {activeTab === "uploads" ? (
-              <div style={{ height: "100%", overflowY: "auto" }}>
-                <UploadsTab
-                  uploads={uploads}
-                  language={language}
-                  onCancel={cancelUpload}
-                  onRetry={retryUpload}
-                  onDelete={deleteUpload}
-                  onClearCompleted={clearCompletedUploads}
-                />
-              </div>
+              <UploadsTab
+                uploads={uploads}
+                language={language}
+                onCancel={cancelUpload}
+                onRetry={retryUpload}
+                onDelete={deleteUpload}
+                onClearCompleted={clearCompletedUploads}
+              />
             ) : activeTab === "downloads" ? (
-              <div
-                style={{ height: "100%", overflowY: "auto", padding: "1.5rem" }}
-              >
-                <DownloadsTab
-                  language={language}
-                  downloads={downloads}
-                  cancelDownload={cancelDownload}
-                  clearCompleted={clearCompleted}
-                  retryDownload={retryDownload}
-                  openDownloadFolder={openDownloadFolder}
-                  deleteDownload={deleteDownload}
-                />
-              </div>
+              <DownloadsTab
+                language={language}
+                downloads={downloads}
+                cancelDownload={cancelDownload}
+                clearCompleted={clearCompleted}
+                retryDownload={retryDownload}
+                openDownloadFolder={openDownloadFolder}
+                deleteDownload={deleteDownload}
+              />
             ) : activeTab === "watchlist" ? (
               <WatchlistTab
                 watchlist={watchlist}
                 language={language}
                 onNavigateToItem={handleNavigateFromWatchlist}
+                selecting={watchlistSelecting}
+                checkedIds={watchlistCheckedIds}
+                onToggleCheck={toggleWatchlistCheck}
+                onOpenAdd={() => setWatchlistShowAdd(true)}
               />
             ) : (
               <>
@@ -2533,34 +3091,133 @@ export default function Library({
                 {filtered.length === 0 && !progress && (
                   <div
                     style={{
-                      textAlign: "center",
-                      padding: "60px 0",
-                      color: "var(--color-text-muted)",
                       position: "absolute",
                       inset: 0,
                       display: "flex",
+                      flexDirection: "column",
                       alignItems: "center",
                       justifyContent: "center",
-                      pointerEvents: "none",
+                      gap: 16,
+                      padding: "40px 24px",
+                      color: "var(--color-text-muted)",
+                      textAlign: "center",
                     }}
                   >
-                    {items.length === 0
-                      ? t(language, "library.noMediaStarting")
-                      : activeTab !== "all"
-                        ? t(language, "library.noCategory", {
-                            category: t(
-                              language,
-                              (TABS.find((tab) => tab.id === activeTab)
-                                ?.labelKey ?? "nav.all") as never,
-                            ).toLowerCase(),
-                          })
-                        : t(language, "library.noResultsFilters")}
+                    <div
+                      style={{
+                        width: 64,
+                        height: 64,
+                        borderRadius: 999,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background:
+                          "color-mix(in srgb, var(--color-primary) 12%, transparent)",
+                        color: "var(--color-primary)",
+                      }}
+                    >
+                      <LayoutGrid
+                        size={26}
+                        strokeWidth={1.8}
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 15,
+                        fontWeight: 600,
+                        color: "var(--color-text)",
+                        maxWidth: 420,
+                      }}
+                    >
+                      {items.length === 0
+                        ? t(language, "library.noMediaStarting")
+                        : activeTab !== "all"
+                          ? t(language, "library.noCategory", {
+                              category: t(
+                                language,
+                                (TABS.find((tab) => tab.id === activeTab)
+                                  ?.labelKey ?? "nav.all") as never,
+                              ).toLowerCase(),
+                            })
+                          : t(language, "library.noResultsFilters")}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                      {items.length === 0 ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={refreshLibrary}
+                            style={{
+                              padding: "8px 16px",
+                              borderRadius: 999,
+                              border: "none",
+                              background: "var(--color-primary)",
+                              color: "#fff",
+                              fontSize: 13,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            <RefreshCw size={14} strokeWidth={2.2} aria-hidden="true" />
+                            {t(language, "library.refresh")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowSettings(true)}
+                            style={{
+                              padding: "8px 16px",
+                              borderRadius: 999,
+                              border:
+                                "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
+                              background: "transparent",
+                              color: "var(--color-text)",
+                              fontSize: 13,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            <SettingsIcon size={14} strokeWidth={2.0} aria-hidden="true" />
+                            {t(language, "settings.title")}
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFilters(defaultFilters());
+                            setPage(1);
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 999,
+                            border:
+                              "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
+                            background: "transparent",
+                            color: "var(--color-text)",
+                            fontSize: 13,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {t(language, "filter.clear")}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </>
             )}
           </div>
         </div>
+          </>
+        )}
       </div>
 
       <IndexStatus
@@ -2636,7 +3293,9 @@ export default function Library({
         />
       )}
 
-      {activeTab !== "downloads" && filtered.length > 0 && pageCount > 1 && (
+      {!selected && !tvShow && !showSettings &&
+        activeTab !== "downloads" && activeTab !== "watchlist" &&
+        activeTab !== "uploads" && filtered.length > 0 && pageCount > 1 && (
         <div
           style={{
             position: "fixed",
@@ -2712,64 +3371,8 @@ export default function Library({
         </div>
       )}
 
-      {selected && (
-        <DetailPanel
-          item={selected}
-          language={language}
-          relatedItems={
-            selected.media_type === "movie" ? getMovieVersions(selected) : []
-          }
-          groupedView={selectedGroupedView}
-          onClose={() => setSelected(null)}
-          onOpenItem={(item) => {
-            setSelectedGroupedView(false);
-            setSelected(item);
-          }}
-          onUpdated={(id, patch) =>
-            setSelected((s) => (s && s.id === id ? { ...s, ...patch } : s))
-          }
-          downloadItem={
-            selected ? downloadMap.get(selected.ftp_path) : undefined
-          }
-          downloadMap={downloadMap}
-          downloadedBadgeMap={badgeMap}
-          isDownloaded={selected ? !!badgeMap[selected.id]?.downloaded : false}
-          onDownload={startDownload}
-          isDownloadPending={isDownloadPending}
-          onRetry={retryDownload}
-          onDevCheckInLibrary={recheckBadgeForItem}
-          watchlistedTmdbIds={watchlist.watchlistedTmdbIds}
-          onAddToWatchlist={watchlist.add}
-          onOpenWatchlist={() => setActiveTab("watchlist")}
-        />
-      )}
-
-      {tvShow && (
-        <TVShowPanel
-          show={tvShow}
-          allEpisodes={getTvEpisodes(tvShow)}
-          language={language}
-          onClose={() => setTvShow(null)}
-          onDownload={startDownload}
-          onDownloadSeason={handleDownloadSeason}
-          downloadMap={downloadMap}
-          isDownloadPending={isDownloadPending}
-          downloadedBadgeMap={badgeMap}
-          onDevCheckInLibrary={recheckBadgeForItem}
-          watchlistedTmdbIds={watchlist.watchlistedTmdbIds}
-          onAddToWatchlist={watchlist.add}
-          onOpenWatchlist={() => setActiveTab("watchlist")}
-          onFixMatch={(episodes) => {
-            const [first] = episodes;
-            setFixMatchRequest({
-              itemIds: episodes.map((episode) => episode.id),
-              initialQuery: getLocalizedTitle(first ?? tvShow, language),
-              initialMediaType:
-                tvShow.media_type === "documentary" ? "documentary" : "tv",
-            });
-          }}
-        />
-      )}
+      {/* DetailPanel + TVShowPanel renders moved inline into MAIN CONTENT
+          as DetailPage + TVShowPage. */}
 
       {fixMatchRequest && (
         <FixMatchModal
@@ -2795,8 +3398,22 @@ export default function Library({
         />
       )}
 
+      {watchlistShowAdd && (
+        <WatchlistAddModal
+          language={language}
+          watchlistedTmdbIds={watchlist.watchlistedTmdbIds}
+          onAdd={watchlist.add}
+          onClose={() => setWatchlistShowAdd(false)}
+        />
+      )}
+
       {showDevLog && showLog && (
-        <ActivityLog language={language} entries={log} onClear={clearLog} />
+        <ActivityLog
+          language={language}
+          entries={log}
+          onClear={clearLog}
+          onClose={() => setShowLog(false)}
+        />
       )}
 
       {quitDialogVisible &&
@@ -2886,6 +3503,6 @@ export default function Library({
           </div>,
           document.body,
         )}
-    </div>
+    </AppShell>
   );
 }

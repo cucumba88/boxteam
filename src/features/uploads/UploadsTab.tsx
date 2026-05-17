@@ -62,87 +62,107 @@ export default function UploadsTab({
   return (
     <div
       style={{
+        height: "100%",
+        overflowY: "auto",
         display: "flex",
         flexDirection: "column",
-        gap: 16,
-        padding: "20px",
-        maxWidth: 900,
-        margin: "0 auto",
-        width: "100%",
-        boxSizing: "border-box",
       }}
     >
-      {/* Header */}
+      {/* Toolbar — chip-row pattern shared with Watchlist / Downloads.
+          Library's outer toolbar already shows "Subidas N titles", so we
+          skip a bespoke page header here. */}
       <div
         style={{
+          padding: "10px 1.5rem",
+          width: "100%",
           display: "flex",
-          alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
+          flexDirection: "column",
+          gap: 14,
+          flexShrink: 0,
+          borderBottom:
+            "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
         }}
       >
-        <h2
-          style={{
-            margin: 0,
-            fontSize: 18,
-            fontWeight: 700,
-            color: "var(--color-text)",
-            flex: 1,
-          }}
-        >
-          Subidas
-        </h2>
-
-        {/* Write permission warning */}
-        {!checkingWrite && writeOk === false && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              background: "rgba(224,85,85,0.1)",
-              border: "1px solid rgba(224,85,85,0.3)",
-              borderRadius: "var(--radius-full)",
-              padding: "5px 12px",
-              fontSize: 12,
-              color: "var(--color-danger)",
-            }}
-          >
-            <AlertTriangle size={13} />
-            Sin permiso de escritura en el FTP
-          </div>
-        )}
-
-        <button
-          disabled={!checkingWrite && writeOk === false}
-          onClick={() => setShowModal(true)}
+        <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 7,
-            background: "var(--color-primary)",
-            border: "none",
-            borderRadius: "var(--radius)",
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 600,
-            padding: "9px 18px",
-            cursor:
-              !checkingWrite && writeOk === false ? "not-allowed" : "pointer",
-            opacity: !checkingWrite && writeOk === false ? 0.5 : 1,
-            transition: "opacity 0.15s ease",
+            gap: 8,
+            flexWrap: "wrap",
+            width: "100%",
           }}
         >
-          <Upload size={14} />
-          Subir archivos
-        </button>
+          {!checkingWrite && writeOk === false && (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                background: "color-mix(in srgb, var(--color-danger) 12%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--color-danger) 36%, transparent)",
+                borderRadius: 999,
+                padding: "5px 12px",
+                fontSize: 12,
+                color: "var(--color-danger)",
+                fontWeight: 600,
+              }}
+            >
+              <AlertTriangle size={13} aria-hidden="true" />
+              Sin permiso de escritura en el FTP
+            </div>
+          )}
+
+          <div style={{ flex: 1 }} />
+
+          <button
+            disabled={!checkingWrite && writeOk === false}
+            onClick={() => setShowModal(true)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              height: 34,
+              padding: "0 12px",
+              borderRadius: "var(--radius)",
+              border: "none",
+              background: "var(--color-primary)",
+              color: "#fff",
+              fontSize: 12.5,
+              fontWeight: 700,
+              cursor:
+                !checkingWrite && writeOk === false ? "not-allowed" : "pointer",
+              opacity: !checkingWrite && writeOk === false ? 0.5 : 1,
+              fontFamily: "inherit",
+              boxShadow:
+                "0 4px 14px color-mix(in srgb, var(--color-primary) 36%, transparent)",
+            }}
+          >
+            <Upload size={13} strokeWidth={2.5} aria-hidden="true" />
+            Subir archivos
+          </button>
+        </div>
       </div>
 
-      {/* Stats */}
+      {/* Content body */}
+      <div
+        style={{
+          padding: "16px 1.5rem calc(80px + env(safe-area-inset-bottom, 0px))",
+          maxWidth: 1100,
+          margin: "0 auto",
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+          boxSizing: "border-box",
+        }}
+      >
+
+      {/* Stats — auto-fit so they wrap nicely on mobile instead of being
+          crammed into a hardcoded 4-column grid. */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
           gap: 10,
         }}
       >
@@ -263,6 +283,7 @@ export default function UploadsTab({
           onQueued={() => setShowModal(false)}
         />
       )}
+      </div>{/* /content body */}
     </div>
   );
 }

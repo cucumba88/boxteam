@@ -213,12 +213,18 @@ export default function FilterBar({
   language,
   searchInputRef,
   onChange,
+  hideHeader = false,
+  hideSearch = false,
 }: {
   filters: Filters;
   items: MediaItem[];
   language: AppLanguage;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
   onChange: (f: Filters) => void;
+  /** When the host already shows a "Filters" title, suppress the internal one. */
+  hideHeader?: boolean;
+  /** When the host renders its own search input, suppress the internal one. */
+  hideSearch?: boolean;
 }) {
   const resolutionCounts = countBy(items, (item) =>
     normalizeResolution(item.resolution),
@@ -313,6 +319,7 @@ export default function FilterBar({
       }}
     >
       {/* Header */}
+      {!hideHeader && (
       <div
         style={{
           display: "flex",
@@ -377,8 +384,10 @@ export default function FilterBar({
           {t(language, "filter.clear")}
         </button>
       </div>
+      )}
 
       {/* Search */}
+      {!hideSearch && (
       <div
         style={{
           display: "flex",
@@ -427,7 +436,9 @@ export default function FilterBar({
           </button>
         )}
       </div>
+      )}
 
+      {!hideHeader && !hideSearch && (
       <div
         style={{
           height: 1,
@@ -436,6 +447,7 @@ export default function FilterBar({
           margin: "2px 0",
         }}
       />
+      )}
 
       {/* Sort */}
       <Section label={t(language, "filter.sort")}>

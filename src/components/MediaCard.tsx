@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { Check, Clapperboard, Tv2 } from "lucide-react";
+import { Check, Clapperboard, Download, Tv2 } from "lucide-react";
 import { MediaItem } from "../hooks/useIndexing";
 import type { DownloadItem } from "../hooks/useDownloads";
 import DownloadRing from "./DownloadRing";
@@ -30,6 +30,12 @@ interface Props {
   watchlistedTmdbIds?: Set<number>;
   onAddToWatchlist?: (params: AddWatchlistParams) => Promise<void>;
   onOpenWatchlist?: () => void;
+  /**
+   * When true, suppress the hover "Download" overlay. The card represents a
+   * grouped title (multiple file versions); downloading from the poster is
+   * ambiguous — versions are selected in the detail page instead.
+   */
+  disableQuickAction?: boolean;
 }
 
 const RELEASE_TYPE_COLORS: Record<string, string> = {
@@ -124,11 +130,12 @@ function MediaCard({
   downloadItem,
   hideEpisodeBadge = false,
   showFileSize = false,
-  onDownload: _onDownload,
+  onDownload,
   onSelect,
   watchlistedTmdbIds,
   onAddToWatchlist,
   onOpenWatchlist,
+  disableQuickAction = false,
 }: Props) {
   const [imgLoaded, setImgLoaded] = useState(false);
   const isTV =
@@ -349,72 +356,78 @@ function MediaCard({
             </div>
           )}
 
-        {/* Resolution + HDR badges bottom-right */}
-        <div
-          style={{
-            position: "absolute",
-            bottom: "0.4rem",
-            right: "0.4rem",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-end",
-            gap: "0.2rem",
-            zIndex: 4,
-            maxWidth: "calc(42% - 0.4rem)",
-          }}
-        >
-          {item.hdr && (
-            <OverlayBadge tone="violet" title={item.hdr}>
-              {item.hdr}
+        {/* Premium HDR badge — only show HDR10+ and Dolby Vision, the formats
+            that actually warrant attention. Plain HDR/HDR10 is the default
+            assumption for modern releases and adds visual noise. */}
+        {item.hdr && (item.hdr === "HDR10+" || item.hdr === "DV") && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: "0.4rem",
+              right: "0.4rem",
+              zIndex: 4,
+            }}
+          >
+            <OverlayBadge
+              tone="violet"
+              title={item.hdr === "DV" ? "Dolby Vision" : item.hdr}
+            >
+              {item.hdr === "DV" ? "DV" : "HDR10+"}
             </OverlayBadge>
-          )}
-          {item.resolution && (
-            <OverlayBadge title={item.resolution}>
-              {item.resolution}
-            </OverlayBadge>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Language + release type — stacked bottom-left */}
-        {(langs.length > 0 || item.release_type) && (
+        {/* Quality chip bottom-left: combines release type + resolution into
+            a single readable pill ("WEB-DL · 1080p"). Halves badge count on
+            most cards. Language drops down into the info row below. */}
+        {(item.release_type || item.resolution) && (
           <div
             style={{
               position: "absolute",
               bottom: "0.4rem",
               left: "0.4rem",
               zIndex: 4,
-              maxWidth: "calc(58% - 0.4rem)",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "flex-start",
-              gap: "0.2rem",
+              maxWidth: "calc(70% - 0.4rem)",
             }}
           >
-            {langs.length > 0 && (
-              <OverlayBadge
-                tone="neutral"
-                title={langs.join(", ")}
-                style={{
-                  background: "color-mix(in srgb, black 62%, transparent)",
-                  letterSpacing: "0.06em",
-                }}
-              >
-                {langs.join(" · ")}
-              </OverlayBadge>
-            )}
-            {item.release_type && (
-              <OverlayBadge
-                tone="release"
-                releaseColor={
-                  RELEASE_TYPE_COLORS[item.release_type] || "#1e293b"
-                }
-                title={item.release_type}
-              >
-                {item.release_type}
-              </OverlayBadge>
-            )}
+            <OverlayBadge
+              tone={item.release_type ? "release" : "neutral"}
+              releaseColor={
+                item.release_type
+                  ? RELEASE_TYPE_COLORS[item.release_type] || "#1e293b"
+                  : undefined
+              }
+              title={[item.release_type, item.resolution]
+                .filter(Boolean)
+                .join(" · ")}
+            >
+              {[item.release_type, item.resolution].filter(Boolean).join(" · ")}
+            </OverlayBadge>
           </div>
         )}
+
+        {/* Hover quick-action: download button. Suppressed in grouped views
+            (movies grouped, TV grouped) where the poster represents multiple
+            file versions and a single-click download is ambiguous. */}
+        {!disableQuickAction &&
+          onDownload &&
+          !badges?.downloaded &&
+          (!downloadItem ||
+            downloadItem.status === "error" ||
+            downloadItem.status === "cancelled") && (
+            <button
+              type="button"
+              className="media-card-quick-action"
+              aria-label="Download"
+              title="Download"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDownload(item);
+              }}
+            >
+              <Download size={18} strokeWidth={2.2} aria-hidden="true" />
+            </button>
+          )}
 
         {/* Download ring overlay */}
         <DownloadRing downloadItem={downloadItem} />
@@ -443,30 +456,48 @@ function MediaCard({
         >
           {title}
         </div>
-        <div
-          style={{
-            fontSize: "0.7rem",
-            color: "var(--color-text-muted)",
-            display: "flex",
-            alignItems: "center",
-            gap: "0.35rem",
-          }}
-        >
-          {year && <span>{year}</span>}
-          {item.tmdb_rating != null && item.tmdb_rating > 0 && (
-            <>
-              <span style={{ opacity: 0.4 }}>·</span>
-              <span>{item.tmdb_rating.toFixed(1)}</span>
-            </>
-          )}
-
-          {showFileSize && item.size_bytes != null && item.size_bytes > 0 && (
-            <>
-              <span style={{ opacity: 0.4 }}>·</span>
-              <span>{formatBytes(item.size_bytes)}</span>
-            </>
-          )}
-        </div>
+        {/* Meta row — fixed-height single line that truncates with an
+            ellipsis instead of wrapping awkwardly mid-value. Show the most
+            important facts first (year, rating, size), then language. Each
+            value is nowrap so individual chunks like "17.88 GB" never break
+            across lines. Hover title gives the full content. */}
+        {(() => {
+          const parts: string[] = [];
+          if (year) parts.push(String(year));
+          if (item.tmdb_rating != null && item.tmdb_rating > 0) {
+            parts.push(item.tmdb_rating.toFixed(1));
+          }
+          if (showFileSize && item.size_bytes != null && item.size_bytes > 0) {
+            parts.push(formatBytes(item.size_bytes));
+          }
+          if (langs.length > 0) {
+            parts.push(langs.map((l) => l.toUpperCase()).join("/"));
+          }
+          if (parts.length === 0) return null;
+          return (
+            <div
+              title={parts.join(" · ")}
+              style={{
+                fontSize: "0.7rem",
+                color: "var(--color-text-muted)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                lineHeight: 1.4,
+                minHeight: "1em",
+              }}
+            >
+              {parts.map((p, i) => (
+                <span key={i}>
+                  {i > 0 && (
+                    <span style={{ opacity: 0.4, margin: "0 0.35rem" }}>·</span>
+                  )}
+                  {p}
+                </span>
+              ))}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

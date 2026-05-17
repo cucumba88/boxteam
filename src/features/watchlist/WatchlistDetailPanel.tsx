@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarClock, Check, ExternalLink, Server } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarClock,
+  Check,
+  ExternalLink,
+  Server,
+} from "lucide-react";
 import type { TmdbSeason, WatchlistCoverageItem, WatchlistItem } from "./types";
 import type { AppLanguage } from "../../utils/mediaLanguage";
 import { t } from "../../utils/i18n";
@@ -133,246 +139,355 @@ export default function WatchlistDetailPanel({
   }, [onClose]);
 
   return (
-    <>
-      {/* Backdrop */}
+    <div
+      style={{
+        position: "relative",
+        height: "100%",
+        width: "100%",
+        background: "var(--color-bg)",
+        overflowY: "auto",
+        overflowX: "hidden",
+        animation: "detail-page-in 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
+      }}
+    >
+      {/* Atmospheric blurred poster — same visual language as DetailPage so
+          the page reads as part of the same family. */}
+      {poster && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 460,
+            overflow: "hidden",
+            pointerEvents: "none",
+          }}
+        >
+          <img
+            src={poster}
+            alt=""
+            decoding="async"
+            loading="eager"
+            onLoad={(e) => {
+              (e.currentTarget as HTMLImageElement).style.opacity = "0.35";
+            }}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center top",
+              filter: "blur(40px) saturate(140%)",
+              transform: "scale(1.15)",
+              opacity: 0,
+              transition: "opacity 0.45s ease-out",
+            }}
+          />
+        </div>
+      )}
       <div
-        onClick={onClose}
+        aria-hidden="true"
         style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.4)",
-          zIndex: 500,
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 460,
+          background:
+            "linear-gradient(180deg, color-mix(in srgb, var(--color-bg) 30%, transparent) 0%, color-mix(in srgb, var(--color-bg) 80%, transparent) 60%, var(--color-bg) 100%)",
+          pointerEvents: "none",
         }}
       />
 
-      {/* Side panel (desktop) or bottom sheet (mobile) */}
+      {/* Sticky back bar — matches DetailPage / Settings pattern. */}
       <div
-        style={
-          isMobile
-            ? {
-                position: "fixed",
-                left: 0,
-                right: 0,
-                top: "calc(env(safe-area-inset-top, 0px) + 68px)",
-                bottom: "calc(64px + env(safe-area-inset-bottom, 0px))",
-                background: "var(--color-surface)",
-                borderTop: "1px solid var(--color-border)",
-                borderRadius: "var(--radius-lg) var(--radius-lg) 0 0",
-                zIndex: 501,
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-              }
-            : {
-                position: "fixed",
-                top: 68,
-                right: 0,
-                bottom: 0,
-                width: 360,
-                background: "var(--color-surface)",
-                borderLeft: "1px solid var(--color-border)",
-                zIndex: 501,
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-              }
-        }
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 24px",
+          background: "color-mix(in srgb, var(--color-bg) 92%, transparent)",
+          backdropFilter: "blur(14px) saturate(140%)",
+          WebkitBackdropFilter: "blur(14px) saturate(140%)",
+          borderBottom:
+            "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
+          flexShrink: 0,
+        }}
       >
-        {/* Header */}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={language === "es" ? "Volver" : "Back"}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 12px 6px 10px",
+            borderRadius: 999,
+            border:
+              "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+            background:
+              "color-mix(in srgb, var(--color-surface) 85%, transparent)",
+            color: "var(--color-text)",
+            fontSize: 12.5,
+            fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          <ArrowLeft size={14} strokeWidth={2.2} aria-hidden="true" />
+          <span>{language === "es" ? "Atrás" : "Back"}</span>
+        </button>
         <div
           style={{
-            padding: "14px 16px",
-            borderBottom: "1px solid var(--color-border)",
             display: "flex",
             alignItems: "center",
-            justifyContent: "space-between",
-            flexShrink: 0,
+            gap: 8,
+            color: "var(--color-text-muted)",
+            fontSize: 12.5,
+            minWidth: 0,
+            overflow: "hidden",
           }}
         >
-          {isMobile && (
-            <div
-              style={{
-                position: "absolute",
-                top: 8,
-                left: "50%",
-                transform: "translateX(-50%)",
-                width: 36,
-                height: 4,
-                borderRadius: 2,
-                background: "var(--color-border)",
-              }}
-            />
-          )}
+          <span>{language === "es" ? "Seguimiento" : "Watchlist"}</span>
+          <span style={{ opacity: 0.5 }}>/</span>
           <span
+            title={displayTitle}
             style={{
-              fontWeight: 600,
               color: "var(--color-text)",
-              fontSize: 15,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              minWidth: 0,
             }}
           >
-            {t(language, "watchlist.detail")}
+            {displayTitle}
           </span>
-          <button
-            onClick={onClose}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--color-text-muted)",
-              fontSize: 20,
-              cursor: "pointer",
-              lineHeight: 1,
-            }}
-          >
-            ×
-          </button>
         </div>
+      </div>
 
-        {/* Scrollable content */}
+      {/* Content container — the outer wrapper handles scrolling now, so the
+          backdrop + gradient scroll out of view naturally instead of staying
+          painted on top of the rest of the page. */}
+      <div style={{ position: "relative", zIndex: 1 }}>
         <div
           style={{
-            flex: 1,
-            overflowY: "auto",
-            padding: 16,
+            maxWidth: 1100,
+            margin: "0 auto",
+            // Mobile bottom padding clears the fixed bottom tab bar (~64px).
+            padding: isMobile
+              ? "16px 16px calc(80px + env(safe-area-inset-bottom, 0px))"
+              : "24px 32px 40px",
             display: "flex",
             flexDirection: "column",
-            gap: 16,
+            gap: 20,
           }}
         >
-          {/* Poster + title */}
-          <div style={{ display: "flex", gap: 14 }}>
-            {poster ? (
-              <img
-                src={poster}
-                alt={displayTitle}
+          {/* Hero — DetailPage-style: big poster + large title + meta row +
+              status / library-presence chips. Replaces the old 90px sidebar
+              proportions so the page actually looks like a page. */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isMobile
+                ? "1fr"
+                : "minmax(180px, 220px) minmax(0, 1fr)",
+              gap: isMobile ? 16 : 28,
+              alignItems: "flex-end",
+              padding: "12px 0 4px",
+            }}
+          >
+            <div
+              style={{
+                aspectRatio: "2 / 3",
+                borderRadius: 14,
+                overflow: "hidden",
+                background: "var(--color-surface-2)",
+                border:
+                  "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+                boxShadow:
+                  "0 24px 48px color-mix(in srgb, black 50%, transparent)",
+                maxWidth: isMobile ? 180 : "none",
+              }}
+            >
+              {poster ? (
+                <img
+                  src={poster}
+                  alt={displayTitle}
+                  loading="eager"
+                  decoding="async"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    display: "block",
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--color-text-muted)",
+                    fontSize: 36,
+                  }}
+                  aria-hidden="true"
+                >
+                  ★
+                </div>
+              )}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                minWidth: 0,
+              }}
+            >
+              <h1
                 style={{
-                  width: 90,
-                  borderRadius: "var(--radius)",
-                  flexShrink: 0,
-                }}
-              />
-            ) : (
-              <div
-                style={{
-                  width: 90,
-                  height: 135,
-                  background: "var(--color-surface-2)",
-                  borderRadius: "var(--radius)",
-                  flexShrink: 0,
-                }}
-              />
-            )}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontWeight: 700,
+                  margin: 0,
+                  fontSize: "clamp(24px, 3vw, 38px)",
+                  fontWeight: 800,
+                  letterSpacing: "-0.02em",
+                  lineHeight: 1.1,
                   color: "var(--color-text)",
-                  fontSize: 15,
-                  lineHeight: 1.3,
                 }}
               >
                 {displayTitle}
+              </h1>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  color: "var(--color-text-muted)",
+                  fontSize: 13.5,
+                }}
+              >
+                {item.year && (
+                  <span style={{ fontWeight: 600, color: "var(--color-text)" }}>
+                    {item.year}
+                  </span>
+                )}
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    padding: "3px 10px",
+                    borderRadius: 999,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                    background:
+                      item.tmdb_type === "tv"
+                        ? "color-mix(in srgb, var(--color-teal) 18%, transparent)"
+                        : "color-mix(in srgb, var(--color-primary) 18%, transparent)",
+                    color:
+                      item.tmdb_type === "tv"
+                        ? "var(--color-teal)"
+                        : "var(--color-primary)",
+                    border: `1px solid color-mix(in srgb, ${
+                      item.tmdb_type === "tv"
+                        ? "var(--color-teal)"
+                        : "var(--color-primary)"
+                    } 36%, transparent)`,
+                  }}
+                >
+                  {item.tmdb_type === "tv" ? "TV" : "Película"}
+                </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    padding: "3px 10px",
+                    borderRadius: 999,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    background:
+                      item.library_status === "available"
+                        ? "color-mix(in srgb, var(--color-success) 18%, transparent)"
+                        : "color-mix(in srgb, var(--color-surface-2) 80%, transparent)",
+                    color:
+                      item.library_status === "available"
+                        ? "var(--color-success)"
+                        : "var(--color-text-muted)",
+                    border: `1px solid color-mix(in srgb, ${
+                      item.library_status === "available"
+                        ? "var(--color-success)"
+                        : "var(--color-border)"
+                    } 40%, transparent)`,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 999,
+                      background:
+                        item.library_status === "available"
+                          ? "var(--color-success)"
+                          : "var(--color-text-muted)",
+                    }}
+                  />
+                  {item.library_status === "available"
+                    ? t(language, "watchlist.available")
+                    : t(language, "watchlist.pending")}
+                </span>
+                {item.library_count > 0 && (
+                  <span>
+                    · {item.library_count}{" "}
+                    {t(language, "watchlist.filesInLibrary")}
+                  </span>
+                )}
               </div>
-              {item.year && (
-                <div
+
+              {displayOverview && (
+                <p
                   style={{
-                    color: "var(--color-text-muted)",
-                    fontSize: 13,
-                    marginTop: 4,
+                    margin: 0,
+                    fontSize: 14,
+                    color: "var(--color-text)",
+                    lineHeight: 1.6,
+                    maxWidth: "70ch",
                   }}
                 >
-                  {item.year}
-                </div>
-              )}
-              {/* Type */}
-              <span
-                style={{
-                  display: "inline-block",
-                  marginTop: 6,
-                  background:
-                    item.tmdb_type === "tv"
-                      ? "var(--color-teal)"
-                      : "var(--color-primary)",
-                  color: "#fff",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  borderRadius: "var(--radius-full)",
-                  padding: "2px 8px",
-                  textTransform: "uppercase",
-                }}
-              >
-                {item.tmdb_type === "tv" ? "TV" : "Película"}
-              </span>
-              {/* Status */}
-              <span
-                style={{
-                  display: "inline-block",
-                  marginTop: 6,
-                  marginLeft: 6,
-                  background:
-                    item.library_status === "available"
-                      ? "var(--color-success)"
-                      : "var(--color-surface-2)",
-                  color:
-                    item.library_status === "available"
-                      ? "#fff"
-                      : "var(--color-text-muted)",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  borderRadius: "var(--radius-full)",
-                  padding: "2px 8px",
-                  textTransform: "uppercase",
-                }}
-              >
-                {item.library_status === "available"
-                  ? t(language, "watchlist.available")
-                  : t(language, "watchlist.pending")}
-              </span>
-              {item.library_count > 0 && (
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "var(--color-text-muted)",
-                    marginTop: 4,
-                  }}
-                >
-                  {item.library_count} {t(language, "watchlist.filesInLibrary")}
-                </div>
+                  {displayOverview}
+                </p>
               )}
             </div>
           </div>
 
-          {/* Overview */}
-          {displayOverview && (
-            <p
-              style={{
-                margin: 0,
-                fontSize: 13,
-                color: "var(--color-text-muted)",
-                lineHeight: 1.6,
-              }}
-            >
-              {displayOverview}
-            </p>
-          )}
-
           {/* Movie: list of available versions with download actions */}
           {item.tmdb_type === "movie" && coverage.length > 0 && (
-            <div>
-              <label
-                style={{
-                  fontSize: 12,
-                  color: "var(--color-text-muted)",
-                  fontWeight: 500,
-                }}
-              >
-                {language === "es" ? "Archivos disponibles" : "Available files"}
-              </label>
+            <Section
+              title={
+                language === "es" ? "Archivos disponibles" : "Available files"
+              }
+              subtitle={`${coverage.length} ${coverage.length === 1 ? "file" : "files"}`}
+            >
               <div
                 style={{
-                  border: "1px solid var(--color-border)",
-                  borderRadius: "var(--radius)",
+                  borderRadius: 12,
+                  border:
+                    "1px solid color-mix(in srgb, var(--color-border) 55%, transparent)",
+                  background:
+                    "color-mix(in srgb, var(--color-surface) 90%, transparent)",
                   overflow: "hidden",
-                  marginTop: 6,
                 }}
               >
                 {sortByResolution(coverage).map((c, i) => {
@@ -484,120 +599,188 @@ export default function WatchlistDetailPanel({
                   );
                 })}
               </div>
-            </div>
+            </Section>
           )}
 
-          {/* TV scope */}
-          {item.tmdb_type === "tv" && (
-            <div>
-              <label
-                style={{
-                  fontSize: 12,
-                  color: "var(--color-text-muted)",
-                  fontWeight: 500,
-                }}
-              >
-                {t(language, "watchlist.coverage")}
-              </label>
-              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                {(["all", "latest"] as const).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setScope(s)}
+          {/* Unified configuration card — TV scope (TV only), auto-download
+              toggle, quality profile picker, and the contextual save button.
+              Replaces the old loose stack of inputs. */}
+          <Section
+            title={language === "es" ? "Configuración" : "Configuration"}
+            subtitle={
+              isDirty
+                ? language === "es"
+                  ? "Cambios sin guardar"
+                  : "Unsaved changes"
+                : undefined
+            }
+          >
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                padding: "16px 18px",
+                borderRadius: 12,
+                border:
+                  "1px solid color-mix(in srgb, var(--color-border) 55%, transparent)",
+                background:
+                  "color-mix(in srgb, var(--color-surface) 90%, transparent)",
+              }}
+            >
+              {item.tmdb_type === "tv" && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
                     style={{
-                      border: "none",
-                      borderRadius: "var(--radius-full)",
-                      padding: "4px 12px",
-                      cursor: "pointer",
-                      fontSize: 12,
-                      fontWeight: 500,
-                      background:
-                        scope === s
-                          ? "var(--color-primary)"
-                          : "var(--color-surface-2)",
-                      color: scope === s ? "#fff" : "var(--color-text-muted)",
-                      transition: "background 0.15s ease",
+                      fontSize: 13,
+                      color: "var(--color-text)",
+                      fontWeight: 600,
                     }}
                   >
-                    {s === "all"
-                      ? t(language, "watchlist.allSeasons")
-                      : t(language, "watchlist.latestSeason")}
-                  </button>
-                ))}
+                    {t(language, "watchlist.coverage")}
+                  </span>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {(["all", "latest"] as const).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setScope(s)}
+                        style={{
+                          border:
+                            scope === s
+                              ? "1px solid color-mix(in srgb, var(--color-primary) 50%, transparent)"
+                              : "1px solid color-mix(in srgb, var(--color-border) 60%, transparent)",
+                          borderRadius: 999,
+                          padding: "5px 12px",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          background:
+                            scope === s
+                              ? "color-mix(in srgb, var(--color-primary) 18%, transparent)"
+                              : "color-mix(in srgb, var(--color-surface-2) 70%, transparent)",
+                          color:
+                            scope === s
+                              ? "var(--color-primary)"
+                              : "var(--color-text-muted)",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        {s === "all"
+                          ? t(language, "watchlist.allSeasons")
+                          : t(language, "watchlist.latestSeason")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 13,
+                    color: "var(--color-text)",
+                    fontWeight: 600,
+                  }}
+                >
+                  {t(language, "watchlist.autoDownload")}
+                </span>
+                <Toggle checked={autoDownload} onChange={setAutoDownload} />
               </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
+              >
+                <label
+                  style={{
+                    fontSize: 11,
+                    color: "var(--color-text-muted)",
+                    fontWeight: 700,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {t(language, "watchlist.qualityProfile")}
+                </label>
+                <select
+                  value={profileId}
+                  onChange={(e) => setProfileId(Number(e.target.value))}
+                  style={selectStyle}
+                >
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {isDirty && (
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleSave()}
+                    disabled={saving}
+                    style={{
+                      background: "var(--color-primary)",
+                      border: "none",
+                      color: "#fff",
+                      borderRadius: 999,
+                      padding: "8px 18px",
+                      cursor: saving ? "default" : "pointer",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      opacity: saving ? 0.7 : 1,
+                      boxShadow:
+                        "0 4px 14px color-mix(in srgb, var(--color-primary) 36%, transparent)",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {saving
+                      ? t(language, "watchlist.saving")
+                      : t(language, "watchlist.saveChanges")}
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+          </Section>
 
-          {/* Auto-download */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 10,
-            }}
-          >
-            <span style={{ fontSize: 13, color: "var(--color-text)" }}>
-              {t(language, "watchlist.autoDownload")}
-            </span>
-            <Toggle checked={autoDownload} onChange={setAutoDownload} />
-          </div>
-
-          {/* Quality profile */}
-          <div>
-            <label
-              style={{
-                fontSize: 12,
-                color: "var(--color-text-muted)",
-                fontWeight: 500,
-              }}
-            >
-              {t(language, "watchlist.qualityProfile")}
-            </label>
-            <select
-              value={profileId}
-              onChange={(e) => setProfileId(Number(e.target.value))}
-              style={selectStyle}
-            >
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Save button */}
-          {isDirty && (
-            <button
-              onClick={() => void handleSave()}
-              disabled={saving}
-              style={{
-                background: "var(--color-primary)",
-                border: "none",
-                color: "#fff",
-                borderRadius: "var(--radius)",
-                padding: "8px 16px",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 500,
-              }}
-            >
-              {saving
-                ? t(language, "watchlist.saving")
-                : t(language, "watchlist.saveChanges")}
-            </button>
-          )}
-
-          {/* Episode coverage — full TMDB season view */}
+          {/* Episode coverage — TMDB season grid */}
           {item.tmdb_type === "tv" && (
-            <div>
+            <Section
+              title={language === "es" ? "Cobertura por temporada" : "Season coverage"}
+              subtitle={
+                seasons.length > 0
+                  ? `${seasons.length} ${seasons.length === 1 ? (language === "es" ? "temporada" : "season") : language === "es" ? "temporadas" : "seasons"}`
+                  : undefined
+              }
+            >
               {loadingSeasons ? (
                 <div
                   style={{
-                    padding: "12px 0",
+                    padding: "24px 0",
                     color: "var(--color-text-muted)",
                     fontSize: 13,
+                    textAlign: "center",
                   }}
                 >
                   {language === "es"
@@ -607,9 +790,10 @@ export default function WatchlistDetailPanel({
               ) : seasons.length === 0 ? (
                 <div
                   style={{
-                    padding: "12px 0",
+                    padding: "24px 0",
                     color: "var(--color-text-muted)",
                     fontSize: 13,
+                    textAlign: "center",
                   }}
                 >
                   {language === "es"
@@ -619,8 +803,11 @@ export default function WatchlistDetailPanel({
               ) : (
                 <div
                   style={{
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "var(--radius)",
+                    borderRadius: 12,
+                    border:
+                      "1px solid color-mix(in srgb, var(--color-border) 55%, transparent)",
+                    background:
+                      "color-mix(in srgb, var(--color-surface) 90%, transparent)",
                     overflow: "hidden",
                   }}
                 >
@@ -637,38 +824,117 @@ export default function WatchlistDetailPanel({
                   ))}
                 </div>
               )}
-            </div>
+            </Section>
           )}
 
           {/* Movie in-library indicator — bottom fallback removed (shown above) */}
-        </div>
 
-        {/* Footer: remove */}
-        <div
+          {/* Danger zone — wrapped in its own labeled section. */}
+          <Section title={language === "es" ? "Zona de riesgo" : "Danger zone"}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "14px 18px",
+                borderRadius: 12,
+                border:
+                  "1px solid color-mix(in srgb, var(--color-danger) 28%, transparent)",
+                background:
+                  "color-mix(in srgb, var(--color-danger) 6%, transparent)",
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "var(--color-text)",
+                  }}
+                >
+                  {t(language, "watchlist.removeFromWatchlist")}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "var(--color-text-muted)",
+                    marginTop: 2,
+                  }}
+                >
+                  {language === "es"
+                    ? "Deja de seguir este título y elimina su configuración."
+                    : "Stop tracking this title and remove its configuration."}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemove(item.id)}
+                style={{
+                  background: "var(--color-danger)",
+                  border: "none",
+                  color: "#fff",
+                  borderRadius: 999,
+                  padding: "9px 18px",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  fontFamily: "inherit",
+                  flexShrink: 0,
+                }}
+              >
+                {language === "es" ? "Eliminar" : "Remove"}
+              </button>
+            </div>
+          </Section>
+        </div>{/* /container */}
+      </div>{/* /scrollable */}
+    </div>
+  );
+}
+
+// ── Page section helper (mirrors the DetailPage / TVShowPage style) ────────
+
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <header
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <h2
           style={{
-            padding: "12px 16px",
-            borderTop: "1px solid var(--color-border)",
+            margin: 0,
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "var(--color-text-muted)",
           }}
         >
-          <button
-            onClick={() => onRemove(item.id)}
-            style={{
-              background: "transparent",
-              border: "1px solid var(--color-danger)",
-              color: "var(--color-danger)",
-              borderRadius: "var(--radius)",
-              padding: "7px 14px",
-              cursor: "pointer",
-              fontSize: 13,
-              width: "100%",
-              fontWeight: 500,
-            }}
-          >
-            {t(language, "watchlist.removeFromWatchlist")}
-          </button>
-        </div>
-      </div>
-    </>
+          {title}
+        </h2>
+        {subtitle && (
+          <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            {subtitle}
+          </span>
+        )}
+      </header>
+      {children}
+    </section>
   );
 }
 
