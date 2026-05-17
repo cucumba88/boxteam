@@ -356,6 +356,7 @@ export default function Library({
   headerSlot,
   showUsers = false,
   onCloseUsers,
+  onLeaveUsers,
 }: {
   startIndexingOnMount?: boolean;
   headerSlot?: React.ReactNode;
@@ -363,7 +364,12 @@ export default function Library({
    *  takeover instead of swapping out the whole shell. Keeps the sidebar
    *  + status bar around the users page. */
   showUsers?: boolean;
+  /** WebUsers "Volver" button — pushes URL back to "/". */
   onCloseUsers?: () => void;
+  /** State-only close for when the user is navigating elsewhere (sidebar
+   *  click, command palette) — the new destination will push its own URL,
+   *  so we must NOT push "/" first or history gets duplicate entries. */
+  onLeaveUsers?: () => void;
 }) {
   const showDevLog = import.meta.env.DEV;
   const {
@@ -769,6 +775,11 @@ export default function Library({
   };
 
   const switchTab = (tab: TabId) => {
+    // Close any takeovers first — Settings / user-management paint on top
+    // of the library content, so without this the new tab would render
+    // underneath and the click would look like a no-op.
+    if (showSettings) setShowSettings(false);
+    if (showUsers && onLeaveUsers) onLeaveUsers();
     setActiveTab(tab);
     if (!isTauri()) {
       window.history.pushState({}, "", TAB_SLUGS[tab]);
@@ -1709,9 +1720,8 @@ export default function Library({
       sections={sidebarSections}
       activeTab={activeTab}
       onTabChange={(tab) => {
-        // Clicking a library tab from inside Settings should close Settings
-        // and navigate. Otherwise the active state would never restore.
-        if (showSettings) setShowSettings(false);
+        // switchTab already closes Settings + the user-management takeover
+        // (state-only, no extra history entry).
         switchTab(tab);
       }}
       onOpenSettings={() => setShowSettings(true)}

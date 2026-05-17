@@ -198,7 +198,14 @@ function WebRouter() {
   // content-area takeover inside it (so the sidebar + status bar stay
   // visible around it). `showUsers` swaps the content area only.
   const closeUsers = () => {
+    // "Volver" button — user explicitly wants to go back to library root.
     window.history.pushState({}, "", "/");
+    setPage("library");
+  };
+
+  const leaveUsers = () => {
+    // Sidebar / palette navigation — Library will push the destination
+    // URL itself. Just drop the users takeover; don't touch history.
     setPage("library");
   };
 
@@ -208,6 +215,7 @@ function WebRouter() {
       headerSlot={headerSlot}
       showUsers={page === "users" && isAdmin}
       onCloseUsers={closeUsers}
+      onLeaveUsers={leaveUsers}
     />
   );
 }
