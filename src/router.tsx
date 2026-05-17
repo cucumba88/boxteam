@@ -10,7 +10,6 @@ import { apiBase } from "./lib/transport";
 import Login from "./pages/Login";
 import WebBootstrap from "./pages/WebBootstrap";
 import WebSetupWizard from "./pages/WebSetupWizard";
-import WebUsers from "./pages/WebUsers";
 import InviteAccept from "./pages/InviteAccept";
 import ThemeToggle from "./components/ThemeToggle";
 
@@ -55,7 +54,6 @@ function WebRouter() {
     () => window.location.pathname === "/usuarios" ? "users" : "library"
   );
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const inviteToken = new URLSearchParams(window.location.search).get("invite");
 
   useEffect(() => {
@@ -64,16 +62,11 @@ function WebRouter() {
     prefetchConfig();
   }, []);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [menuOpen]);
+  // Outside-click for the avatar menu is handled inside UserMenu itself
+  // (it knows about the portal-rendered dropdown). Don't register a second
+  // listener here — a stale `mousedown` handler used to fire BEFORE the
+  // portal button's `click`, which is why "Gestionar usuarios" appeared
+  // dead even after the v0.9.1 attempt.
 
   useEffect(() => {
     const handlePop = () => {
@@ -186,7 +179,6 @@ function WebRouter() {
 
   const headerSlot = (
     <UserMenu
-      menuRef={menuRef}
       buttonStyle={avatarBtn}
       menuOpen={menuOpen}
       setMenuOpen={setMenuOpen}
@@ -202,23 +194,33 @@ function WebRouter() {
     />
   );
 
+  // Library is always mounted — the user-management page renders as a
+  // content-area takeover inside it (so the sidebar + status bar stay
+  // visible around it). `showUsers` swaps the content area only.
+  const closeUsers = () => {
+    // "Volver" button — user explicitly wants to go back to library root.
+    window.history.pushState({}, "", "/");
+    setPage("library");
+  };
+
+  const leaveUsers = () => {
+    // Sidebar / palette navigation — Library will push the destination
+    // URL itself. Just drop the users takeover; don't touch history.
+    setPage("library");
+  };
+
   return (
-    <>
-      {page === "library" && <Library startIndexingOnMount={false} headerSlot={headerSlot} />}
-      {page === "users" && isAdmin && (
-        <WebUsers
-          onBack={() => {
-            window.history.pushState({}, "", "/");
-            setPage("library");
-          }}
-        />
-      )}
-    </>
+    <Library
+      startIndexingOnMount={false}
+      headerSlot={headerSlot}
+      showUsers={page === "users" && isAdmin}
+      onCloseUsers={closeUsers}
+      onLeaveUsers={leaveUsers}
+    />
   );
 }
 
 interface UserMenuProps {
-  menuRef: React.RefObject<HTMLDivElement | null>;
   buttonStyle: React.CSSProperties;
   menuOpen: boolean;
   setMenuOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
@@ -237,7 +239,6 @@ interface UserMenuProps {
  * handler (which only checks the button container) doesn't close it instantly.
  */
 function UserMenu({
-  menuRef,
   buttonStyle,
   menuOpen,
   setMenuOpen,
@@ -286,7 +287,7 @@ function UserMenu({
   }, [menuOpen, setMenuOpen]);
 
   return (
-    <div ref={menuRef} style={{ position: "relative" }}>
+    <div style={{ position: "relative" }}>
       <button
         ref={buttonRef}
         onClick={() => setMenuOpen((v) => !v)}

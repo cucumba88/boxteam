@@ -1,5 +1,35 @@
 # Novedades de Oscata
 
+## Versión 0.9.2 — 17 de mayo de 2026
+
+Esta versión cierra cuatro defectos del modo web que quedaron tras el rediseño de v0.9.0 / v0.9.1. Tres son bugs concretos que el usuario reportó; el cuarto es una pulida estructural del shell para que la gestión de usuarios deje de comportarse como un "salida del shell" y pase a ser una página más dentro de la app.
+
+### 🐛 1. "Gestionar usuarios" seguía sin funcionar después del fix de v0.9.1
+
+El parche de v0.9.1 cambió el listener interno del menú de avatar de `mousedown` a `click` — pero `WebRouter` tenía un **segundo** listener de `mousedown` a nivel de documento que cerraba el menú antes de que el botón del portal pudiera procesar su propio `click`. El menú se desmontaba en el mismo tick y la navegación nunca se ejecutaba. Se elimina por completo ese listener externo: `UserMenu` ya gestiona el cierre por click fuera contra los refs del botón y del portal, así que un único handler es suficiente y correcto.
+
+### 🎨 2. Pie de Ajustes ahora ocupa todo el ancho
+
+El pie con los botones "Cancelar / Guardar / Guardar y reindexar" vivía dentro del wrapper centrado de `max-width: 1200`, lo que dejaba la línea divisoria y los botones recortados al ancho del contenido en lugar de extenderse de borde a borde. Se reestructura el layout: el área de scroll y el pie son ahora hermanos a nivel del overlay. El scroll conserva su contenido centrado a 1200px; el pie se estira de borde a borde, igual que la barra superior pegajosa de "Atrás".
+
+### 🔗 3. Ajustes ahora tiene su propia URL: `/ajustes`
+
+Ajustes era la única pestaña sin URL — abrir Ajustes sumaba estado pero no cambiaba la barra de direcciones, lo que hacía imposible enlazarlo o usar el atrás del navegador. Ahora abrir Ajustes hace `pushState('/ajustes')`, cerrar vuelve a la pestaña activa, el `popstate` del navegador sincroniza el overlay, y el escritor de filtros en la URL ignora `/ajustes` (que no tiene estado de filtros propio). Igual de profundo que `/peliculas/<tmdb>` o `/watchlist`.
+
+### 🏠 4. La gestión de usuarios vive ahora dentro del shell
+
+`WebUsers` reemplazaba la app entera — sidebar, barra de estado, header, todo desaparecía y volvías cuando pulsabas "Volver". El usuario apuntó con razón que era una regresión respecto al patrón del resto de páginas (Películas, Seguimiento, Ajustes), que se renderizan como takeover del área de contenido manteniendo el shell visible.
+
+Se reorganiza el render del modo web para que `Library` esté siempre montada y `WebUsers` aparezca como takeover en la misma slot que usa `Settings`:
+
+- `Library` acepta `showUsers` + dos callbacks (`onCloseUsers` para el botón "Volver", `onLeaveUsers` para cuando el usuario navega a otra sección desde la sidebar — éste último no toca el historial porque `switchTab` ya empuja la URL destino).
+- `WebUsers` pierde su envoltorio `app-shell-bg` + `minHeight: 100vh` y pasa a ser un `height: 100%` con cuerpo scrollable, igual de profundo que `Settings`. El fallback `NoAccess` recibe el mismo trato.
+- `switchTab` ahora cierra Settings + el takeover de usuarios al inicio de la función, así que **todos** los disparadores de cambio de pestaña (sidebar, command palette, barra de tabs móvil, botones de "Ir a Descargas", etc.) salen limpiamente del takeover sin código duplicado por cada llamada.
+
+Antes hacer click en "Películas" desde `/usuarios` solo cambiaba la URL pero la página de usuarios seguía pintada encima — porque la sidebar estaba mutando estado interno de `Library` mientras que la decisión de mostrar `WebUsers` se tomaba en el router externo a partir de su propio estado `page`. Ahora el cambio de pestaña notifica al padre y el takeover se cierra antes de pintar la nueva sección.
+
+---
+
 ## Versión 0.9.1 — 17 de mayo de 2026
 
 ### 🐛 Fix: el botón "Gestionar usuarios" del menú de avatar no hacía nada

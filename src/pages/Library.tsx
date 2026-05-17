@@ -49,6 +49,7 @@ import {
 import { foldForSearch } from "../utils/textSearch";
 import IndexStatus from "../components/IndexStatus";
 import Settings from "./Settings";
+import WebUsers from "./WebUsers";
 import ActivityLog from "../components/ActivityLog";
 import DetailPage from "../components/DetailPage";
 import TVShowPage from "../components/TVShowPage";
@@ -353,9 +354,22 @@ function deduplicateByTitle(entries: MediaItem[]): MediaItem[] {
 export default function Library({
   startIndexingOnMount = false,
   headerSlot,
+  showUsers = false,
+  onCloseUsers,
+  onLeaveUsers,
 }: {
   startIndexingOnMount?: boolean;
   headerSlot?: React.ReactNode;
+  /** Web mode only — render the user-management page as a content-area
+   *  takeover instead of swapping out the whole shell. Keeps the sidebar
+   *  + status bar around the users page. */
+  showUsers?: boolean;
+  /** WebUsers "Volver" button — pushes URL back to "/". */
+  onCloseUsers?: () => void;
+  /** State-only close for when the user is navigating elsewhere (sidebar
+   *  click, command palette) — the new destination will push its own URL,
+   *  so we must NOT push "/" first or history gets duplicate entries. */
+  onLeaveUsers?: () => void;
 }) {
   const showDevLog = import.meta.env.DEV;
   const {
@@ -405,7 +419,9 @@ export default function Library({
   const [filters, setFilters] = useState<Filters>(() =>
     isTauri() ? defaultFilters() : filtersFromSearchParams().filters,
   );
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState<boolean>(
+    () => !isTauri() && typeof window !== "undefined" && window.location.pathname === "/ajustes",
+  );
   const [showLog, setShowLog] = useState(false);
   const [selected, setSelected] = useState<MediaItem | null>(null);
   const [selectedGroupedView, setSelectedGroupedView] = useState(false);
@@ -561,6 +577,13 @@ export default function Library({
   useEffect(() => {
     if (isTauri()) return;
     const handlePop = () => {
+      // /ajustes deep-link → show settings overlay. Any other path closes it.
+      const onSettingsUrl = window.location.pathname === "/ajustes";
+      setShowSettings(onSettingsUrl);
+      if (onSettingsUrl) return;
+      // /usuarios is handled by the outer WebRouter; don't reset library
+      // state (tab/filters/selection) while the users takeover is active.
+      if (window.location.pathname === "/usuarios") return;
       const tab = tabFromPathname();
       setActiveTab(tab);
       // Resolve any detail segment in the URL to the matching item — leaves
@@ -628,9 +651,31 @@ export default function Library({
   // the tab pushState history is not polluted with every filter keystroke).
   useEffect(() => {
     if (isTauri()) return;
+    // Don't pollute /ajustes or /usuarios with filter query strings —
+    // neither page has filter state of its own.
+    if (window.location.pathname === "/ajustes") return;
+    if (window.location.pathname === "/usuarios") return;
     const qs = filtersToSearchParams(filters, page);
     window.history.replaceState({}, "", window.location.pathname + qs);
   }, [filters, page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync showSettings state → URL (web mode). Opening pushes /ajustes;
+  // closing pops back to the previous entry so the browser back button
+  // returns to wherever the user came from.
+  useEffect(() => {
+    if (isTauri()) return;
+    const onSettingsUrl = window.location.pathname === "/ajustes";
+    if (showSettings && !onSettingsUrl) {
+      window.history.pushState({}, "", "/ajustes");
+    } else if (!showSettings && onSettingsUrl) {
+      // We were on /ajustes and someone closed Settings without using the
+      // back button — restore the active tab in the URL.
+      const target =
+        TAB_SLUGS[activeTab] + filtersToSearchParams(filters, page);
+      window.history.pushState({}, "", target);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSettings]);
 
   useEffect(() => {
     if (!startIndexingOnMount || hasStartedInitialIndexRef.current) {
@@ -730,6 +775,11 @@ export default function Library({
   };
 
   const switchTab = (tab: TabId) => {
+    // Close any takeovers first — Settings / user-management paint on top
+    // of the library content, so without this the new tab would render
+    // underneath and the click would look like a no-op.
+    if (showSettings) setShowSettings(false);
+    if (showUsers && onLeaveUsers) onLeaveUsers();
     setActiveTab(tab);
     if (!isTauri()) {
       window.history.pushState({}, "", TAB_SLUGS[tab]);
@@ -1670,9 +1720,8 @@ export default function Library({
       sections={sidebarSections}
       activeTab={activeTab}
       onTabChange={(tab) => {
-        // Clicking a library tab from inside Settings should close Settings
-        // and navigate. Otherwise the active state would never restore.
-        if (showSettings) setShowSettings(false);
+        // switchTab already closes Settings + the user-management takeover
+        // (state-only, no extra history entry).
         switchTab(tab);
       }}
       onOpenSettings={() => setShowSettings(true)}
@@ -2280,11 +2329,18 @@ export default function Library({
           />
         )}
 
+        {/* User management — content-area takeover so the sidebar + status
+            bar stay visible (web mode only; triggered from the avatar menu).
+            Settings still wins precedence if both are somehow open. */}
+        {!showSettings && showUsers && (
+          <WebUsers onBack={onCloseUsers} />
+        )}
+
         {/* Detail / TV show page takes over the content area when an item or
             show is selected. Sidebar + status bar stay visible; back button
             returns to the library. tvShow takes priority over selected — they
             shouldn't both be set, but if they were we'd want the show view. */}
-        {!showSettings && tvShow && (
+        {!showSettings && !showUsers && tvShow && (
           <TVShowPage
             show={tvShow}
             allEpisodes={getTvEpisodes(tvShow)}
@@ -2314,7 +2370,7 @@ export default function Library({
           />
         )}
 
-        {!showSettings && !tvShow && selected && (
+        {!showSettings && !showUsers && !tvShow && selected && (
           <DetailPage
             item={selected}
             language={language}
@@ -2347,7 +2403,7 @@ export default function Library({
           />
         )}
 
-        {!showSettings && !selected && !tvShow && (
+        {!showSettings && !showUsers && !selected && !tvShow && (
           <>
         {/* Toolbar row */}
         <div
@@ -3293,7 +3349,7 @@ export default function Library({
         />
       )}
 
-      {!selected && !tvShow && !showSettings &&
+      {!selected && !tvShow && !showSettings && !showUsers &&
         activeTab !== "downloads" && activeTab !== "watchlist" &&
         activeTab !== "uploads" && filtered.length > 0 && pageCount > 1 && (
         <div
