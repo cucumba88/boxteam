@@ -1631,8 +1631,10 @@ export default function Settings({
           zIndex: 10,
           display: "flex",
           alignItems: "center",
-          gap: 12,
-          padding: "10px 24px",
+          gap: isMobile ? 8 : 12,
+          // Edge-to-edge on mobile — every pixel of horizontal space helps
+          // for the back button + title + version pill to fit comfortably.
+          padding: isMobile ? "10px 12px" : "10px 24px",
           // Opaque bg, no backdrop-filter — sticky blur over scrolling
           // content stutters iOS Safari at 120 Hz.
           background: "var(--color-bg)",
@@ -1674,31 +1676,47 @@ export default function Settings({
             color: "var(--color-text-muted)",
             fontSize: 12.5,
             minWidth: 0,
+            flex: 1,
+            overflow: "hidden",
           }}
         >
-          <span style={{ color: "var(--color-text)", fontWeight: 700 }}>
+          <span
+            style={{
+              color: "var(--color-text)",
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              fontSize: isMobile ? 15 : undefined,
+            }}
+          >
             {t(language, "settings.title")}
           </span>
         </div>
-        <div style={{ flex: 1 }} />
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "4px 10px",
-            borderRadius: 999,
-            background:
-              "color-mix(in srgb, var(--color-surface) 70%, transparent)",
-            border:
-              "1px solid color-mix(in srgb, var(--color-border) 55%, transparent)",
-            color: "var(--color-text-muted)",
-            fontSize: 11.5,
-            fontWeight: 600,
-          }}
-        >
-          v{appVersion}
-        </span>
+        {/* Version pill hidden on mobile — every pixel matters for the title
+            + back button. The version is still visible in the footer and in
+            the Acerca de section. */}
+        {!isMobile && (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 10px",
+              borderRadius: 999,
+              background:
+                "color-mix(in srgb, var(--color-surface) 70%, transparent)",
+              border:
+                "1px solid color-mix(in srgb, var(--color-border) 55%, transparent)",
+              color: "var(--color-text-muted)",
+              fontSize: 11.5,
+              fontWeight: 600,
+              flexShrink: 0,
+            }}
+          >
+            v{appVersion}
+          </span>
+        )}
       </div>
 
       {/* Scroll area is full width so the bottom footer can span edge-to-edge.

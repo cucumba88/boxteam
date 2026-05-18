@@ -347,16 +347,8 @@ select {
     width: 100vw !important;
   }
 
-  /* Settings modal: full-width, anchored to top with reduced padding */
-  .settings-overlay {
-    padding: 0.5rem !important;
-    align-items: flex-start !important;
-    padding-top: 2rem !important;
-  }
-
-  .settings-panel {
-    width: 100% !important;
-    max-height: calc(100dvh - 2.5rem) !important;
-    border-radius: var(--radius-lg) !important;
-  }
+  /* Settings is now a full-screen takeover (not a centred modal) so the
+     old overlay padding + max-height capped its content area, cropping
+     the bottom of long sections and pushing the sticky header inward
+     from the screen edge. Let the inline styles win — no overrides. */
 }
