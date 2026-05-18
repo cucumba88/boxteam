@@ -46,6 +46,7 @@ export default memo(function VirtualMediaGrid({
   jumpRequest,
   onVisibleRangeChange,
   onFirstVisibleIndexChange,
+  onActiveLetterChange,
   initialScrollIndex,
   onInitialScrollConsumed,
 }: {
@@ -75,12 +76,18 @@ export default memo(function VirtualMediaGrid({
   jumpRequest?: JumpRequest;
   onVisibleRangeChange?: (start: number, end: number) => void;
   /**
-   * Fires whenever the topmost visible item index changes. Undebounced —
-   * use for cheap, render-driven UI like an active-letter highlight in a
-   * jump rail. For expensive work (network requests) prefer
-   * `onVisibleRangeChange`, which is debounced.
+   * Fires whenever the topmost visible item index changes — but only into
+   * a ref-style callback (parent should store in a ref, not state).
+   * Undebounced and called on every scroll-driven row change. Using setState
+   * here causes a re-render storm on every scroll tick.
    */
   onFirstVisibleIndexChange?: (index: number) => void;
+  /**
+   * Fires when the bucket letter of the first visible item changes
+   * (e.g. "M" → "N"). Safe to drive React state — changes roughly once per
+   * row of scrolled content.
+   */
+  onActiveLetterChange?: (letter: string) => void;
   /**
    * If > 0, the grid scrolls (instantly, no animation) so the row containing
    * this item index is at the top of the viewport on first mount. Used by
@@ -195,7 +202,8 @@ export default memo(function VirtualMediaGrid({
     });
   }, [jumpRequest, columns, rowVirtualizer]);
 
-  // Debounced visible-range emission for the parent (used for badge fetching).
+  // Latest-callback refs so scroll-driven effects don't re-run when the
+  // parent passes new inline arrow functions every render.
   const onRangeRef = useRef(onVisibleRangeChange);
   useEffect(() => {
     onRangeRef.current = onVisibleRangeChange;
@@ -204,6 +212,37 @@ export default memo(function VirtualMediaGrid({
   useEffect(() => {
     onFirstIdxRef.current = onFirstVisibleIndexChange;
   }, [onFirstVisibleIndexChange]);
+  const onActiveLetterRef = useRef(onActiveLetterChange);
+  useEffect(() => {
+    onActiveLetterRef.current = onActiveLetterChange;
+  }, [onActiveLetterChange]);
+  const onCardSelectRef = useRef(onCardSelect);
+  useEffect(() => {
+    onCardSelectRef.current = onCardSelect;
+  }, [onCardSelect]);
+  const onToggleCheckRef = useRef(onToggleCheck);
+  useEffect(() => {
+    onToggleCheckRef.current = onToggleCheck;
+  }, [onToggleCheck]);
+  const onDownloadRef = useRef(onDownload);
+  useEffect(() => {
+    onDownloadRef.current = onDownload;
+  }, [onDownload]);
+  const selectingRef = useRef(selecting);
+  useEffect(() => {
+    selectingRef.current = selecting;
+  }, [selecting]);
+
+  // Stable handlers — referentially constant for the component's lifetime so
+  // the memo'd MediaCards downstream don't re-render on every scroll-driven
+  // grid render. They read live state via refs above.
+  const handleMediaSelect = useCallback((item: MediaItem) => {
+    if (selectingRef.current) onToggleCheckRef.current(item.id);
+    else onCardSelectRef.current(item);
+  }, []);
+  const handleMediaDownload = useCallback((item: MediaItem) => {
+    onDownloadRef.current(item);
+  }, []);
   const virtualRows = rowVirtualizer.getVirtualItems();
   // Indexes coming from `getVirtualItems()` include overscan, so the topmost
   // entry is actually above the viewport. Derive the truly visible first row
@@ -215,12 +254,28 @@ export default memo(function VirtualMediaGrid({
   const overscanFirstRow = virtualRows[0]?.index ?? 0;
   const overscanLastRow =
     virtualRows[virtualRows.length - 1]?.index ?? overscanFirstRow;
-  // Undebounced: feeds the active-letter highlight in the jump rail.
+  // Cheap callback: stash the topmost visible item index in the parent via
+  // a ref-style callback. The parent should NOT setState on every fire —
+  // that re-renders the whole tree on every scroll tick (kills perf on iOS).
   useEffect(() => {
     if (!onFirstIdxRef.current) return;
     if (items.length === 0) return;
     onFirstIdxRef.current(firstVisibleRow * columns);
   }, [firstVisibleRow, columns, items.length]);
+  // Active-letter emission: only fires when the bucket of the top-visible
+  // item changes (~once per row scrolled, not per pixel). Safe to drive
+  // React state with this.
+  const lastEmittedLetterRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (items.length === 0) return;
+    const idx = firstVisibleRow * columns;
+    const item = items[idx];
+    if (!item) return;
+    const letter = firstCharBucket(getLocalizedTitle(item, language));
+    if (letter === lastEmittedLetterRef.current) return;
+    lastEmittedLetterRef.current = letter;
+    onActiveLetterRef.current?.(letter);
+  }, [firstVisibleRow, columns, items, language]);
   useEffect(() => {
     if (!onRangeRef.current) return;
     if (items.length === 0) return;
@@ -335,11 +390,8 @@ export default memo(function VirtualMediaGrid({
                     hideEpisodeBadge={hideEpisodeBadge}
                     showFileSize={showFileSize}
                     disableQuickAction={disableQuickAction}
-                    onDownload={onDownload}
-                    onSelect={(selected) => {
-                      if (selecting) onToggleCheck(selected.id);
-                      else onCardSelect(selected);
-                    }}
+                    onDownload={handleMediaDownload}
+                    onSelect={handleMediaSelect}
                   />
                 </div>
               ))}
