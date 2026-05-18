@@ -90,7 +90,12 @@ body,
 }
 
 #root {
+  /* Use the *dynamic* viewport so the React mount matches the visible area
+     when iOS Safari's URL bar is showing. With `min-height: 100vh` the root
+     extended past the visible viewport (vh = max viewport, dvh = current),
+     producing a phantom 40-60 px of scroll below the shell on mobile. */
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -315,6 +320,18 @@ select {
 
 /* ── Mobile (≤767px) ──────────────────────────────────────────────────── */
 @media (max-width: 767px) {
+  /* Lock the page-level scroll on mobile. The grid (and any other internal
+     scroll container) handle their own overflow; the html/body must not
+     also scroll, otherwise iOS Safari shows two stacked scrolls (the page
+     and the inner content). */
+  html,
+  body,
+  #root {
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   /* Bottom tab bar clears scrollable content */
   .mobile-content-area {
     padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));

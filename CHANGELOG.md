@@ -1,5 +1,15 @@
 # Novedades de Oscata
 
+## Versión 0.10.9 — 18 de mayo de 2026
+
+### 🐛 Doble scroll en móvil
+
+En móvil había dos scrolls: el de la rejilla (correcto) y otro de la propia página que dejaba ver una franja vacía debajo del shell. Causa: `#root` tenía `min-height: 100vh`, pero `.shell-root` ya estaba en `100dvh`. En iOS Safari con la barra de URL visible, `100vh > 100dvh` por unos 40-60 px, así que el `#root` sobresalía del viewport visible y la página podía hacer scroll para mostrar ese espacio vacío.
+
+Se cambia `#root` a `min-height: 100dvh` (con `100vh` como fallback para navegadores sin `dvh`), y en el media query móvil se bloquea explícitamente cualquier scroll a nivel `html` / `body` / `#root` (`height: 100dvh; overflow: hidden; overscroll-behavior: none`). El único elemento con scroll en móvil pasa a ser el contenedor interno que toque (la rejilla, el panel de Ajustes, el panel de detalle, etc.).
+
+---
+
 ## Versión 0.10.8 — 18 de mayo de 2026
 
 ### 📱 Sweep de mobile UI/UX
