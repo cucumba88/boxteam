@@ -1174,7 +1174,8 @@ export default function Library({
   );
 
   const ghostBtn: React.CSSProperties = {
-    padding: "7px 14px",
+    padding: isMobile ? "9px 14px" : "7px 14px",
+    minHeight: isMobile ? 40 : undefined,
     borderRadius: "var(--radius-full)",
     border:
       "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
@@ -1190,7 +1191,8 @@ export default function Library({
   };
 
   const primaryBtn: React.CSSProperties = {
-    padding: "7px 14px",
+    padding: isMobile ? "9px 14px" : "7px 14px",
+    minHeight: isMobile ? 40 : undefined,
     borderRadius: "var(--radius-full)",
     border: "none",
     background: "var(--color-primary)",
@@ -2117,7 +2119,7 @@ export default function Library({
                 }}
               >
                 <Menu
-                  size={16}
+                  size={18}
                   strokeWidth={2.2}
                   aria-hidden="true"
                   style={{ display: "block" }}
@@ -2568,10 +2570,12 @@ export default function Library({
                             marginLeft: 10,
                           }}
                         >
-                          {activeTab === "watchlist"
-                            ? watchlist.items.length
-                            : filtered.length}{" "}
-                          titles
+                          {t(language, "library.titlesCount", {
+                            count:
+                              activeTab === "watchlist"
+                                ? watchlist.items.length
+                                : filtered.length,
+                          })}
                         </span>
                       )}
                     </>

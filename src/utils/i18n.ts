@@ -71,6 +71,27 @@ const messages = {
     en: "{count} selected",
   },
   "library.selectMultiple": { es: "Seleccionar varios", en: "Select multiple" },
+  "library.titlesCount": {
+    es: "{count} títulos",
+    en: "{count} titles",
+  },
+  "watchlist.allTypes": { es: "Todos", en: "All" },
+  "watchlist.movies": { es: "Películas", en: "Movies" },
+  "watchlist.tv": { es: "Series", en: "TV" },
+  "watchlist.statusAll": { es: "Todo", en: "All" },
+  "watchlist.statusPending": { es: "Pendiente", en: "Pending" },
+  "watchlist.statusAvailable": { es: "Disponible", en: "Available" },
+  "watchlist.remove": { es: "Quitar", en: "Remove" },
+  "watchlist.addTitleCta": { es: "Agregar título", en: "Add a title" },
+  "watchlist.empty": {
+    es: "Tu lista de seguimiento está vacía",
+    en: "Your watchlist is empty",
+  },
+  "uploads.upload": { es: "Subir archivos", en: "Upload files" },
+  "uploads.noFtpWrite": {
+    es: "Sin permiso de escritura en el FTP",
+    en: "No write permission on the FTP server",
+  },
   "library.actions": { es: "Acciones de librería", en: "Library actions" },
   "library.openSettings": { es: "Abrir ajustes", en: "Open Settings" },
   "library.noMediaStarting": {

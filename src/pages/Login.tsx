@@ -58,7 +58,8 @@ export default function Login() {
     border: "1px solid var(--color-border)",
     background: "var(--color-surface-2)",
     color: "var(--color-text)",
-    fontSize: 14,
+    // 16px minimum prevents iOS Safari from auto-zooming the page on focus.
+    fontSize: 16,
     outline: "none",
   };
 
