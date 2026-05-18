@@ -1633,9 +1633,9 @@ export default function Settings({
           alignItems: "center",
           gap: 12,
           padding: "10px 24px",
-          background: "color-mix(in srgb, var(--color-bg) 92%, transparent)",
-          backdropFilter: "blur(14px) saturate(140%)",
-          WebkitBackdropFilter: "blur(14px) saturate(140%)",
+          // Opaque bg, no backdrop-filter — sticky blur over scrolling
+          // content stutters iOS Safari at 120 Hz.
+          background: "var(--color-bg)",
           borderBottom:
             "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
           flexShrink: 0,
@@ -1649,20 +1649,21 @@ export default function Settings({
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
-            padding: "6px 12px 6px 10px",
+            padding: isMobile ? "10px 14px 10px 12px" : "6px 12px 6px 10px",
+            minHeight: isMobile ? 40 : undefined,
             borderRadius: 999,
             border:
               "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
             background:
               "color-mix(in srgb, var(--color-surface) 85%, transparent)",
             color: "var(--color-text)",
-            fontSize: 12.5,
+            fontSize: isMobile ? 14 : 12.5,
             fontWeight: 600,
             cursor: "pointer",
             fontFamily: "inherit",
           }}
         >
-          <AppIcon name="arrow-left" size={14} strokeWidth={2.2} />
+          <AppIcon name="arrow-left" size={isMobile ? 16 : 14} strokeWidth={2.2} />
           <span>{language === "es" ? "Atrás" : "Back"}</span>
         </button>
         <div

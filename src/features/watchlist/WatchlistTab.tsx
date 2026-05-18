@@ -8,6 +8,7 @@ import { isTauri } from "../../lib/transport";
 import WatchlistCard from "./WatchlistCard";
 import WatchlistDetailPanel from "./WatchlistDetailPanel";
 import { foldForSearch } from "../../utils/textSearch";
+import { t } from "../../utils/i18n";
 
 /** Reads a watchlist detail tmdb_id from "/watchlist/<id>". Returns null on
  *  bad input or when running inside Tauri (no URL bar there). */
@@ -219,15 +220,16 @@ export default function WatchlistTab({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={language === "es" ? "Buscar…" : "Search…"}
-              aria-label={language === "es" ? "Buscar" : "Search"}
+              placeholder={`${t(language, "common.search")}…`}
+              aria-label={t(language, "common.search")}
               style={{
                 width: "100%",
                 border: "none",
                 outline: "none",
                 background: "transparent",
                 color: "var(--color-text)",
-                fontSize: 13,
+                // 16px minimum prevents iOS Safari from auto-zooming on focus.
+                fontSize: 16,
                 fontFamily: "inherit",
               }}
             />
@@ -255,17 +257,14 @@ export default function WatchlistTab({
           {(["all", "movie", "tv"] as TypeFilter[]).map((tf) => (
             <FilterChip
               key={`type-${tf}`}
-              label={
+              label={t(
+                language,
                 tf === "all"
-                  ? language === "es"
-                    ? "Todos"
-                    : "All"
+                  ? "watchlist.allTypes"
                   : tf === "movie"
-                    ? language === "es"
-                      ? "Películas"
-                      : "Movies"
-                    : "TV"
-              }
+                    ? "watchlist.movies"
+                    : "watchlist.tv",
+              )}
               active={typeFilter === tf}
               onClick={() => setTypeFilter(tf)}
             />
@@ -286,19 +285,14 @@ export default function WatchlistTab({
           {(["all", "pending", "available"] as StatusFilter[]).map((s) => (
             <FilterChip
               key={`status-${s}`}
-              label={
+              label={t(
+                language,
                 s === "all"
-                  ? language === "es"
-                    ? "Todo"
-                    : "All"
+                  ? "watchlist.statusAll"
                   : s === "pending"
-                    ? language === "es"
-                      ? "Pendiente"
-                      : "Pending"
-                    : language === "es"
-                      ? "Disponible"
-                      : "Available"
-              }
+                    ? "watchlist.statusPending"
+                    : "watchlist.statusAvailable",
+              )}
               active={statusFilter === s}
               onClick={() => setStatusFilter(s)}
             />
@@ -330,7 +324,7 @@ export default function WatchlistTab({
               color: "var(--color-text-muted)",
             }}
           >
-            {language === "es" ? "Cargando…" : "Loading…"}
+            {t(language, "common.loading")}
           </div>
         ) : filtered.length === 0 ? (
           <div
@@ -347,12 +341,8 @@ export default function WatchlistTab({
             <span style={{ fontSize: 36 }}>🔖</span>
             <span>
               {watchlist.items.length === 0
-                ? language === "es"
-                  ? "Tu lista de seguimiento está vacía"
-                  : "Your watchlist is empty"
-                : language === "es"
-                  ? "No hay resultados"
-                  : "No results"}
+                ? t(language, "watchlist.empty")
+                : t(language, "watchlist.noResults")}
             </span>
             {watchlist.items.length === 0 && onOpenAdd && (
               <button
@@ -362,13 +352,14 @@ export default function WatchlistTab({
                   border: "none",
                   color: "#fff",
                   borderRadius: "var(--radius)",
-                  padding: "7px 16px",
+                  padding: "9px 18px",
                   cursor: "pointer",
-                  fontSize: 13,
-                  fontWeight: 500,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  minHeight: 44,
                 }}
               >
-                + {language === "es" ? "Agregar título" : "Add a title"}
+                + {t(language, "watchlist.addTitleCta")}
               </button>
             )}
           </div>

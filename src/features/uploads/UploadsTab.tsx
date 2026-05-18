@@ -12,6 +12,7 @@ import UploadCard from "./UploadCard";
 import UploadPrepareModal from "./UploadPrepareModal";
 import type { UploadItem } from "./types";
 import type { AppLanguage } from "../../utils/mediaLanguage";
+import { t } from "../../utils/i18n";
 
 interface UploadsTabProps {
   uploads: UploadItem[];
@@ -108,7 +109,7 @@ export default function UploadsTab({
               }}
             >
               <AlertTriangle size={13} aria-hidden="true" />
-              Sin permiso de escritura en el FTP
+              {t(language, "uploads.noFtpWrite")}
             </div>
           )}
 
@@ -138,7 +139,7 @@ export default function UploadsTab({
             }}
           >
             <Upload size={13} strokeWidth={2.5} aria-hidden="true" />
-            Subir archivos
+            {t(language, "uploads.upload")}
           </button>
         </div>
       </div>

@@ -12,6 +12,7 @@ import {
 import { useAuth, type WebUser } from "../lib/AuthContext";
 import { apiBase, getToken } from "../lib/transport";
 import { formInputStandard, formSelectStandard } from "../lib/formStyles";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 interface CreateForm {
   email: string;
@@ -53,6 +54,7 @@ interface WebUsersProps {
 }
 
 export default function WebUsers({ onBack }: WebUsersProps = {}) {
+  const isMobile = useIsMobile();
   const { user: me } = useAuth();
   const [users, setUsers] = useState<WebUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -446,7 +448,7 @@ export default function WebUsers({ onBack }: WebUsersProps = {}) {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 1fr",
+                gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
                 gap: 10,
               }}
             >
@@ -798,6 +800,7 @@ function UserCard({
   onSave: () => void;
   onDelete: () => void;
 }) {
+  const isMobile = useIsMobile();
   const initial = user.email.charAt(0).toUpperCase();
   if (editing) {
     return (
@@ -816,7 +819,7 @@ function UserCard({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 1fr auto",
+            gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr auto",
             gap: 10,
           }}
         >
@@ -955,12 +958,20 @@ function UserCard({
       </div>
       <button
         type="button"
-        style={chipBtn}
+        style={{
+          ...chipBtn,
+          // Bump tap target on mobile + icon-only to keep the row from
+          // wrapping in 393 px viewports.
+          minHeight: isMobile ? 36 : undefined,
+          paddingLeft: isMobile ? 10 : 12,
+          paddingRight: isMobile ? 10 : 12,
+        }}
         onClick={onStartEdit}
         aria-label="Editar"
+        title="Editar"
       >
-        <Pencil size={12} strokeWidth={2.2} aria-hidden="true" />
-        <span>Editar</span>
+        <Pencil size={14} strokeWidth={2.2} aria-hidden="true" />
+        {!isMobile && <span>Editar</span>}
       </button>
       {!isMe && (
         <button
@@ -970,11 +981,15 @@ function UserCard({
             color: "var(--color-danger)",
             borderColor:
               "color-mix(in srgb, var(--color-danger) 40%, transparent)",
+            minHeight: isMobile ? 36 : undefined,
+            paddingLeft: isMobile ? 10 : 12,
+            paddingRight: isMobile ? 10 : 12,
           }}
           onClick={onDelete}
           aria-label="Eliminar"
+          title="Eliminar"
         >
-          <Trash2 size={12} strokeWidth={2.2} aria-hidden="true" />
+          <Trash2 size={14} strokeWidth={2.2} aria-hidden="true" />
         </button>
       )}
     </div>

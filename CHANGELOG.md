@@ -1,5 +1,57 @@
 # Novedades de Oscata
 
+## Versión 0.10.8 — 18 de mayo de 2026
+
+### 📱 Sweep de mobile UI/UX
+
+Pasada completa sobre todas las pantallas en móvil tras resolver el problema de scroll. Bugs concretos detectados via `grep` + lectura del código, agrupados por impacto.
+
+#### iOS: zoom automático al enfocar inputs
+
+iOS Safari hace zoom de la página cuando un `<input>` tiene `font-size < 16px` y recibe foco. Tres inputs estaban a 13-14px:
+
+- Barra de búsqueda de la Biblioteca (`FilterChipRow`).
+- Barra de búsqueda del Seguimiento (`WatchlistTab`).
+- Inputs de Login (email + contraseña).
+
+Todos a 16px ahora — el resto de inputs ya usaba el estilo compartido `formInputStandard` que ya estaba bien.
+
+#### Backdrop-filter en barras pegajosas — resto del catálogo
+
+La pasada anterior (v0.10.5) quitó `backdrop-filter` en la navbar y bottom tab bar móviles. Quedaban tres barras pegajosas más con el mismo problema (DetailPage, TVShowPage, Ajustes). Las tres pasan a fondo opaco — el blur era prácticamente imperceptible y se cargaba todo el frame de scroll en iOS Safari.
+
+#### Página de Usuarios — sin lógica móvil hasta ahora
+
+`WebUsers` no tenía detección de móvil. Sus formularios usaban grids fijos:
+
+- Crear usuario: `1fr 1fr` → en 393 px daba inputs de ~165 px cada uno.
+- Editar usuario: `1fr 1fr auto` → tres columnas en 393 px era literalmente imposible.
+
+Se introduce `useIsMobile()`; en móvil ambos grids colapsan a `1fr` y las acciones de cada fila (Editar/Eliminar) pasan a modo icon-only para que la fila quepa.
+
+#### Internacionalización — strings hardcodeados
+
+Varios strings se renderizaban directamente sin pasar por el sistema `i18n` y se mostraban en inglés aunque el idioma estuviese en español (o viceversa):
+
+- "X titles" en el header de Biblioteca → `library.titlesCount` con `{count}`.
+- Chips del Seguimiento (Todos/Películas/TV, Todo/Pendiente/Disponible) → claves `watchlist.*`.
+- "Buscar…" / "Loading…" / "Your watchlist is empty" en el Seguimiento → claves existentes (`common.search`, `common.loading`, `watchlist.empty`).
+- "Sin permiso de escritura en el FTP" y "Subir archivos" en Subidas → `uploads.noFtpWrite`, `uploads.upload`.
+
+#### Tap targets bajo el mínimo de 44 px
+
+- `ghostBtn` / `primaryBtn` (Biblioteca) → padding 9/14 + min-height 40 en móvil.
+- Botón "Atrás" del header de Ajustes → padding 10/14 + min-height 40 + fontSize 14 + icon 16 en móvil.
+- `ActionButton` de Descargas → 42×42 icon-only en móvil (los botones Cancelar/Reintentar/Abrir/Borrar ya no se desbordan a múltiples líneas).
+- Botón "Agregar título" vacío de Seguimiento → padding 9/18 + min-height 44.
+- Botones Editar/Eliminar en cada fila de Usuarios → min-height 36 + icon-only en móvil.
+
+#### Pequeñas pulidas
+
+- Icono del menú "burger" móvil → 16 px → 18 px (más en línea con el botón activo de la tab bar inferior, que es 22 px).
+
+---
+
 ## Versión 0.10.7 — 18 de mayo de 2026
 
 ### 🐛 La virtualización no estaba funcionando en móvil — la causa real del scroll lento

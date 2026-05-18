@@ -13,6 +13,7 @@ import {
 import type { DownloadItem } from "../hooks/useDownloads";
 import type { AppLanguage } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { isTauri } from "../lib/transport";
 
 function formatBytes(b: number): string {
@@ -127,6 +128,7 @@ function ActionButton({
   onClick: () => void;
   tone?: "neutral" | "primary" | "success" | "danger";
 }) {
+  const isMobile = useIsMobile();
   const color =
     tone === "primary"
       ? "var(--color-primary)"
@@ -139,13 +141,17 @@ function ActionButton({
   return (
     <button
       onClick={onClick}
+      title={label}
+      aria-label={label}
       style={{
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
         gap: 8,
-        height: 36,
-        padding: "0 12px",
+        // 42 px on mobile for HIG tap-target; icon-only avoids wrapping.
+        height: isMobile ? 42 : 36,
+        width: isMobile ? 42 : undefined,
+        padding: isMobile ? 0 : "0 12px",
         borderRadius: "var(--radius-full)",
         border: `1px solid color-mix(in srgb, ${color} 28%, var(--color-border) 72%)`,
         background: `color-mix(in srgb, ${color} 10%, var(--color-surface) 90%)`,
@@ -158,12 +164,12 @@ function ActionButton({
       }}
     >
       <Icon
-        size={14}
+        size={isMobile ? 16 : 14}
         strokeWidth={2.25}
         aria-hidden="true"
         style={{ display: "block" }}
       />
-      {label}
+      {!isMobile && label}
     </button>
   );
 }

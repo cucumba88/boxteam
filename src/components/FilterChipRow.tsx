@@ -167,7 +167,9 @@ export default function FilterChipRow({
             outline: "none",
             background: "transparent",
             color: "var(--color-text)",
-            fontSize: 13,
+            // 16px minimum prevents iOS Safari from auto-zooming the page
+            // when the input gains focus.
+            fontSize: 16,
             fontFamily: "inherit",
           }}
         />

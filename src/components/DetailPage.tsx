@@ -252,7 +252,9 @@ export default function DetailPage({
         }}
       />
 
-      {/* Sticky top action bar */}
+      {/* Sticky top action bar — opaque bg, no backdrop-filter. A sticky
+          blur over a scrolling page is one of the most expensive things
+          you can do on iOS Safari (recomputes blur per paint frame). */}
       <div
         style={{
           position: "sticky",
@@ -262,10 +264,7 @@ export default function DetailPage({
           alignItems: "center",
           gap: 10,
           padding: "10px 24px",
-          background:
-            "color-mix(in srgb, var(--color-bg) 92%, transparent)",
-          backdropFilter: "blur(14px) saturate(140%)",
-          WebkitBackdropFilter: "blur(14px) saturate(140%)",
+          background: "var(--color-bg)",
           borderBottom:
             "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
         }}
