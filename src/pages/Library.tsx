@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Activity,
@@ -837,36 +837,39 @@ export default function Library({
     setRestoreGridIndex(0);
   };
 
-  const handleCardSelect = (item: MediaItem) => {
-    // Remember the grid's current scroll position so we can return to the
-    // same row when the user closes the detail / TV-show takeover. Captured
-    // before any state mutation that triggers re-render.
-    setRestoreGridIndex(firstVisibleIndexRef.current);
-    const isTV =
-      item.tmdb_type === "tv" ||
-      item.media_type === "tv" ||
-      item.media_type === "documentary";
-    if (isTV) {
-      setTvShow(item);
-    } else {
-      setSelectedGroupedView(activeTab === "movie" && movieView === "grouped");
-      setSelected(item);
-    }
-    // Push a deep-linkable URL when we have a tmdb_id (web mode only —
-    // Tauri has no URL bar so it's a no-op). Falls back to the file's db
-    // id under `/file/<n>` when there's no tmdb match.
-    if (!isTauri() && item.tmdb_id) {
-      const slug = isTV
-        ? item.media_type === "documentary"
-          ? "/documentales"
-          : "/series"
-        : "/peliculas";
-      const target = `${slug}/${item.tmdb_id}`;
-      if (window.location.pathname !== target) {
-        window.history.pushState({}, "", target);
+  const handleCardSelect = useCallback(
+    (item: MediaItem) => {
+      // Remember the grid's current scroll position so we can return to the
+      // same row when the user closes the detail / TV-show takeover. Captured
+      // before any state mutation that triggers re-render.
+      setRestoreGridIndex(firstVisibleIndexRef.current);
+      const isTV =
+        item.tmdb_type === "tv" ||
+        item.media_type === "tv" ||
+        item.media_type === "documentary";
+      if (isTV) {
+        setTvShow(item);
+      } else {
+        setSelectedGroupedView(activeTab === "movie" && movieView === "grouped");
+        setSelected(item);
       }
-    }
-  };
+      // Push a deep-linkable URL when we have a tmdb_id (web mode only —
+      // Tauri has no URL bar so it's a no-op). Falls back to the file's db
+      // id under `/file/<n>` when there's no tmdb match.
+      if (!isTauri() && item.tmdb_id) {
+        const slug = isTV
+          ? item.media_type === "documentary"
+            ? "/documentales"
+            : "/series"
+          : "/peliculas";
+        const target = `${slug}/${item.tmdb_id}`;
+        if (window.location.pathname !== target) {
+          window.history.pushState({}, "", target);
+        }
+      }
+    },
+    [activeTab, movieView],
+  );
 
   /** Pop the detail segment off the URL back to the tab list (web mode). */
   const popDetailFromUrl = () => {
@@ -903,12 +906,13 @@ export default function Library({
     }
   };
 
-  const toggleCheck = (id: number) =>
+  const toggleCheck = useCallback((id: number) => {
     setCheckedIds((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  }, []);
 
   const exitSelect = () => {
     setSelecting(false);
@@ -1087,9 +1091,14 @@ export default function Library({
     () => (showAlphaRail ? buildAlphaIndex(filtered, language) : null),
     [filtered, language, showAlphaRail],
   );
-  const handleAlphaJump = (letter: string) => {
-    if (!alphaIndex) return;
-    const idx = alphaIndex[letter];
+  const alphaIndexRef = useRef(alphaIndex);
+  useEffect(() => {
+    alphaIndexRef.current = alphaIndex;
+  }, [alphaIndex]);
+  const handleAlphaJump = useCallback((letter: string) => {
+    const current = alphaIndexRef.current;
+    if (!current) return;
+    const idx = current[letter];
     if (idx == null) return;
     setJumpRequest({ index: idx, tick: Date.now() });
     setPinnedLetter(letter);
@@ -1100,13 +1109,40 @@ export default function Library({
       setPinnedLetter(null);
       pinTimerRef.current = null;
     }, 1500);
-  };
+  }, []);
 
   // Cancel any pending pin timer on unmount.
   useEffect(() => {
     return () => {
       if (pinTimerRef.current) window.clearTimeout(pinTimerRef.current);
     };
+  }, []);
+
+  // Stable callbacks for the grid so its memo holds across Library re-renders
+  // (which happen ~6-7×/sec during scroll due to visibleRange + activeLetter
+  // state updates). Without these, every Library render re-creates inline
+  // arrows and the grid's memo bails out, costing a full virtual-row remap
+  // per render.
+  const handleVisibleRangeChange = useCallback((start: number, end: number) => {
+    setVisibleRange({ start, end });
+  }, []);
+  const handleFirstVisibleIndexChange = useCallback((idx: number) => {
+    firstVisibleIndexRef.current = idx;
+  }, []);
+  // Only setState the active letter when the alpha rail is actually shown.
+  // Otherwise every row crossed during scroll triggers a useless re-render
+  // (especially bad on the All tab with sort = "Recently added" where every
+  // row tends to start with a different letter).
+  const showAlphaRailRef = useRef(showAlphaRail);
+  useEffect(() => {
+    showAlphaRailRef.current = showAlphaRail;
+    if (!showAlphaRail) setActiveLetter(null);
+  }, [showAlphaRail]);
+  const handleActiveLetterChange = useCallback((letter: string) => {
+    if (showAlphaRailRef.current) setActiveLetter(letter);
+  }, []);
+  const handleInitialScrollConsumed = useCallback(() => {
+    setRestoreGridIndex(0);
   }, []);
 
   // Visible-window items drive badge fetching — only request badges for what
@@ -1710,15 +1746,11 @@ export default function Library({
           useGroupedMovies || (isSeriesTab && !useEpisodeList)
         }
         jumpRequest={jumpRequest}
-        onVisibleRangeChange={(start, end) =>
-          setVisibleRange({ start, end })
-        }
-        onFirstVisibleIndexChange={(idx) => {
-          firstVisibleIndexRef.current = idx;
-        }}
-        onActiveLetterChange={setActiveLetter}
+        onVisibleRangeChange={handleVisibleRangeChange}
+        onFirstVisibleIndexChange={handleFirstVisibleIndexChange}
+        onActiveLetterChange={handleActiveLetterChange}
         initialScrollIndex={restoreGridIndex}
-        onInitialScrollConsumed={() => setRestoreGridIndex(0)}
+        onInitialScrollConsumed={handleInitialScrollConsumed}
       />
       {showAlphaRail && alphaIndex && (
         <AlphaJumpRail

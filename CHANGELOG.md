@@ -1,5 +1,17 @@
 # Novedades de Oscata
 
+## Versión 0.10.4 — 18 de mayo de 2026
+
+### ⚡ Scroll en móvil, segunda pasada — el tab "Todo" en concreto
+
+La v0.10.3 mejoró el caso medio pero seguía notándose lento en la pestaña "Todo", que mueve unos 3.500 ítems frente a los ~500 de Películas. Dos causas pendientes:
+
+1. **`setActiveLetter` se disparaba aunque el rail A-Z no estuviese a la vista** — el grid emite el bucket cada vez que cruzas una fila. En "Todo" con orden "Recién añadidos" cada fila empieza por una letra distinta, así que cruzar una fila implicaba `setState` en `Library` y por tanto un re-render de todo el componente (3.500 líneas de JSX). Ahora el handler de Library descarta la emisión si `showAlphaRail` es `false` — sin rail, sin setState.
+
+2. **Callbacks inestables en los props del grid rompían su `memo`** — `handleCardSelect`, `toggleCheck`, `handleAlphaJump` y las tres flechas inline (`onVisibleRangeChange`, `onFirstVisibleIndexChange`, `onInitialScrollConsumed`) se creaban nuevas en cada render de `Library`. El grid está envuelto en `memo`, pero la comparación superficial de props fallaba con esas referencias siempre nuevas, así que el grid se re-renderizaba cada vez que algo en Library cambiaba (~6-7 veces por segundo durante el scroll por la actualización debounced de `visibleRange`). Se envuelven los seis en `useCallback` con dependencias correctas; el memo del grid agarra y ya sólo se renderiza cuando su propio estado interno del virtualizador cambia.
+
+---
+
 ## Versión 0.10.3 — 17 de mayo de 2026
 
 ### ⚡ Scroll en móvil fluido
