@@ -308,6 +308,9 @@ export default memo(function VirtualMediaGrid({
       style={{
         height: "100%",
         overflowY: "auto",
+        // Prevent iOS Safari from handing off the scroll gesture to a
+        // parent scroll container when the user reaches top/bottom.
+        overscrollBehavior: "contain",
         paddingLeft: PADDING_X,
         paddingRight: PADDING_X,
         paddingTop: PADDING_TOP,

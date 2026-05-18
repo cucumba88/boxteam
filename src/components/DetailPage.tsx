@@ -196,6 +196,7 @@ export default function DetailPage({
         width: "100%",
         overflowY: "auto",
         overflowX: "hidden",
+        overscrollBehavior: "contain",
         background: "var(--color-bg)",
         animation: "detail-page-in 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
       }}

@@ -732,6 +732,7 @@ export default function DownloadsTab({
       style={{
         height: "100%",
         overflowY: "auto",
+        overscrollBehavior: "contain",
         display: "flex",
         flexDirection: "column",
       }}

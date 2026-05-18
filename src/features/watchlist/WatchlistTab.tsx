@@ -161,7 +161,11 @@ export default function WatchlistTab({
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        overflowY: "auto",
+        // Outer wrapper does NOT scroll — the inner grid div below has its
+        // own overflowY:auto. Having both was a literal double-scrollbar
+        // bug on mobile.
+        overflow: "hidden",
+        minHeight: 0,
       }}
     >
       {/* Library's outer toolbar already renders "Seguimiento N titles", so
@@ -311,6 +315,7 @@ export default function WatchlistTab({
         style={{
           flex: 1,
           overflowY: "auto",
+          overscrollBehavior: "contain",
           padding: isMobile ? "16px 1.5rem 6.5rem" : "1.5rem",
         }}
       >
