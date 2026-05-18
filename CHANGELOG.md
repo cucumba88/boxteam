@@ -4,7 +4,7 @@
 
 ### ⚡ Scroll en móvil fluido por fin
 
-El scroll en iPhone iba lentísimo desde v0.10.0. Dos cuellos de botella alimentaban una tormenta de re-renders en cada tick de scroll:
+El scroll en móvil (iOS y Android) iba lentísimo desde v0.10.0. Dos cuellos de botella alimentaban una tormenta de re-renders en cada tick de scroll:
 
 1. **`setFirstVisibleIndex` en cada cambio de fila** — el grid emitía el índice del primer item visible a un `useState` de `Library`, lo que disparaba un re-render del árbol completo de `Library` (~3.500 líneas de JSX) en cada ~250 px de scroll. Lo movemos a un `useRef` (no provoca re-render); a cambio el grid emite un nuevo evento `onActiveLetterChange` que sólo dispara cuando cambia la letra del primer item visible (~1-2 veces por segundo de scroll). El highlight del rail A-Z sigue exactamente igual; el cambio es transparente.
 
