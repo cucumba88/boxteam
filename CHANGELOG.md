@@ -1,5 +1,19 @@
 # Novedades de Oscata
 
+## Versión 0.10.3 — 17 de mayo de 2026
+
+### ⚡ Scroll en móvil fluido por fin
+
+El scroll en iPhone iba lentísimo desde v0.10.0. Dos cuellos de botella alimentaban una tormenta de re-renders en cada tick de scroll:
+
+1. **`setFirstVisibleIndex` en cada cambio de fila** — el grid emitía el índice del primer item visible a un `useState` de `Library`, lo que disparaba un re-render del árbol completo de `Library` (~3.500 líneas de JSX) en cada ~250 px de scroll. Lo movemos a un `useRef` (no provoca re-render); a cambio el grid emite un nuevo evento `onActiveLetterChange` que sólo dispara cuando cambia la letra del primer item visible (~1-2 veces por segundo de scroll). El highlight del rail A-Z sigue exactamente igual; el cambio es transparente.
+
+2. **Callbacks inline rompían el `memo` de `MediaCard`** — el grid pasaba `onSelect={(s) => …}` como flecha anónima en cada render. Aunque `MediaCard` está memoizado, cada render del grid generaba una nueva referencia y rompía la igualdad superficial — todas las cartas visibles re-renderizaban en cada scroll. Se introducen handlers estables (`useCallback` con dependencias vacías que leen el estado vivo desde refs) para `onSelect` y `onDownload` dentro del grid. Ahora el memo de `MediaCard` agarra y las cartas no se re-renderizan al hacer scroll, sólo cuando cambian sus datos (badges, downloadMap, etc.).
+
+El "pin" del A-Z (mantener la letra resaltada justo después de un click) ya no depende del índice del primer item visible — ahora es un timeout de 1.5 s que cubre la animación del scroll suave. Más simple y robusto.
+
+---
+
 ## Versión 0.10.2 — 17 de mayo de 2026
 
 ### 🔙 Volver del detalle preserva la posición de scroll

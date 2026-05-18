@@ -63,11 +63,7 @@ import VirtualMediaGrid, {
   type JumpRequest,
 } from "../components/VirtualMediaGrid";
 import AlphaJumpRail from "../components/AlphaJumpRail";
-import {
-  buildAlphaIndex,
-  firstCharBucket,
-  titleSortKey,
-} from "../utils/alphaJump";
+import { buildAlphaIndex, titleSortKey } from "../utils/alphaJump";
 import ThemeToggle from "../components/ThemeToggle";
 import { AppLanguage, getLocalizedTitle } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
@@ -471,18 +467,25 @@ export default function Library({
     start: number;
     end: number;
   }>({ start: 0, end: 0 });
-  const [firstVisibleIndex, setFirstVisibleIndex] = useState(0);
+  // Ref, not state — updated by the grid on every scroll tick. Keeping
+  // this out of React state avoids re-rendering the entire Library tree
+  // every time the user moves the scroll by one row (kills perf on iOS).
+  const firstVisibleIndexRef = useRef(0);
+  // Active rail letter — updated by the grid only when the bucket actually
+  // changes (~once per row of scroll), so this state change fires a few
+  // times per second of scrolling instead of every frame.
+  const [activeLetter, setActiveLetter] = useState<string | null>(null);
   // Saved grid scroll position so that closing a detail / TV-show takeover
   // returns the user to roughly the same row instead of snapping to the top.
   // Set by handleCardSelect, cleared by switchTab and after the grid consumes
   // it via onInitialScrollConsumed.
   const [restoreGridIndex, setRestoreGridIndex] = useState(0);
   // After a rail click we lock the highlight to the clicked letter so the
-  // user always sees their click confirmed — the row containing the first
-  // L item may have column-0 in K, which otherwise leaves the highlight
-  // stuck on K. The lock clears the moment the user scrolls.
+  // user always sees their click confirmed. Auto-clears after 1.5s — long
+  // enough to cover the smooth-scroll animation, short enough that genuine
+  // user scrolling takes over quickly.
   const [pinnedLetter, setPinnedLetter] = useState<string | null>(null);
-  const pinnedAtIndexRef = useRef<number | null>(null);
+  const pinTimerRef = useRef<number | null>(null);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [showMobileNavMenu, setShowMobileNavMenu] = useState(false);
   const mobileNavMenuRef = useRef<HTMLDivElement>(null);
@@ -824,8 +827,12 @@ export default function Library({
     // instead of re-running a stale scrollToIndex from the previous tab.
     setJumpRequest(undefined);
     setPinnedLetter(null);
-    pinnedAtIndexRef.current = null;
-    setFirstVisibleIndex(0);
+    if (pinTimerRef.current) {
+      window.clearTimeout(pinTimerRef.current);
+      pinTimerRef.current = null;
+    }
+    setActiveLetter(null);
+    firstVisibleIndexRef.current = 0;
     setVisibleRange({ start: 0, end: 0 });
     setRestoreGridIndex(0);
   };
@@ -834,7 +841,7 @@ export default function Library({
     // Remember the grid's current scroll position so we can return to the
     // same row when the user closes the detail / TV-show takeover. Captured
     // before any state mutation that triggers re-render.
-    setRestoreGridIndex(firstVisibleIndex);
+    setRestoreGridIndex(firstVisibleIndexRef.current);
     const isTV =
       item.tmdb_type === "tv" ||
       item.media_type === "tv" ||
@@ -1086,28 +1093,21 @@ export default function Library({
     if (idx == null) return;
     setJumpRequest({ index: idx, tick: Date.now() });
     setPinnedLetter(letter);
-    // Remember which row this jump landed on. The virtualizer will fire
-    // onFirstVisibleIndexChange a few times during the smooth scroll; we
-    // unpin only when the user scrolls past that row.
-    pinnedAtIndexRef.current = idx;
+    // Auto-clear after the smooth-scroll settles. After this the rail
+    // highlight follows the scroll-driven activeLetter signal again.
+    if (pinTimerRef.current) window.clearTimeout(pinTimerRef.current);
+    pinTimerRef.current = window.setTimeout(() => {
+      setPinnedLetter(null);
+      pinTimerRef.current = null;
+    }, 1500);
   };
 
-  // Clear the pinned letter as soon as the user actively scrolls away from
-  // the jump target. We treat any first-visible-index change outside the
-  // jumped row as user-driven scroll.
+  // Cancel any pending pin timer on unmount.
   useEffect(() => {
-    if (pinnedAtIndexRef.current == null) return;
-    if (alphaIndex == null) return;
-    const pinnedIdx = pinnedAtIndexRef.current;
-    // Allow a small tolerance: column-0 of the jumped row, or anywhere up to
-    // a row above/below.
-    const drift = Math.abs(firstVisibleIndex - pinnedIdx);
-    if (drift > 14) {
-      // User has clearly scrolled away — drop the pin.
-      pinnedAtIndexRef.current = null;
-      setPinnedLetter(null);
-    }
-  }, [firstVisibleIndex, alphaIndex]);
+    return () => {
+      if (pinTimerRef.current) window.clearTimeout(pinTimerRef.current);
+    };
+  }, []);
 
   // Visible-window items drive badge fetching — only request badges for what
   // the user can see (or recently scrolled past). `badgeMap` caches results
@@ -1713,7 +1713,10 @@ export default function Library({
         onVisibleRangeChange={(start, end) =>
           setVisibleRange({ start, end })
         }
-        onFirstVisibleIndexChange={setFirstVisibleIndex}
+        onFirstVisibleIndexChange={(idx) => {
+          firstVisibleIndexRef.current = idx;
+        }}
+        onActiveLetterChange={setActiveLetter}
         initialScrollIndex={restoreGridIndex}
         onInitialScrollConsumed={() => setRestoreGridIndex(0)}
       />
@@ -1722,14 +1725,7 @@ export default function Library({
           alphaIndex={alphaIndex}
           onJump={handleAlphaJump}
           language={language}
-          activeLetter={
-            pinnedLetter ??
-            (filtered[firstVisibleIndex]
-              ? firstCharBucket(
-                  getLocalizedTitle(filtered[firstVisibleIndex], language),
-                )
-              : null)
-          }
+          activeLetter={pinnedLetter ?? activeLetter}
         />
       )}
     </>
