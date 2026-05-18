@@ -234,6 +234,7 @@ export default function WebUsers({ onBack }: WebUsersProps = {}) {
         style={{
           flex: 1,
           overflowY: "auto",
+          overscrollBehavior: "contain",
           background: "transparent",
         }}
       >

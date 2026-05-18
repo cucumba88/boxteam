@@ -1726,6 +1726,7 @@ export default function Settings({
         style={{
           flex: 1,
           overflowY: "auto",
+          overscrollBehavior: "contain",
           background: "transparent",
         }}
       >

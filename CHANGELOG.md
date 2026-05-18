@@ -1,5 +1,21 @@
 # Novedades de Oscata
 
+## Versión 0.10.11 — 18 de mayo de 2026
+
+### 🐛 Doble scrollbar en móvil — vuelta
+
+La v0.10.9 bloqueó el scroll a nivel de `html`/`body`/`#root` y v0.10.7 a nivel de `.shell-root`, pero seguían apareciendo dos scrollbars en iPhone Safari al hacer scroll en las pestañas principales. Causa real: `.shell-body` y `.shell-content` no tenían regla de `overflow`, así que su valor por defecto era `visible`. Si por cualquier motivo algún hijo crecía por encima de la altura disponible (típico con flex columns + sticky elements en iOS), su scroll se filtraba al ancestro y aparecía como un segundo scrollbar.
+
+Además, **`WatchlistTab` tenía dos `overflow-y: auto` anidados directos** (root + grid div) — bug literal de doble scroll incluso en desktop, no detectado hasta ahora.
+
+Cambios:
+
+- `.shell-root`, `.shell-body`, `.shell-content` añaden `overflow: hidden` + `min-height: 0` en el media query móvil. Sólo los contenedores explícitos pueden hacer scroll.
+- Se añade `overscroll-behavior: contain` a todos los contenedores con scroll real: la rejilla virtualizada, el panel de Ajustes, las páginas de Detalle y Series, las pestañas de Descargas / Subidas / Seguimiento y la página de Usuarios. Esto evita que iOS Safari pase el gesto de scroll al padre cuando se llega al borde.
+- El `<div>` raíz de Watchlist deja de tener `overflow: auto`; el scroll real vive sólo en el grid interno.
+
+---
+
 ## Versión 0.10.10 — 18 de mayo de 2026
 
 Tres bugs concretos que el sweep anterior no detectó:

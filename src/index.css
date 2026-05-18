@@ -321,15 +321,25 @@ select {
 /* ── Mobile (≤767px) ──────────────────────────────────────────────────── */
 @media (max-width: 767px) {
   /* Lock the page-level scroll on mobile. The grid (and any other internal
-     scroll container) handle their own overflow; the html/body must not
-     also scroll, otherwise iOS Safari shows two stacked scrolls (the page
-     and the inner content). */
+     scroll container) handle their own overflow; everything above them in
+     the flex chain must NOT scroll, otherwise iOS Safari shows two stacked
+     scroll containers (the page and the inner content). */
   html,
   body,
   #root {
     height: 100dvh;
     overflow: hidden;
     overscroll-behavior: none;
+  }
+  /* Belt-and-suspenders: every flex-container ancestor of a scrollable
+     panel (grid, Settings panel, DetailPage scroll, etc.) also gets
+     overflow: hidden + min-height: 0 so it can never grow taller than the
+     viewport and accidentally introduce a second scrollbar. */
+  .shell-root,
+  .shell-body,
+  .shell-content {
+    overflow: hidden;
+    min-height: 0;
   }
 
   /* Bottom tab bar clears scrollable content */

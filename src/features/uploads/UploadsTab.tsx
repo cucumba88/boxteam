@@ -65,6 +65,7 @@ export default function UploadsTab({
       style={{
         height: "100%",
         overflowY: "auto",
+        overscrollBehavior: "contain",
         display: "flex",
         flexDirection: "column",
       }}
