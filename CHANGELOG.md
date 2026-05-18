@@ -1,5 +1,28 @@
 # Novedades de Oscata
 
+## Versión 0.10.12 — 18 de mayo de 2026
+
+Tres bugs introducidos por los cambios de móvil recientes:
+
+### 🐛 Menú de perfil (avatar) no aparecía en móvil
+
+Causa: `UserMenu` se montaba **dos veces** en el árbol — una en el `footerSlot` de la `AppSidebar` (`display: none` en móvil, pero React lo monta igual) y otra en el navbar superior móvil. Ambas instancias comparten el prop `menuOpen` desde el router, así que al pulsar el avatar móvil:
+
+1. La instancia móvil abría su menú en la posición correcta (debajo del avatar).
+2. La instancia oculta del sidebar **también** abría su menú, pero su `buttonRef` apuntaba a un elemento con `display: none` cuyo `getBoundingClientRect()` devuelve ceros — el portal acababa renderizado en `(8, 8)` por las cláusulas de clamping. Dos menús a la vez, uno tapando el otro, taps yendo al equivocado.
+
+Solución: en móvil se pasa `footerSlot={undefined}` y `collapsedFooterSlot={undefined}` a `AppSidebar` para que `UserMenu` se monte **sólo** donde es visible.
+
+### 🐛 No se podía guardar en Ajustes en móvil
+
+El footer con los botones "Cancelar / Guardar / Guardar y reindexar" estaba siendo tapado por la barra inferior de pestañas (`position: fixed, bottom: 0, height: ~64px + safe-area`). En móvil se añade `padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px))` al overlay de Ajustes para que el footer suba por encima de la tab bar.
+
+### 🐛 Versión no visible en Ajustes móvil
+
+La v0.10.10 escondió la pastilla de versión del header en móvil (para hacer sitio al botón "Atrás" + título) sin reubicarla. Ahora se muestra como texto discreto en el footer (donde antes vivía el "footerHelp", que se oculta en móvil), así que la versión sigue siendo visible.
+
+---
+
 ## Versión 0.10.11 — 18 de mayo de 2026
 
 ### 🐛 Doble scrollbar en móvil — vuelta

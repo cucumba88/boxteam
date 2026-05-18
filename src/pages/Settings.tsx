@@ -1618,6 +1618,13 @@ export default function Settings({
         display: "flex",
         flexDirection: "column",
         background: "var(--color-bg)",
+        // Bottom tab bar on mobile sits fixed at the viewport bottom and
+        // would cover the Settings footer (Save / Save and reindex). Push
+        // the whole overlay's content up by the tab bar height + safe-area
+        // so the footer is always tappable.
+        paddingBottom: isMobile
+          ? "calc(64px + env(safe-area-inset-bottom, 0px))"
+          : undefined,
         animation: "detail-page-in 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
       }}
     >
@@ -4147,7 +4154,13 @@ export default function Settings({
         }}
       >
           <div style={subtextStyle}>
-            {!isMobile && t(language, "settings.footerHelp")}
+            {isMobile ? (
+              <span style={{ color: "var(--color-text-muted)" }}>
+                v{appVersion}
+              </span>
+            ) : (
+              t(language, "settings.footerHelp")
+            )}
           </div>
 
           <div
