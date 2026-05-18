@@ -1905,10 +1905,13 @@ export default function Library({
           top: 0,
           zIndex: 50,
           height: 68,
+          // Opaque gradient — no backdrop-filter. On iOS Safari a fixed
+          // backdrop-filter atop a scrolling list forces the browser to
+          // recompute the blur on every paint frame, which destroys 120Hz
+          // scroll perf. The background is already ~98% opaque so visually
+          // the blur was barely doing anything anyway.
           background:
-            "linear-gradient(180deg, color-mix(in srgb, var(--color-bg) 98%, black), color-mix(in srgb, var(--color-bg) 96%, black))",
-          backdropFilter: "blur(16px) saturate(150%)",
-          WebkitBackdropFilter: "blur(16px) saturate(150%)",
+            "linear-gradient(180deg, var(--color-bg), color-mix(in srgb, var(--color-bg) 96%, black))",
           borderBottom: "1px solid color-mix(in srgb, white 10%, transparent)",
           boxShadow: "0 1px 24px color-mix(in srgb, black 28%, transparent)",
           alignItems: "center",
@@ -2237,11 +2240,13 @@ export default function Library({
             right: 0,
             zIndex: "var(--z-bottom-tabs)" as never,
             display: "flex",
-            background: "color-mix(in srgb, var(--color-bg) 96%, black)",
+            // Opaque background — no backdrop-filter. Fixed-position blur
+            // over a scrolling list is the #1 iOS Safari scroll-perf
+            // killer; we trade an imperceptible glass look for smooth
+            // 120Hz scrolling.
+            background: "var(--color-bg)",
             borderTop:
               "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
-            backdropFilter: "blur(16px)",
-            WebkitBackdropFilter: "blur(16px)",
             paddingBottom: "env(safe-area-inset-bottom, 0px)",
           }}
         >
