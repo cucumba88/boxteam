@@ -607,13 +607,21 @@
     display: none;
   }
 
+  /* Lock the mobile shell to the viewport — without this the flex chain
+     collapses to "size to content" and our virtualized grid below ends up
+     with clientHeight === scrollHeight, which makes @tanstack/react-virtual
+     think every row is visible and render the entire library (~3500 cards
+     on the All tab — 540,000px tall, zero virtualization, terrible scroll
+     on iOS). Using dvh so the iOS Safari URL bar shrink/grow doesn't break
+     it; 100vh kept as a fallback for browsers without dvh. */
   .shell-root {
-    height: auto;
-    min-height: 100vh;
-    overflow: visible;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
   }
 
   .shell-body {
     flex: 1 1 auto;
+    min-height: 0;
   }
 }

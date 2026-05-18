@@ -1,5 +1,31 @@
 # Novedades de Oscata
 
+## Versión 0.10.7 — 18 de mayo de 2026
+
+### 🐛 La virtualización no estaba funcionando en móvil — la causa real del scroll lento
+
+Las cuatro rondas anteriores de "optimización" del scroll en móvil (v0.10.3, v0.10.4, v0.10.5, v0.10.6) iban detrás del problema equivocado. El verdadero motivo lo encontré conectando el iPhone al Mac, levantando `ios_webkit_debug_proxy` contra Safari iOS y mirando el DOM en directo: **había 3.511 `.media-card` renderizadas a la vez** en la pestaña Todo. La virtualización no estaba virtualizando absolutamente nada.
+
+Pista en el DOM: el contenedor scrollable medía **542.293 píxeles de alto**, idéntico a su `scrollHeight`. Subiendo por la cadena de ancestros, todos los flex containers tenían exactamente esa misma altura — incluido `.shell-root`. El motivo: una regla en `shell.css` dentro del media query móvil:
+
+```css
+@media (max-width: 767px) {
+  .shell-root {
+    height: auto;          /* ← rompe la cadena flex */
+    min-height: 100vh;
+    overflow: visible;
+  }
+}
+```
+
+Con `height: auto`, todo el flex chain colapsa a "dimensiónate al contenido" en vez de "ocupa el viewport". El virtualizador de @tanstack/react-virtual lee `scrollEl.clientHeight` para saber cuántas filas son visibles; al recibir 542.293 px lo interpreta como "todo el viewport, renderiza absolutamente todo". Con ~3.500 cartas a la vez en el DOM en una iPhone, el scroll era inutilizable por motivos obvios.
+
+Se cambia a `height: 100vh; height: 100dvh; overflow: hidden;` en móvil. El `dvh` evita que la barra de URL de Safari iOS al aparecer/desaparecer rompa la altura. Con esto la cadena flex se constriñe al viewport y la virtualización funciona: ~10-20 cartas en el DOM en lugar de 3.500.
+
+Las cuatro pasadas previas (callbacks estables, eliminar backdrop-filter, quitar shimmer animado, reducir overscan) siguen siendo correctas y necesarias — sumadas a esta corrección, el scroll en iPhone debería sentirse nativo.
+
+---
+
 ## Versión 0.10.6 — 18 de mayo de 2026
 
 ### ⚡ Scroll en móvil, cuarta pasada — animación shimmer del póster
