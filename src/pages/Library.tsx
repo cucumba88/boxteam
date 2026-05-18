@@ -1824,8 +1824,13 @@ export default function Library({
       onOpenSettings={() => setShowSettings(true)}
       settingsLabel={t(language, "settings.title")}
       settingsActive={showSettings}
-      footerSlot={sidebarFooter}
-      collapsedFooterSlot={headerSlot}
+      // headerSlot (UserMenu) is rendered in the mobile top navbar already.
+      // Mount it ONLY in the visible location — otherwise the
+      // display:none sidebar instance also mounts, its hidden button
+      // returns a zero-rect, and its portal renders at (8,8) overlapping
+      // the real mobile menu.
+      footerSlot={isMobile ? undefined : sidebarFooter}
+      collapsedFooterSlot={isMobile ? undefined : headerSlot}
     />
   );
 
