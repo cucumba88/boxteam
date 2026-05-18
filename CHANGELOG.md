@@ -1,5 +1,34 @@
 # Novedades de Oscata
 
+## Versión 0.10.10 — 18 de mayo de 2026
+
+Tres bugs concretos que el sweep anterior no detectó:
+
+### 🐛 El menú de usuario no funcionaba en móvil
+
+`UserMenu` (avatar + dropdown con email, "Gestionar usuarios", "Cerrar sesión") siempre flotaba **hacia arriba** desde el avatar, asumiendo el patrón de escritorio donde el avatar está en la esquina inferior izquierda de la sidebar. En móvil el avatar está en la barra superior — no hay espacio arriba, así que el menú se renderizaba prácticamente fuera de pantalla, recortado por el borde superior. Ahora se mide el espacio disponible arriba vs abajo y se elige dirección dinámicamente: en móvil cae **debajo** del avatar.
+
+### 🐛 Ajustes recortaba sus elementos en móvil
+
+`index.css` tenía un media-query móvil heredado de cuando Ajustes era un modal centrado:
+
+```css
+.settings-overlay { padding: 0.5rem !important; padding-top: 2rem !important; }
+.settings-panel { max-height: calc(100dvh - 2.5rem) !important; }
+```
+
+Ajustes pasó a ser una toma de pantalla completa hace varias versiones, así que esas reglas se quedaron obsoletas. El `padding-top: 2rem` empujaba el contenido hacia dentro y la barra de "Atrás" dejaba de quedar pegada al borde superior; el `max-height: calc(100dvh - 2.5rem)` cortaba ~35 px al fondo, recortando los últimos botones de la última sección. Se eliminan las dos reglas.
+
+### 🐛 Cabecera de Ajustes apretada en móvil
+
+Mismo tema, sumado a que la pastilla de versión "v0.10.x" robaba ancho innecesario en una pantalla de 393 px. En móvil ahora:
+
+- La cabecera usa `padding: 10px 12px` en lugar de `10px 24px` (edge-to-edge útil).
+- La pastilla de versión se oculta (la versión sigue siendo visible en "Acerca de" y en el pie del propio Ajustes).
+- El título "Ajustes" puede hacer ellipsis si por algún motivo no cabe.
+
+---
+
 ## Versión 0.10.9 — 18 de mayo de 2026
 
 ### 🐛 Doble scroll en móvil

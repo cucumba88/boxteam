@@ -259,10 +259,17 @@ function UserMenu({
     if (!menuOpen) return;
     const rect = buttonRef.current?.getBoundingClientRect();
     if (!rect) return;
-    // Float the menu UP above the avatar with right edge aligned to button.
+    // Flip menu direction based on available space. Desktop sidebar puts
+    // the avatar at the bottom-left → menu floats UP. Mobile puts it in
+    // the top navbar → there's no room above so the menu must float DOWN.
     const menuWidth = 220;
-    const menuMaxHeight = 200;
-    const top = Math.max(8, rect.top - menuMaxHeight - 8);
+    const menuMaxHeight = 240;
+    const spaceAbove = rect.top;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const placeBelow = spaceAbove < menuMaxHeight + 16 && spaceBelow >= spaceAbove;
+    const top = placeBelow
+      ? Math.min(window.innerHeight - menuMaxHeight - 8, rect.bottom + 8)
+      : Math.max(8, rect.top - menuMaxHeight - 8);
     const left = Math.max(
       8,
       Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth),
