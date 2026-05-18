@@ -225,24 +225,13 @@ select {
   animation: ring-pulse 1.4s ease-in-out infinite;
 }
 
-/* Poster shimmer */
-@keyframes poster-shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
+/* Poster placeholder while the image loads. We used to animate a gradient
+   via background-position here, but that's a paint-thread animation —
+   with 20+ cards visible at once it competed with the scroll repaint on
+   iOS Safari and stuttered the grid. The plain dark surface plus the
+   img fade-in is enough feedback that the content is loading. */
 .poster-shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--color-surface) 25%,
-    var(--color-surface-2) 50%,
-    var(--color-surface) 75%
-  );
-  background-size: 200% 100%;
-  animation: poster-shimmer 1.4s ease-in-out infinite;
+  background: var(--color-surface-2);
 }
 
 /* Image fade-in on load */

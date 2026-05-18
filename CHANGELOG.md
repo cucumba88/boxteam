@@ -1,5 +1,15 @@
 # Novedades de Oscata
 
+## Versión 0.10.6 — 18 de mayo de 2026
+
+### ⚡ Scroll en móvil, cuarta pasada — animación shimmer del póster
+
+La animación de "shimmer" que aparecía sobre cada carta mientras se cargaba su póster animaba `background-position` en un gradiente lineal — es una animación a **hilo de pintura** (paint), no a hilo de compositor. Con 20+ cartas visibles a la vez durante el scroll, cada una repintando su gradiente en cada frame, la pintura competía con el repintado del propio scroll. Resultado: tirones.
+
+Se elimina la animación; queda un fondo plano del color de la superficie como placeholder. El fade-in del `<img>` al cargar sigue dando el feedback de "contenido entrando", que es lo que realmente comunicaba la información al usuario.
+
+---
+
 ## Versión 0.10.5 — 18 de mayo de 2026
 
 ### ⚡ Scroll en móvil, tercera pasada — el verdadero culpable era CSS
