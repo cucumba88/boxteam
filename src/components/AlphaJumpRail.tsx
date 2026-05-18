@@ -34,10 +34,11 @@ export default function AlphaJumpRail({
         gap: 1,
         padding: "8px 4px",
         borderRadius: 14,
+        // Opaque-ish background, no backdrop-filter — over a scrolling
+        // grid on iOS Safari, the blur recomputes every paint frame and
+        // tanks scroll perf.
         background:
-          "color-mix(in srgb, var(--color-surface) 75%, transparent)",
-        backdropFilter: "blur(8px)",
-        WebkitBackdropFilter: "blur(8px)",
+          "color-mix(in srgb, var(--color-surface) 96%, transparent)",
         border:
           "1px solid color-mix(in srgb, var(--color-border) 55%, transparent)",
         boxShadow:

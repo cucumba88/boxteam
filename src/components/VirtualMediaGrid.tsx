@@ -134,7 +134,10 @@ export default memo(function VirtualMediaGrid({
     count: rowCount,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
-    overscan: 4,
+    // Smaller overscan = fewer card mounts when scrolling fast. 2 still
+    // gives a row above + below the viewport so cards never pop in
+    // mid-scroll, but halves the per-render reconciliation work vs. 4.
+    overscan: 2,
   });
 
   // Reset scroll on filter/sort/tab change. Skip when an `initialScrollIndex`

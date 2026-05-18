@@ -1,8 +1,22 @@
 # Novedades de Oscata
 
-## Versión 0.10.4 — 18 de mayo de 2026
+## Versión 0.10.5 — 18 de mayo de 2026
 
-### ⚡ Scroll en móvil, segunda pasada — el tab "Todo" en concreto
+### ⚡ Scroll en móvil, tercera pasada — el verdadero culpable era CSS
+
+Las dos rondas anteriores (v0.10.3, v0.10.4) optimizaron React pero el scroll seguía igual de malo en iPhone. El motivo no estaba en React: estaba en tres `backdrop-filter` siempre visibles encima del scroll. En iOS Safari, un `backdrop-filter` con `position: fixed` (o sticky) sobre una lista que se está desplazando obliga al navegador a recalcular el blur en cada frame de pintura — un asesino conocido del scroll a 120 Hz.
+
+Los tres elementos:
+
+1. **Navbar superior móvil** — `position: sticky` con `backdrop-filter: blur(16px) saturate(150%)`. El fondo ya era ~98% opaco, así que el blur era prácticamente invisible. Se quita; queda el gradiente opaco.
+2. **Bottom tab bar móvil** — `position: fixed` con `backdrop-filter: blur(16px)`. Igual: fondo ya casi opaco, blur imperceptible. Se quita.
+3. **Columna A-Z lateral** — `backdrop-filter: blur(8px)` sobre la lista que está debajo. Se sube la opacidad del fondo de 75% → 96% y se quita el blur. Visualmente casi idéntico.
+
+Adicionalmente se baja el `overscan` del virtualizador de 4 filas a 2 filas. Sigue habiendo una fila prerenderizada por encima y por debajo del viewport (para que no aparezcan tarjetas "popping" durante el scroll), pero la mitad de tarjetas off-screen significa la mitad de trabajo de React por render.
+
+---
+
+## Versión 0.10.4 — 18 de mayo de 2026
 
 La v0.10.3 mejoró el caso medio pero seguía notándose lento en la pestaña "Todo", que mueve unos 3.500 ítems frente a los ~500 de Películas. Dos causas pendientes:
 
