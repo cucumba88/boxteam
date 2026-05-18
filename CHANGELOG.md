@@ -2,15 +2,15 @@
 
 ## Versión 0.10.3 — 17 de mayo de 2026
 
-### ⚡ Scroll en móvil fluido por fin
+### ⚡ Scroll en móvil fluido
 
-El scroll en móvil (iOS y Android) iba lentísimo desde v0.10.0. Dos cuellos de botella alimentaban una tormenta de re-renders en cada tick de scroll:
+El scroll en móvil (iOS y Android) iba lento desde v0.10.0. Había dos causas que provocaban re-renders innecesarios en cada movimiento del scroll:
 
-1. **`setFirstVisibleIndex` en cada cambio de fila** — el grid emitía el índice del primer item visible a un `useState` de `Library`, lo que disparaba un re-render del árbol completo de `Library` (~3.500 líneas de JSX) en cada ~250 px de scroll. Lo movemos a un `useRef` (no provoca re-render); a cambio el grid emite un nuevo evento `onActiveLetterChange` que sólo dispara cuando cambia la letra del primer item visible (~1-2 veces por segundo de scroll). El highlight del rail A-Z sigue exactamente igual; el cambio es transparente.
+1. **`setFirstVisibleIndex` en cada cambio de fila** — el grid emitía el índice del primer item visible a un `useState` de `Library`, lo que disparaba un re-render del componente entero (~3.500 líneas de JSX) cada vez que el scroll avanzaba una fila. Se mueve a un `useRef`, que no provoca re-render. A cambio, el grid emite un nuevo evento `onActiveLetterChange` que sólo se dispara cuando cambia la letra del primer item visible (una o dos veces por segundo de scroll). El highlight del rail A-Z se comporta igual; el cambio es transparente para el usuario.
 
-2. **Callbacks inline rompían el `memo` de `MediaCard`** — el grid pasaba `onSelect={(s) => …}` como flecha anónima en cada render. Aunque `MediaCard` está memoizado, cada render del grid generaba una nueva referencia y rompía la igualdad superficial — todas las cartas visibles re-renderizaban en cada scroll. Se introducen handlers estables (`useCallback` con dependencias vacías que leen el estado vivo desde refs) para `onSelect` y `onDownload` dentro del grid. Ahora el memo de `MediaCard` agarra y las cartas no se re-renderizan al hacer scroll, sólo cuando cambian sus datos (badges, downloadMap, etc.).
+2. **Callbacks inline rompían el `memo` de `MediaCard`** — el grid pasaba `onSelect={(s) => …}` como flecha anónima en cada render. `MediaCard` está memoizado, pero cada render del grid generaba una referencia nueva y rompía la igualdad superficial, así que todas las cartas visibles se re-renderizaban con cada scroll. Se añaden handlers estables (`useCallback` con dependencias vacías que leen el estado vivo desde refs) para `onSelect` y `onDownload` dentro del grid. El memo vuelve a funcionar y las cartas sólo se re-renderizan cuando cambian sus datos (badges, downloadMap, etc.).
 
-El "pin" del A-Z (mantener la letra resaltada justo después de un click) ya no depende del índice del primer item visible — ahora es un timeout de 1.5 s que cubre la animación del scroll suave. Más simple y robusto.
+El "pin" del A-Z (mantener la letra resaltada justo después de un click) ya no depende del índice del primer item visible; pasa a ser un timeout de 1,5 s que cubre la animación del scroll suave.
 
 ---
 
