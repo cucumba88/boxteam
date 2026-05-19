@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { LogEntry } from "../components/ActivityLog";
 import { call, connectWs, isTauri } from "../lib/transport";
+import { getMedia, invalidateMedia } from "../lib/mediaCache";
 
 export interface MediaItem {
   id: number;
@@ -42,6 +43,7 @@ const ENABLE_ACTIVITY_LOG = import.meta.env.DEV;
 
 export function useIndexing() {
   const [items, setItems] = useState<MediaItem[]>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [isIndexing, setIsIndexing] = useState(false);
   const [crawlStats, setCrawlStats] = useState<{
     scannedFolders: number;
@@ -78,14 +80,16 @@ export function useIndexing() {
     setLog((prev) => [...prev.slice(-MAX_LOG + 1), { ts: Date.now(), msg }]);
   }, []);
 
-  // Hydrate from SQLite on mount
+  // Hydrate from SQLite on mount. Uses the shared mediaCache so this resolves
+  // instantly if router.tsx already kicked off the prefetch.
   useEffect(() => {
-    call<MediaItem[]>("get_all_media")
+    getMedia<MediaItem[]>()
       .then((loaded) => {
         rebuildIndex(loaded);
         setItems(loaded);
       })
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setInitialLoading(false));
   }, []);
 
   useEffect(() => {
@@ -144,6 +148,7 @@ export function useIndexing() {
       // Merge with in-memory state to preserve any TMDB patches (index:update)
       // that arrived between index:complete and when get_all_media resolves —
       // those writes may have been missed by the DB snapshot due to the race.
+      invalidateMedia();
       call<MediaItem[]>("get_all_media")
         .then((loaded) => {
           setItems((prev) => {
@@ -278,6 +283,7 @@ export function useIndexing() {
         addLog(
           `✓ Done — ${p.total} files indexed, ${p.new_items} new, ${p.removed ?? 0} stale items removed`,
         );
+        invalidateMedia();
         call<MediaItem[]>("get_all_media")
           .then((loaded) => {
             rebuildIndex(loaded);
@@ -318,6 +324,7 @@ export function useIndexing() {
           // Transition detected via poll (WS event may have been missed during reconnect).
           setProgress(null);
           setTmdbProgress(null);
+          invalidateMedia();
           const loaded = await call<MediaItem[]>("get_all_media");
           rebuildIndex(loaded);
           setItems(loaded);
@@ -345,6 +352,7 @@ export function useIndexing() {
 
   return {
     items,
+    initialLoading,
     isIndexing,
     crawlStats,
     progress,

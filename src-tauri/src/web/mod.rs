@@ -20,6 +20,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tauri::Manager;
 #[cfg(not(debug_assertions))]
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 
 static WEBGUI_RUNNING: std::sync::LazyLock<std::sync::atomic::AtomicBool> =
@@ -186,7 +187,10 @@ fn build_router(state: AppState) -> Router {
         }
     }
 
-    root.layer(cors)
+    // gzip/brotli compression shrinks the /api/media response 5-10x on real
+    // libraries (hundreds of KB of JSON → tens of KB). Big win on slow remote
+    // connections; transparent to browsers.
+    root.layer(CompressionLayer::new()).layer(cors)
 }
 
 /// In debug mode, proxy all non-API requests to the Vite dev server (HMR included).

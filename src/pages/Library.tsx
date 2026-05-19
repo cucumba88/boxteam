@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { call, isTauri } from "../lib/transport";
 import { getConfig, prefetchConfig } from "../lib/configCache";
+import { prefetchMedia } from "../lib/mediaCache";
 import AppShell from "../shell/AppShell";
 import AppSidebar, {
   type SidebarSection,
@@ -62,6 +63,7 @@ import { useQuitHandler } from "../hooks/useQuitHandler";
 import VirtualMediaGrid, {
   type JumpRequest,
 } from "../components/VirtualMediaGrid";
+import SkeletonGrid from "../components/SkeletonGrid";
 import AlphaJumpRail from "../components/AlphaJumpRail";
 import { buildAlphaIndex, titleSortKey } from "../utils/alphaJump";
 import ThemeToggle from "../components/ThemeToggle";
@@ -368,6 +370,7 @@ export default function Library({
     log,
     appendLog,
     clearLog,
+    initialLoading,
   } = useIndexing();
   const { quitDialogVisible, activeCount, confirmQuit, cancelQuit } =
     useQuitHandler();
@@ -512,8 +515,10 @@ export default function Library({
   const badgeRequestIdRef = useRef(0);
 
   // Pre-fetch config so Settings opens instantly when the user clicks the button.
+  // Pre-fetch the library so cold loads don't flash the empty state.
   useEffect(() => {
     prefetchConfig();
+    prefetchMedia();
   }, []);
 
   // Fetch FTP host once to populate the status bar.
@@ -3322,7 +3327,9 @@ export default function Library({
               <>
                 {mediaContent}
 
-                {filtered.length === 0 && !progress && (
+                {initialLoading && items.length === 0 && <SkeletonGrid />}
+
+                {filtered.length === 0 && !progress && !initialLoading && (
                   <div
                     style={{
                       position: "absolute",
