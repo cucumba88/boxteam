@@ -686,7 +686,7 @@ impl Db {
         Ok(())
     }
 
-    fn save_app_value(&self, key: &str, value: &str) -> Result<(), String> {
+    pub fn save_app_value(&self, key: &str, value: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO app_config (key, value) VALUES (?1, ?2)",
@@ -696,7 +696,7 @@ impl Db {
         Ok(())
     }
 
-    fn load_app_value(&self, key: &str) -> Result<Option<String>, String> {
+    pub fn load_app_value(&self, key: &str) -> Result<Option<String>, String> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
             "SELECT value FROM app_config WHERE key = ?1",

@@ -1,9 +1,13 @@
 pub mod auth;
+pub mod client_ip;
 pub mod dto;
 pub mod handlers;
+pub mod rate_limit;
+pub mod redact;
 
 use axum::{
     middleware,
+    response::Response as AxumResponse,
     routing::{delete, get, post, put},
     Router,
 };
@@ -21,7 +25,7 @@ use tauri::Manager;
 #[cfg(not(debug_assertions))]
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::compression::CompressionLayer;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 static WEBGUI_RUNNING: std::sync::LazyLock<std::sync::atomic::AtomicBool> =
     std::sync::LazyLock::new(|| std::sync::atomic::AtomicBool::new(false));
@@ -102,7 +106,10 @@ pub fn spawn_if_enabled(db: crate::db::Db, queue: crate::downloads::SharedQueue,
             }
         };
         println!("[webgui] listening on http://{addr}");
-        if let Err(e) = axum::serve(listener, build_router(state)).await {
+        // ConnectInfo<SocketAddr> needs `into_make_service_with_connect_info`
+        // so handlers can read the peer address (rate-limit, audit log).
+        let svc = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
+        if let Err(e) = axum::serve(listener, svc).await {
             WEBGUI_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
             eprintln!("[webgui] stopped: {e}");
         }
@@ -110,7 +117,7 @@ pub fn spawn_if_enabled(db: crate::db::Db, queue: crate::downloads::SharedQueue,
 }
 
 fn build_router(state: AppState) -> Router {
-    let cors = CorsLayer::permissive();
+    let cors = build_cors_layer(&state);
     let api_state = state.clone();
     let auth_mw = middleware::from_fn_with_state(api_state.clone(), auth::auth_middleware);
 
@@ -190,7 +197,113 @@ fn build_router(state: AppState) -> Router {
     // gzip/brotli compression shrinks the /api/media response 5-10x on real
     // libraries (hundreds of KB of JSON → tens of KB). Big win on slow remote
     // connections; transparent to browsers.
-    root.layer(CompressionLayer::new()).layer(cors)
+    root.layer(middleware::from_fn(security_headers_middleware))
+        .layer(CompressionLayer::new())
+        .layer(cors)
+}
+
+/// Build the CORS layer. Allowed origins come from (in priority order):
+///   1. `OSCATA_WEBGUI_ALLOWED_ORIGINS` env (comma-separated)
+///   2. `webgui_app_url` from DB config (the canonical external URL)
+///   3. dev fallback: `http://localhost:1420` (Vite dev server)
+///
+/// If no origin is configured AND no app_url is set, we fall back to
+/// `CorsLayer::permissive()` and log a loud warning — this preserves the
+/// out-of-the-box experience for first-run / desktop / LAN-only setups, but
+/// makes the misconfiguration impossible to miss for anyone exposing publicly.
+fn build_cors_layer(state: &AppState) -> CorsLayer {
+    use axum::http::HeaderValue;
+
+    let from_env: Vec<String> = std::env::var("OSCATA_WEBGUI_ALLOWED_ORIGINS")
+        .ok()
+        .map(|s| {
+            s.split(',')
+                .map(|o| o.trim().to_string())
+                .filter(|o| !o.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut origins: Vec<String> = from_env;
+    if origins.is_empty() {
+        if let Ok(cfg) = state.db.load_webgui_config() {
+            let url = cfg.app_url.trim().trim_end_matches('/').to_string();
+            if !url.is_empty() {
+                origins.push(url);
+            }
+        }
+    }
+    // Always allow the Vite dev server in debug builds.
+    #[cfg(debug_assertions)]
+    if !origins.iter().any(|o| o == "http://localhost:1420") {
+        origins.push("http://localhost:1420".into());
+    }
+
+    if origins.is_empty() {
+        eprintln!(
+            "[webgui] WARNING: no allowed origins configured (set \
+             OSCATA_WEBGUI_ALLOWED_ORIGINS or webgui app_url). \
+             CORS is wide open — do not expose to the public internet."
+        );
+        return CorsLayer::permissive();
+    }
+
+    let parsed: Vec<HeaderValue> = origins
+        .iter()
+        .filter_map(|o| o.parse::<HeaderValue>().ok())
+        .collect();
+    if parsed.is_empty() {
+        eprintln!("[webgui] WARNING: no origins parsed cleanly; falling back to permissive CORS");
+        return CorsLayer::permissive();
+    }
+    println!("[webgui] CORS locked to: {:?}", origins);
+
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(parsed))
+        .allow_methods(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any)
+}
+
+/// Sets defensive response headers on every response:
+/// - `Content-Security-Policy`: limits where the SPA can load script/img/connect from.
+/// - `X-Content-Type-Options: nosniff`
+/// - `X-Frame-Options: DENY` (no embedding in iframes)
+/// - `Referrer-Policy: strict-origin-when-cross-origin`
+async fn security_headers_middleware(
+    req: axum::http::Request<axum::body::Body>,
+    next: middleware::Next,
+) -> AxumResponse {
+    let mut resp = next.run(req).await;
+    let h = resp.headers_mut();
+    // Inline style/script are used by Vite for HMR in dev and by inline `style` attributes
+    // throughout the codebase, so 'unsafe-inline' is required. The data: scheme is needed
+    // for PWA icons / inline SVGs. wss: covers the live event websocket.
+    h.insert(
+        "content-security-policy",
+        axum::http::HeaderValue::from_static(
+            "default-src 'self'; \
+             img-src 'self' https://image.tmdb.org data: blob:; \
+             connect-src 'self' wss: ws:; \
+             style-src 'self' 'unsafe-inline'; \
+             script-src 'self' 'unsafe-inline'; \
+             font-src 'self' data:; \
+             frame-ancestors 'none'; \
+             base-uri 'self'",
+        ),
+    );
+    h.insert(
+        "x-content-type-options",
+        axum::http::HeaderValue::from_static("nosniff"),
+    );
+    h.insert(
+        "x-frame-options",
+        axum::http::HeaderValue::from_static("DENY"),
+    );
+    h.insert(
+        "referrer-policy",
+        axum::http::HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    resp
 }
 
 /// In debug mode, proxy all non-API requests to the Vite dev server (HMR included).
