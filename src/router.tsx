@@ -5,6 +5,7 @@ import Wizard from "./pages/Wizard";
 import Library from "./pages/Library";
 import { isTauri } from "./lib/transport";
 import { prefetchConfig } from "./lib/configCache";
+import { prefetchMedia } from "./lib/mediaCache";
 import { AuthProvider, useAuth } from "./lib/AuthContext";
 import { apiBase } from "./lib/transport";
 import Login from "./pages/Login";
@@ -60,6 +61,9 @@ function WebRouter() {
     // Pre-fetch the app config so Settings opens instantly (avoids the
     // full-screen loading overlay that shows while form === null).
     prefetchConfig();
+    // Pre-fetch the library so the grid renders real cards instead of an
+    // empty-state flash on cold load (slow remote connections).
+    prefetchMedia();
   }, []);
 
   // Outside-click for the avatar menu is handled inside UserMenu itself
@@ -146,6 +150,7 @@ function WebRouter() {
         onComplete={() => {
           setHasConfig(true);
           prefetchConfig();
+          prefetchMedia();
         }}
       />
     );

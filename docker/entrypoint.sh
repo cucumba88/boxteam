@@ -5,6 +5,8 @@ mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME/oscata-tau
 
 # Tauri/WebKit requires a display even in headless mode.
 # We start a minimal 1×1 virtual display; the actual window is hidden by OSCATA_HEADLESS=1.
+# Remove stale lock file left by previous container run (e.g. after host reboot).
+rm -f /tmp/.X99-lock
 Xvfb :99 -screen 0 1x1x8 -ac -nolisten tcp &
 
 exec /opt/oscata/oscata-tauri
