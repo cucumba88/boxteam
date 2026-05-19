@@ -10,6 +10,19 @@ fn clean_ftp_error(e: impl std::fmt::Display) -> String {
     e.to_string().replace("`\"", "").replace("\"`", "")
 }
 
+/// Like [`clean_ftp_error`] but also scrubs the FTP password from the message
+/// in case a misbehaving server echoes it back in an error (e.g. "530 Login
+/// incorrect: cucumba88:hunter2"). Only used at the login/connect boundary
+/// where the password is in scope.
+fn clean_ftp_error_redacted(e: impl std::fmt::Display, secret: &str) -> String {
+    let s = clean_ftp_error(e);
+    if secret.is_empty() {
+        s
+    } else {
+        s.replace(secret, "***")
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FtpFile {
     pub path: String,
@@ -24,8 +37,8 @@ const MEDIA_EXTENSIONS: &[&str] = &["mkv", "mp4", "avi", "m2ts", "mov", "ts"];
 async fn connect(host: &str, port: u16, user: &str, pass: &str) -> Result<AsyncFtpStream, String> {
     let mut ftp = AsyncFtpStream::connect(format!("{host}:{port}"))
         .await
-        .map_err(|e| clean_ftp_error(e))?;
-    ftp.login(user, pass).await.map_err(|e| clean_ftp_error(e))?;
+        .map_err(|e| clean_ftp_error_redacted(e, pass))?;
+    ftp.login(user, pass).await.map_err(|e| clean_ftp_error_redacted(e, pass))?;
     Ok(ftp)
 }
 
@@ -155,10 +168,10 @@ pub async fn test_connection(
     let addr = format!("{host}:{port}");
     let mut ftp = AsyncFtpStream::connect(&addr)
         .await
-        .map_err(|e| format!("Cannot connect to {addr}: {}", clean_ftp_error(e)))?;
+        .map_err(|e| format!("Cannot connect to {addr}: {}", clean_ftp_error_redacted(e, pass)))?;
     ftp.login(user, pass)
         .await
-        .map_err(|e| format!("Login failed: {}", clean_ftp_error(e)))?;
+        .map_err(|e| format!("Login failed: {}", clean_ftp_error_redacted(e, pass)))?;
     ftp.quit().await.ok();
     Ok(())
 }
