@@ -1,6 +1,8 @@
+use std::net::SocketAddr;
+
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
+    extract::{ConnectInfo, Path, State},
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use serde_json::Value;
@@ -9,9 +11,13 @@ use tauri::Manager;
 use crate::web::{
     auth::{AdminUser, ApiError, ApiResult, AuthUser, generate_otp, hash_password,
            new_session_token, verify_password},
+    client_ip::client_ip,
     dto::*,
+    rate_limit, redact,
     AppState,
 };
+
+const BOOTSTRAP_COMPLETE_KEY: &str = "bootstrap_complete";
 
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct CheckMediaBadgesRequest {
@@ -82,7 +88,25 @@ pub async fn auth_bootstrap(
     State(state): State<AppState>,
     Json(body): Json<BootstrapRequest>,
 ) -> ApiResult<Json<Value>> {
+    // One-way "bootstrap complete" flag: even if web_users gets wiped,
+    // /api/auth/bootstrap stays closed. The flag is set the first time
+    // bootstrap succeeds and never cleared.
+    if state
+        .db
+        .load_app_value(BOOTSTRAP_COMPLETE_KEY)
+        .map_err(ApiError::from)?
+        .as_deref()
+        == Some("1")
+    {
+        return Err(ApiError::bad_request("Bootstrap already completed"));
+    }
     if state.db.web_user_count().map_err(ApiError::from)? > 0 {
+        // Safety net: if a user exists but the flag wasn't set (e.g. upgraded
+        // from a pre-flag build), set it now and reject the bootstrap.
+        state
+            .db
+            .save_app_value(BOOTSTRAP_COMPLETE_KEY, "1")
+            .map_err(ApiError::from)?;
         return Err(ApiError::bad_request("Admin user already exists"));
     }
     if body.email.trim().is_empty() || body.password.len() < 8 {
@@ -90,24 +114,52 @@ pub async fn auth_bootstrap(
     }
     let hash = hash_password(&body.password)?;
     state.db.create_web_user(&body.email, &hash, "admin").map_err(ApiError::from)?;
+    state
+        .db
+        .save_app_value(BOOTSTRAP_COMPLETE_KEY, "1")
+        .map_err(ApiError::from)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
 pub async fn auth_login(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> ApiResult<Json<LoginResponse>> {
-    let row = state.db.get_web_user_by_email(&body.email)
-        .map_err(ApiError::from)?
-        .ok_or_else(ApiError::unauthorized)?;
+    let ip = client_ip(&headers, peer.ip());
+
+    // Rate-limit / lockout: 5 failures within 5 min → 15-min lockout per (email, ip).
+    if let Err(retry_after) = rate_limit::check_login_allowed(&body.email, ip) {
+        return Err(ApiError {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: format!(
+                "Too many failed attempts. Try again in {} seconds.",
+                retry_after.as_secs()
+            ),
+        });
+    }
+
+    let row = match state.db.get_web_user_by_email(&body.email).map_err(ApiError::from)? {
+        Some(row) => row,
+        None => {
+            rate_limit::record_failure(&body.email, ip);
+            return Err(ApiError::unauthorized());
+        }
+    };
 
     let (user, hash) = row;
     if !user.is_active {
+        rate_limit::record_failure(&body.email, ip);
         return Err(ApiError::unauthorized());
     }
     if !verify_password(&body.password, &hash)? {
+        rate_limit::record_failure(&body.email, ip);
         return Err(ApiError::unauthorized());
     }
+
+    // Successful credential check → clear failure history for this pair.
+    rate_limit::clear(&body.email, ip);
 
     let cfg = state.db.load_webgui_config().map_err(ApiError::from)?;
 
@@ -569,14 +621,32 @@ pub async fn get_settings(
     AuthUser(_u): AuthUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<crate::db::AppConfig>> {
-    Ok(Json(state.db.load_config().map_err(ApiError::from)?))
+    let mut cfg = state.db.load_config().map_err(ApiError::from)?;
+    // Redact all third-party credentials so an authenticated user (or anyone
+    // holding a stolen bearer token) can't read them back. PUT round-trips
+    // the sentinel as "leave unchanged".
+    cfg.ftp_pass = redact::mask(&cfg.ftp_pass);
+    cfg.tmdb_api_key = redact::mask(&cfg.tmdb_api_key);
+    cfg.emby_api_key = redact::mask(&cfg.emby_api_key);
+    cfg.plex_token = redact::mask(&cfg.plex_token);
+    cfg.telegram_bot_token = redact::mask(&cfg.telegram_bot_token);
+    Ok(Json(cfg))
 }
 
 pub async fn put_settings(
     AuthUser(_u): AuthUser,
     State(state): State<AppState>,
-    Json(config): Json<crate::db::AppConfig>,
+    Json(mut config): Json<crate::db::AppConfig>,
 ) -> ApiResult<Json<Value>> {
+    // If the client echoed back the REDACTED sentinel (i.e. the user opened
+    // Settings but didn't touch this field), preserve the existing value.
+    let current = state.db.load_config().map_err(ApiError::from)?;
+    config.ftp_pass = redact::preserve(&config.ftp_pass, &current.ftp_pass);
+    config.tmdb_api_key = redact::preserve(&config.tmdb_api_key, &current.tmdb_api_key);
+    config.emby_api_key = redact::preserve(&config.emby_api_key, &current.emby_api_key);
+    config.plex_token = redact::preserve(&config.plex_token, &current.plex_token);
+    config.telegram_bot_token = redact::preserve(&config.telegram_bot_token, &current.telegram_bot_token);
+
     state.db.save_config(&config).map_err(ApiError::from)?;
     // Invalidate badge cache so stale "not-configured" entries are evicted on config changes.
     crate::commands::BADGE_RESULT_CACHE.lock().unwrap().clear();
@@ -603,14 +673,18 @@ pub async fn get_webgui_config_handler(
     AuthUser(_u): AuthUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<crate::db::WebGuiConfig>> {
-    Ok(Json(state.db.load_webgui_config().map_err(ApiError::from)?))
+    let mut cfg = state.db.load_webgui_config().map_err(ApiError::from)?;
+    cfg.smtp_pass = redact::mask(&cfg.smtp_pass);
+    Ok(Json(cfg))
 }
 
 pub async fn put_webgui_config_handler(
     AuthUser(_u): AuthUser,
     State(state): State<AppState>,
-    Json(config): Json<crate::db::WebGuiConfig>,
+    Json(mut config): Json<crate::db::WebGuiConfig>,
 ) -> ApiResult<Json<Value>> {
+    let current = state.db.load_webgui_config().map_err(ApiError::from)?;
+    config.smtp_pass = redact::preserve(&config.smtp_pass, &current.smtp_pass);
     state.db.save_webgui_config(&config).map_err(ApiError::from)?;
     Ok(Json(serde_json::json!({"ok": true, "note": "Restart required for bind changes to take effect"})))
 }
@@ -871,7 +945,11 @@ pub async fn get_telegram_sub_handler(
     State(state): State<AppState>,
 ) -> ApiResult<Json<Value>> {
     let sub = state.db.get_telegram_sub(user.id).map_err(ApiError::from)?;
-    Ok(Json(serde_json::to_value(sub).unwrap_or(Value::Null)))
+    let masked = sub.map(|mut s| {
+        s.telegram_bot_token = redact::mask(&s.telegram_bot_token);
+        s
+    });
+    Ok(Json(serde_json::to_value(masked).unwrap_or(Value::Null)))
 }
 
 /// POST /notifications/subscription/link — discovers chat_id via the user's bot and creates the subscription.
