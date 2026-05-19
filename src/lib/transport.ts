@@ -34,6 +34,11 @@ const WEB_ROUTES: Record<
   has_config: ["GET", "/settings/has-config"],
   get_config: ["GET", "/settings"],
   save_config: ["PUT", "/settings"],
+  change_password: (a) => [
+    "PUT",
+    "/auth/password",
+    { current_password: a.currentPassword, new_password: a.newPassword },
+  ],
   get_all_media: ["GET", "/media"],
   get_downloads: ["GET", "/downloads"],
   clear_completed: ["POST", "/downloads/clear-completed"],

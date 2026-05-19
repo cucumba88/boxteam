@@ -135,6 +135,7 @@ fn build_router(state: AppState) -> Router {
         // auth-gated
         .route("/auth/me",                 get(handlers::auth_me))
         .route("/auth/logout",             post(handlers::auth_logout))
+        .route("/auth/password",           put(handlers::auth_change_password))
         .route("/users",                   get(handlers::list_users).post(handlers::create_user))
         .route("/users/invite",            post(handlers::invite_user))
         .route("/users/{id}",              put(handlers::update_user).delete(handlers::delete_user))

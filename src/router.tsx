@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { LogOut, User } from "lucide-react";
 import Library from "./pages/Library";
 import { isTauri } from "./lib/transport";
 import { prefetchConfig } from "./lib/configCache";
@@ -8,6 +9,7 @@ import { prefetchMedia } from "./lib/mediaCache";
 import { AuthProvider, useAuth } from "./lib/AuthContext";
 import { apiBase } from "./lib/transport";
 import ThemeToggle from "./components/ThemeToggle";
+const AccountModal = lazy(() => import("./components/AccountModal"));
 
 // Code-split rarely-mounted routes. None of these are hit on the hot path
 // (Library). Lazy-loading them keeps the initial JS bundle ~30–50 KB gzipped
@@ -269,33 +271,38 @@ function UserMenu({
   page,
   onGoToUsers,
 }: UserMenuProps) {
+  const { logout } = useAuth();
+  const [showAccount, setShowAccount] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const portalRef = useRef<HTMLDivElement | null>(null);
-  const [anchor, setAnchor] = useState<{
-    top: number;
-    left: number;
-  } | null>(null);
+  // Anchor either to the button's TOP (menu above) or BOTTOM (menu below).
+  // This avoids hardcoding the menu's height — the previous 240 px assumption
+  // left a ~110 px gap between a short menu and the button on desktop.
+  const [anchor, setAnchor] = useState<
+    | { left: number; placement: "above"; buttonTop: number }
+    | { left: number; placement: "below"; buttonBottom: number }
+    | null
+  >(null);
 
   useLayoutEffect(() => {
     if (!menuOpen) return;
     const rect = buttonRef.current?.getBoundingClientRect();
     if (!rect) return;
-    // Flip menu direction based on available space. Desktop sidebar puts
-    // the avatar at the bottom-left → menu floats UP. Mobile puts it in
-    // the top navbar → there's no room above so the menu must float DOWN.
     const menuWidth = 220;
-    const menuMaxHeight = 240;
-    const spaceAbove = rect.top;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const placeBelow = spaceAbove < menuMaxHeight + 16 && spaceBelow >= spaceAbove;
-    const top = placeBelow
-      ? Math.min(window.innerHeight - menuMaxHeight - 8, rect.bottom + 8)
-      : Math.max(8, rect.top - menuMaxHeight - 8);
+    // Reserve enough headroom that a 4-row menu fits comfortably; ~200 px is
+    // generous (menu items are 32–40 px each, plus header). If less room
+    // above than this, drop below — covers the mobile top-bar case.
+    const reserveAbove = 200;
+    const placeBelow = rect.top < reserveAbove + 16;
     const left = Math.max(
       8,
       Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth),
     );
-    setAnchor({ top, left });
+    if (placeBelow) {
+      setAnchor({ left, placement: "below", buttonBottom: rect.bottom });
+    } else {
+      setAnchor({ left, placement: "above", buttonTop: rect.top });
+    }
   }, [menuOpen]);
 
   useEffect(() => {
@@ -331,7 +338,9 @@ function UserMenu({
             ref={portalRef}
             style={{
               position: "fixed",
-              top: anchor.top,
+              ...(anchor.placement === "above"
+                ? { bottom: window.innerHeight - anchor.buttonTop + 8 }
+                : { top: anchor.buttonBottom + 8 }),
               left: anchor.left,
               background: "var(--color-surface)",
               border: "1px solid var(--color-border)",
@@ -392,66 +401,108 @@ function UserMenu({
               <ThemeToggle />
             </div>
 
+            <div
+              style={{
+                borderTop: "1px solid var(--color-border)",
+                margin: "4px 0",
+              }}
+            />
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowAccount(true);
+                setMenuOpen(false);
+              }}
+              style={menuItemStyle(false)}
+            >
+              <User size={14} strokeWidth={2} aria-hidden="true" />
+              Mi cuenta
+            </button>
+
             {isAdmin && (
-              <>
-                <div
-                  style={{
-                    borderTop: "1px solid var(--color-border)",
-                    margin: "4px 0",
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onGoToUsers();
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "8px 12px",
-                    background:
-                      page === "users"
-                        ? "color-mix(in srgb, var(--color-primary) 14%, transparent)"
-                        : "none",
-                    border: "none",
-                    borderRadius: "6px",
-                    color:
-                      page === "users"
-                        ? "var(--color-primary)"
-                        : "var(--color-text)",
-                    fontSize: 13,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                  }}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onGoToUsers();
+                }}
+                style={menuItemStyle(page === "users")}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                 >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                    <circle cx="9" cy="7" r="4" />
-                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                  </svg>
-                  Gestionar usuarios
-                </button>
-              </>
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+                Gestionar usuarios
+              </button>
             )}
+
+            <div
+              style={{
+                borderTop: "1px solid var(--color-border)",
+                margin: "4px 0",
+              }}
+            />
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(false);
+                logout();
+              }}
+              style={{ ...menuItemStyle(false), color: "var(--color-danger, #f87171)" }}
+            >
+              <LogOut size={14} strokeWidth={2} aria-hidden="true" />
+              Cerrar sesión
+            </button>
           </div>,
           document.body,
         )}
+
+      {showAccount && (
+        <Suspense fallback={null}>
+          <AccountModal
+            email={email}
+            role={role}
+            onClose={() => setShowAccount(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
+}
+
+function menuItemStyle(active: boolean): React.CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    width: "100%",
+    textAlign: "left",
+    padding: "8px 12px",
+    background: active
+      ? "color-mix(in srgb, var(--color-primary) 14%, transparent)"
+      : "none",
+    border: "none",
+    borderRadius: "6px",
+    color: active ? "var(--color-primary)" : "var(--color-text)",
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: "pointer",
+  };
 }
 
 function LoadingScreen() {
