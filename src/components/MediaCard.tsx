@@ -200,6 +200,7 @@ function MediaCard({
             src={poster}
             alt={title}
             decoding="async"
+            loading="lazy"
             onLoad={() => setImgLoaded(true)}
             style={{
               width: "100%",

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MediaItem } from "../hooks/useIndexing";
 import { formSelectCompact } from "../lib/formStyles";
 import AppIcon from "./AppIcon";
@@ -226,6 +226,29 @@ export default function FilterBar({
   /** When the host renders its own search input, suppress the internal one. */
   hideSearch?: boolean;
 }) {
+  // Debounced search: the input value updates locally on every keystroke (so
+  // typing stays responsive), but the committed `filters.search` only fires
+  // after 150 ms of quiet — that's what drives the expensive filter+sort on
+  // 3 800+ items. External changes to filters.search (e.g. Clear filters)
+  // sync back into the draft.
+  const [searchDraft, setSearchDraft] = useState(filters.search);
+  const externalSyncRef = useRef(filters.search);
+  useEffect(() => {
+    if (filters.search !== externalSyncRef.current) {
+      externalSyncRef.current = filters.search;
+      setSearchDraft(filters.search);
+    }
+  }, [filters.search]);
+  useEffect(() => {
+    if (searchDraft === filters.search) return;
+    const t = window.setTimeout(() => {
+      externalSyncRef.current = searchDraft;
+      onChange({ ...filters, search: searchDraft });
+    }, 150);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchDraft]);
+
   const resolutionCounts = countBy(items, (item) =>
     normalizeResolution(item.resolution),
   );
@@ -407,8 +430,8 @@ export default function FilterBar({
         </span>
         <input
           ref={searchInputRef}
-          value={filters.search}
-          onChange={(e) => set({ search: e.target.value })}
+          value={searchDraft}
+          onChange={(e) => setSearchDraft(e.target.value)}
           placeholder={t(language, "filter.searchPlaceholder")}
           style={{
             width: "100%",
@@ -419,9 +442,12 @@ export default function FilterBar({
             fontSize: 13,
           }}
         />
-        {filters.search && (
+        {searchDraft && (
           <button
-            onClick={() => set({ search: "" })}
+            onClick={() => {
+              setSearchDraft("");
+              set({ search: "" });
+            }}
             style={{
               flexShrink: 0,
               background: "none",

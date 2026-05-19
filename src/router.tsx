@@ -1,18 +1,22 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import Wizard from "./pages/Wizard";
 import Library from "./pages/Library";
 import { isTauri } from "./lib/transport";
 import { prefetchConfig } from "./lib/configCache";
 import { prefetchMedia } from "./lib/mediaCache";
 import { AuthProvider, useAuth } from "./lib/AuthContext";
 import { apiBase } from "./lib/transport";
-import Login from "./pages/Login";
-import WebBootstrap from "./pages/WebBootstrap";
-import WebSetupWizard from "./pages/WebSetupWizard";
-import InviteAccept from "./pages/InviteAccept";
 import ThemeToggle from "./components/ThemeToggle";
+
+// Code-split rarely-mounted routes. None of these are hit on the hot path
+// (Library). Lazy-loading them keeps the initial JS bundle ~30–50 KB gzipped
+// smaller and saves parse/eval time on slow mobile devices.
+const Wizard = lazy(() => import("./pages/Wizard"));
+const Login = lazy(() => import("./pages/Login"));
+const WebBootstrap = lazy(() => import("./pages/WebBootstrap"));
+const WebSetupWizard = lazy(() => import("./pages/WebSetupWizard"));
+const InviteAccept = lazy(() => import("./pages/InviteAccept"));
 
 export default function Router() {
   if (!isTauri()) {
@@ -36,12 +40,14 @@ export default function Router() {
   return ready ? (
     <Library startIndexingOnMount={startIndexingAfterWizard} />
   ) : (
-    <Wizard
-      onComplete={(options) => {
-        setStartIndexingAfterWizard(options?.startIndexing === true);
-        setReady(true);
-      }}
-    />
+    <Suspense fallback={<LoadingScreen />}>
+      <Wizard
+        onComplete={(options) => {
+          setStartIndexingAfterWizard(options?.startIndexing === true);
+          setReady(true);
+        }}
+      />
+    </Suspense>
   );
 }
 
@@ -118,41 +124,51 @@ function WebRouter() {
 
   if (bootstrapRequired && user === false) {
     return (
-      <WebBootstrap
-        onComplete={() => {
-          setBootstrapRequired(false);
-          // Fresh install: no config yet after bootstrap
-          setHasConfig(false);
-        }}
-      />
+      <Suspense fallback={<LoadingScreen />}>
+        <WebBootstrap
+          onComplete={() => {
+            setBootstrapRequired(false);
+            // Fresh install: no config yet after bootstrap
+            setHasConfig(false);
+          }}
+        />
+      </Suspense>
     );
   }
 
   if (user === false && inviteToken) {
     return (
-      <InviteAccept
-        token={inviteToken}
-        onAccepted={() => {
-          window.history.replaceState({}, "", window.location.pathname);
-        }}
-      />
+      <Suspense fallback={<LoadingScreen />}>
+        <InviteAccept
+          token={inviteToken}
+          onAccepted={() => {
+            window.history.replaceState({}, "", window.location.pathname);
+          }}
+        />
+      </Suspense>
     );
   }
 
   if (user === false) {
-    return <Login />;
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <Login />
+      </Suspense>
+    );
   }
 
   // Logged in but no FTP/TMDB config yet → show the initial setup wizard
   if (hasConfig === false) {
     return (
-      <WebSetupWizard
-        onComplete={() => {
-          setHasConfig(true);
-          prefetchConfig();
-          prefetchMedia();
-        }}
-      />
+      <Suspense fallback={<LoadingScreen />}>
+        <WebSetupWizard
+          onComplete={() => {
+            setHasConfig(true);
+            prefetchConfig();
+            prefetchMedia();
+          }}
+        />
+      </Suspense>
     );
   }
 
