@@ -115,6 +115,23 @@ pub struct TelegramSub {
     pub created_at: String,
 }
 
+/// Parse the genres column (TEXT, holds a JSON array of TMDB genre IDs) and
+/// emit it as a real JSON array — saving the client from re-parsing a string
+/// inside a string on every render of the Library grid (~3 800 items × every
+/// indexing event = the most-hit `JSON.parse` in the app).
+///
+/// Asymmetric: `serialize_with` only. `MediaItem` is never deserialised from
+/// the wire (all API handlers return it; none accept it as input).
+fn serialize_genres<S: serde::Serializer>(
+    raw: &Option<String>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    let parsed: Option<Vec<i64>> = raw
+        .as_deref()
+        .and_then(|r| serde_json::from_str::<Vec<i64>>(r).ok());
+    parsed.serialize(s)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaItem {
     pub id: i64,
@@ -146,9 +163,11 @@ pub struct MediaItem {
     pub tmdb_poster: Option<String>,
     pub tmdb_poster_en: Option<String>,
     pub tmdb_rating: Option<f64>,
+    #[serde(serialize_with = "serialize_genres")]
     pub tmdb_genres: Option<String>,
     pub indexed_at: Option<String>,
     pub metadata_at: Option<String>,
+    #[serde(skip_serializing)]
     pub manual_match: Option<i64>,
 }
 
@@ -487,6 +506,14 @@ impl Db {
                 manual_match  INTEGER DEFAULT 0
              );",
         )?;
+        // Indexes for the most-filtered columns. `ftp_path` already has the
+        // implicit UNIQUE index; the rest were full table scans before.
+        // Cheap to add (3 871 rows × 4 indexes = milliseconds at start-up).
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_media_tmdb_id    ON media_items(tmdb_id);
+             CREATE INDEX IF NOT EXISTS idx_media_media_type ON media_items(media_type);
+             CREATE INDEX IF NOT EXISTS idx_media_indexed_at ON media_items(indexed_at);",
+        ).ok();
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN media_type TEXT;").ok();
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN tmdb_release_date TEXT;").ok();
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN season INTEGER;").ok();

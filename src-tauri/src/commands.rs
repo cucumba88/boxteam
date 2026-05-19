@@ -5,6 +5,17 @@ use tauri::Emitter;
 use tauri::Manager;
 use tauri::WebviewWindow;
 
+/// Shared HTTP client for Plex / Emby calls. Reused across requests so TLS
+/// sessions + DNS + connection pool aren't rebuilt every check. 8 s timeout
+/// matches the previous per-call setup; long enough for slow local servers,
+/// short enough not to stall the UI when one is offline.
+static MEDIA_SERVER_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .expect("Failed to build media-server HTTP client")
+});
+
 static TV_CONTENT_HINT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(
         r"(?ix)
@@ -540,10 +551,7 @@ async fn exists_in_emby(
         items: Vec<EmbyItem>,
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = &*MEDIA_SERVER_CLIENT;
 
     let titles = [query.title.as_deref(), query.title_en.as_deref()]
         .into_iter()
@@ -680,10 +688,7 @@ pub(crate) async fn exists_in_plex(
     }
     let base = config.plex_url.trim_end_matches('/');
     let token = config.plex_token.trim();
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = &*MEDIA_SERVER_CLIENT;
     let episode_target = desired_episode_target(query);
 
     let mut guids = Vec::new();
@@ -859,10 +864,7 @@ async fn resolve_plex_imdb_id(
         endpoint.push_str(&format!("&year={y}"));
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = &*MEDIA_SERVER_CLIENT;
 
     let resp = client
         .get(&endpoint)
@@ -967,10 +969,7 @@ pub async fn test_tmdb_key(api_key: String) -> Result<bool, String> {
 pub async fn test_emby_connection(url: String, api_key: String) -> Result<String, String> {
     let base = url.trim_end_matches('/');
     let endpoint = format!("{base}/System/Info?api_key={api_key}");
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = &*MEDIA_SERVER_CLIENT;
     let resp = client
         .get(&endpoint)
         .send()
@@ -992,10 +991,7 @@ pub async fn test_emby_connection(url: String, api_key: String) -> Result<String
 pub async fn test_plex_connection(url: String, token: String) -> Result<String, String> {
     let base = url.trim_end_matches('/');
     let endpoint = format!("{base}?X-Plex-Token={token}");
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = &*MEDIA_SERVER_CLIENT;
     let resp = client
         .get(&endpoint)
         .header("Accept", "application/json")

@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::sync::RwLock;
+use std::time::{Duration, Instant};
+
 use axum::{
     extract::FromRequestParts,
     http::{request::Parts, StatusCode},
@@ -7,9 +11,53 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use once_cell::sync::Lazy;
 use rand::Rng;
 
 use crate::web::AppState;
+
+// ── Session cache ─────────────────────────────────────────────────────────────
+
+/// In-memory cache of `(token → (user, cached_at))`. Each entry is valid for
+/// `SESSION_CACHE_TTL`, after which we re-validate against the DB. Logout
+/// invalidates the entry directly via [`invalidate_session_cache`].
+///
+/// Cuts the DB hit from every authenticated request — useful both for
+/// throughput under load and for unblocking the WS upgrade path which used
+/// to queue behind DB writes during indexing.
+const SESSION_CACHE_TTL: Duration = Duration::from_secs(60);
+static SESSION_CACHE: Lazy<RwLock<HashMap<String, (crate::db::WebUser, Instant)>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+fn lookup_session_cache(token: &str) -> Option<crate::db::WebUser> {
+    let now = Instant::now();
+    if let Ok(map) = SESSION_CACHE.read() {
+        if let Some((user, cached_at)) = map.get(token) {
+            if now.duration_since(*cached_at) < SESSION_CACHE_TTL {
+                return Some(user.clone());
+            }
+        }
+    }
+    None
+}
+
+fn store_session_cache(token: &str, user: &crate::db::WebUser) {
+    if let Ok(mut map) = SESSION_CACHE.write() {
+        let now = Instant::now();
+        // Opportunistic eviction of any expired entries so the map can't grow
+        // unbounded with abandoned sessions.
+        map.retain(|_, (_, t)| now.duration_since(*t) < SESSION_CACHE_TTL);
+        map.insert(token.to_string(), (user.clone(), now));
+    }
+}
+
+/// Drop a single token from the cache. Call from `/auth/logout` so a
+/// revoked session can't survive its TTL.
+pub fn invalidate_session_cache(token: &str) {
+    if let Ok(mut map) = SESSION_CACHE.write() {
+        map.remove(token);
+    }
+}
 
 // ── Extractors ───────────────────────────────────────────────────────────────
 
@@ -68,7 +116,12 @@ pub async fn auth_middleware(
         .map(|s| s.trim().to_string());
 
     if let Some(tok) = token {
-        if let Ok(Some(user)) = state.db.validate_web_session(&tok) {
+        // Hit the in-memory cache first; fall back to a DB query, which we
+        // then memoize for the TTL.
+        if let Some(user) = lookup_session_cache(&tok) {
+            req.extensions_mut().insert(user);
+        } else if let Ok(Some(user)) = state.db.validate_web_session(&tok) {
+            store_session_cache(&tok, &user);
             req.extensions_mut().insert(user);
         }
     }

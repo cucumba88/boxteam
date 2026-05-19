@@ -241,6 +241,9 @@ pub async fn auth_logout(
         .map(|s| s.trim())
     {
         state.db.revoke_web_session(tok).ok();
+        // Drop the cached session immediately so the revoked token can't
+        // squeeze in another minute of authenticated requests.
+        crate::web::auth::invalidate_session_cache(tok);
     }
     Ok(Json(serde_json::json!({"ok": true})))
 }
@@ -355,7 +358,15 @@ pub async fn get_media(
     AuthUser(_u): AuthUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<crate::db::MediaItem>>> {
-    Ok(Json(state.db.get_all_media().map_err(ApiError::from)?))
+    // rusqlite is sync — without `spawn_blocking` the ~50–500 ms SELECT + sort
+    // would block a tokio worker thread, starving every other in-flight
+    // request. Db is Arc<Mutex<Connection>> internally so a clone is cheap.
+    let db = state.db.clone();
+    let items = tokio::task::spawn_blocking(move || db.get_all_media())
+        .await
+        .map_err(|e| ApiError::internal(format!("join error: {e}")))?
+        .map_err(ApiError::from)?;
+    Ok(Json(items))
 }
 
 pub async fn check_media_badges_handler(
