@@ -169,7 +169,13 @@ async fn throttle_tmdb_request() {
 
 async fn fetch_json_with_retry<T: DeserializeOwned>(url: &str, context: &str) -> Result<T, String> {
     const MAX_ATTEMPTS: u8 = 3;
-    let client = reqwest::Client::new();
+    // Shared client per process so TLS sessions + DNS + connection pool are
+    // reused across the 1 000s of TMDB calls during a fresh-library indexing
+    // sweep. Previously a new client was built per call — ~10–50 ms TLS
+    // handshake per request adding up to seconds on remote machines.
+    static CLIENT: once_cell::sync::Lazy<reqwest::Client> =
+        once_cell::sync::Lazy::new(reqwest::Client::new);
+    let client = &*CLIENT;
     let mut last_error = String::new();
 
     for attempt in 1..=MAX_ATTEMPTS {

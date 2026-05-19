@@ -1,3 +1,15 @@
+/// Shared HTTP client for all Telegram API calls. Reusing the client lets
+/// reqwest pool connections and reuse TLS sessions across send_message /
+/// send_photo / getUpdates, instead of rebuilding the client (and re-doing
+/// the TLS handshake) every call.
+static TELEGRAM_CLIENT: once_cell::sync::Lazy<reqwest::Client> =
+    once_cell::sync::Lazy::new(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(20))
+            .build()
+            .expect("Failed to build Telegram HTTP client")
+    });
+
 /// Send a message to a Telegram channel/chat via a bot.
 ///
 /// `token`   — bot token from @BotFather (e.g. `123456:ABCdef...`)
@@ -15,12 +27,7 @@ pub async fn send_message(token: &str, chat_id: &str, text: &str) -> Result<(), 
         "parse_mode": "HTML",
     });
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let response = client
+    let response = TELEGRAM_CLIENT
         .post(&url)
         .json(&body)
         .send()
@@ -45,12 +52,8 @@ pub async fn get_updates_first_chat_id(token: &str) -> Result<Option<String>, St
     }
 
     let url = format!("https://api.telegram.org/bot{token}/getUpdates?limit=1&offset=-1");
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
 
-    let response = client
+    let response = TELEGRAM_CLIENT
         .get(&url)
         .send()
         .await
@@ -93,11 +96,6 @@ pub async fn send_photo(token: &str, chat_id: &str, photo_url: &str, caption: &s
         return Err("Telegram token and chat_id must not be empty".to_string());
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .build()
-        .map_err(|e| e.to_string())?;
-
     let url = format!("https://api.telegram.org/bot{token}/sendPhoto");
     let body = serde_json::json!({
         "chat_id": chat_id,
@@ -106,7 +104,7 @@ pub async fn send_photo(token: &str, chat_id: &str, photo_url: &str, caption: &s
         "parse_mode": "HTML",
     });
 
-    let response = client
+    let response = TELEGRAM_CLIENT
         .post(&url)
         .json(&body)
         .send()
