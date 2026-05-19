@@ -230,6 +230,66 @@ pub async fn auth_me(AuthUser(user): AuthUser) -> Json<UserResponse> {
     Json(user.into())
 }
 
+/// PUT /api/auth/password — self-service password change.
+///
+/// Requires re-authentication with the current password (so a stolen bearer
+/// token alone can't rotate the password). On success, all *other* sessions
+/// for this user are revoked, and the in-memory session cache is cleared for
+/// those tokens too. The caller's current session remains valid.
+pub async fn auth_change_password(
+    AuthUser(user): AuthUser,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ChangePasswordRequest>,
+) -> ApiResult<Json<Value>> {
+    if body.new_password.len() < 8 {
+        return Err(ApiError::bad_request(
+            "New password must be at least 8 characters",
+        ));
+    }
+    if body.new_password == body.current_password {
+        return Err(ApiError::bad_request(
+            "New password must differ from the current one",
+        ));
+    }
+
+    let row = state
+        .db
+        .get_web_user_by_email(&user.email)
+        .map_err(ApiError::from)?
+        .ok_or_else(ApiError::unauthorized)?;
+    let (_user, current_hash) = row;
+    if !verify_password(&body.current_password, &current_hash)? {
+        return Err(ApiError {
+            status: StatusCode::FORBIDDEN,
+            message: "Current password is incorrect".into(),
+        });
+    }
+
+    let new_hash = hash_password(&body.new_password)?;
+    state
+        .db
+        .update_web_user(user.id, None, Some(&new_hash), None, None)
+        .map_err(ApiError::from)?;
+
+    // Keep the caller's current session, revoke all others.
+    let current_token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let revoked = state
+        .db
+        .revoke_other_sessions(user.id, &current_token)
+        .map_err(ApiError::from)?;
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "other_sessions_revoked": revoked,
+    })))
+}
+
 pub async fn auth_logout(
     AuthUser(_user): AuthUser,
     State(state): State<AppState>,

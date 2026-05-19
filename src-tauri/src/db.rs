@@ -1662,6 +1662,20 @@ impl Db {
         Ok(())
     }
 
+    /// Revoke every web session for `user_id` *except* `keep_token`. Used by
+    /// the self-service password-change flow so a stolen token can't survive
+    /// after the legitimate user rotates their password.
+    pub fn revoke_other_sessions(&self, user_id: i64, keep_token: &str) -> Result<usize, String> {
+        let conn = self.conn.lock().unwrap();
+        let removed = conn
+            .execute(
+                "DELETE FROM web_sessions WHERE user_id = ?1 AND id <> ?2",
+                params![user_id, keep_token],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(removed)
+    }
+
     // OTP challenges
 
     pub fn create_otp_challenge(&self, user_id: i64, code: &str) -> Result<String, String> {

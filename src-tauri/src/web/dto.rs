@@ -84,6 +84,15 @@ pub struct UpdateUserRequest {
     pub is_active: Option<bool>,
 }
 
+/// Self-service password change. Requires the caller's current password as a
+/// re-authentication check so a stolen bearer token alone can't rotate the
+/// password and lock the real user out.
+#[derive(Debug, Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
 // ── Downloads ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
