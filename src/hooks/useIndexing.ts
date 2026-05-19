@@ -309,10 +309,20 @@ export function useIndexing() {
     const stopWs = connectWs(handleWsEvent);
 
     // ── Polling fallback (status check only) ─────────────────────────────
-    // Polls every 5 s (less frequent than before since WS handles real-time).
-    // Primarily keeps `isIndexing` in sync when the WS reconnects mid-index.
-    const POLL_INTERVAL_MS = 5000;
+    // Polls fast (5 s) while indexing, slow (60 s) when idle. The fast mode
+    // catches a missed `index:complete` event during a WS reconnect; the slow
+    // mode is just a heartbeat so a long-lived tab doesn't drift forever
+    // out of sync. Previously this polled every 5 s forever, which on a
+    // remote/mobile session burned battery and network for no benefit.
+    const FAST_POLL_MS = 5_000;
+    const IDLE_POLL_MS = 60_000;
     let wasRunning = false;
+    let timerId: number | null = null;
+
+    const schedule = (delay: number) => {
+      if (timerId !== null) window.clearTimeout(timerId);
+      timerId = window.setTimeout(poll, delay);
+    };
 
     const poll = async () => {
       try {
@@ -337,16 +347,19 @@ export function useIndexing() {
 
         wasRunning = running;
       } catch {
-        // Server unreachable — ignore
+        // Server unreachable — keep slow-polling so we recover when it's back.
+      } finally {
+        schedule(wasRunning ? FAST_POLL_MS : IDLE_POLL_MS);
       }
     };
 
-    const timerId = window.setInterval(poll, POLL_INTERVAL_MS);
+    // Fire the first poll immediately so initial state is accurate;
+    // subsequent polls reschedule themselves based on current running state.
     poll();
 
     return () => {
       stopWs();
-      window.clearInterval(timerId);
+      if (timerId !== null) window.clearTimeout(timerId);
     };
   }, []);
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Activity,
@@ -45,8 +45,11 @@ import {
 } from "../utils/filterUtils";
 import { foldForSearch } from "../utils/textSearch";
 import IndexStatus from "../components/IndexStatus";
-import Settings from "./Settings";
-import WebUsers from "./WebUsers";
+// Lazy-load the two content-area takeover pages — Settings is 4 000+ lines
+// (the biggest single module in the bundle) and WebUsers is admin-only.
+// Splitting them out shaves ~30 KB gzipped off the Library hot path.
+const Settings = lazy(() => import("./Settings"));
+const WebUsers = lazy(() => import("./WebUsers"));
 import ActivityLog from "../components/ActivityLog";
 import DetailPage from "../components/DetailPage";
 import TVShowPage from "../components/TVShowPage";
@@ -2435,17 +2438,21 @@ export default function Library({
         {/* Settings takes precedence over media views — opening it always
             replaces the current content area. */}
         {showSettings && (
-          <Settings
-            language={language}
-            onClose={() => setShowSettings(false)}
-          />
+          <Suspense fallback={null}>
+            <Settings
+              language={language}
+              onClose={() => setShowSettings(false)}
+            />
+          </Suspense>
         )}
 
         {/* User management — content-area takeover so the sidebar + status
             bar stay visible (web mode only; triggered from the avatar menu).
             Settings still wins precedence if both are somehow open. */}
         {!showSettings && showUsers && (
-          <WebUsers onBack={onCloseUsers} />
+          <Suspense fallback={null}>
+            <WebUsers onBack={onCloseUsers} />
+          </Suspense>
         )}
 
         {/* Detail / TV show page takes over the content area when an item or
