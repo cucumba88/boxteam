@@ -104,11 +104,12 @@ export default function DetailPage({
   const posterSmall = posterPath ? `${TMDB_POSTER_W342}${posterPath}` : null;
 
   const relatedVersions = useMemo(
-    () =>
-      groupedView
-        ? relatedItems
-        : relatedItems.filter((v) => v.id !== item.id),
-    [groupedView, relatedItems, item.id],
+    // The current item is always rendered as its own VersionRow below, so it
+    // must be excluded from this list regardless of grouped vs non-grouped —
+    // in groupedView, relatedItems includes the current item, which previously
+    // caused it to render twice (once with "ACTUAL", once without).
+    () => relatedItems.filter((v) => v.id !== item.id),
+    [relatedItems, item.id],
   );
 
   const genres = useMemo(() => {
