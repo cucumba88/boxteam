@@ -676,8 +676,7 @@ impl Db {
     pub fn migrate_to(&self, new_dir: &std::path::Path) -> Result<(), String> {
         std::fs::create_dir_all(new_dir).map_err(|e| e.to_string())?;
         let db_path = new_dir.join("library.db");
-        // Escape any single-quotes in the path for the SQL literal.
-        let escaped = db_path.to_string_lossy().replace('\'', "''");
+        let escaped = Self::validate_and_escape_sqlite_path(&db_path)?;
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(&format!("VACUUM INTO '{}';", escaped))
             .map_err(|e| e.to_string())?;
@@ -741,8 +740,32 @@ impl Db {
         }
     }
 
+    /// Escape a filesystem path for use inside a `VACUUM INTO '…'` / `ATTACH '…'`
+    /// SQL statement. SQLite doesn't support parameter binding for those
+    /// statements, so the path is interpolated as a literal — with the standard
+    /// SQL string-literal escape (double single-quotes).
+    ///
+    /// Returns `Err` if the path contains characters that indicate either
+    /// corruption or an injection attempt: control chars, NUL bytes, newlines
+    /// (which would break the statement out of the literal), or extreme length.
+    /// All sane filesystem paths pass this check.
+    /// Like [`validate_and_escape_sqlite_path`] but for internal/code-controlled
+    /// paths (seed DBs bundled with the binary) where validation failure is a
+    /// programmer error rather than a user-input issue.
     fn escape_sqlite_path(path: &std::path::Path) -> String {
-        path.to_string_lossy().replace('\'', "''")
+        Self::validate_and_escape_sqlite_path(path)
+            .expect("internal SQLite path must be valid")
+    }
+
+    fn validate_and_escape_sqlite_path(path: &std::path::Path) -> Result<String, String> {
+        let raw = path.to_string_lossy();
+        if raw.len() > 4096 {
+            return Err(format!("Path too long ({} bytes)", raw.len()));
+        }
+        if raw.chars().any(|c| c == '\0' || (c.is_control() && c != '\t')) {
+            return Err("Path contains control characters".to_string());
+        }
+        Ok(raw.replace('\'', "''"))
     }
 
     fn migration_applied(conn: &Connection, migration_id: &str) -> Result<bool, String> {
@@ -1298,7 +1321,7 @@ impl Db {
             Self::sanitize_version_for_filename(to_version),
             timestamp
         ));
-        let escaped_path = backup_path.to_string_lossy().replace('\'', "''");
+        let escaped_path = Self::validate_and_escape_sqlite_path(&backup_path)?;
 
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(&format!("VACUUM INTO '{}';", escaped_path))
@@ -1693,17 +1716,26 @@ impl Db {
             }
         }
 
+        // Race-safe consume: claim the invite first (UPDATE … WHERE used_at IS NULL),
+        // and abort if rows_affected != 1 — another concurrent caller already used it.
+        // Then insert the user. The whole thing runs inside a transaction so a failed
+        // INSERT (e.g. UNIQUE email collision) rolls back the invite claim.
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+
+        let claimed = tx.execute(
+            "UPDATE web_invites SET used_at=?1 WHERE id=?2 AND used_at IS NULL",
+            params![now, token],
+        ).map_err(|e| e.to_string())?;
+        if claimed != 1 {
+            return Err("Invalid or expired invite".to_string());
+        }
+
         tx.execute(
             "INSERT INTO web_users (email, password_hash, role, is_active, created_at) VALUES (?1, ?2, ?3, 1, ?4)",
             params![normalized_email, password_hash, role, now],
         ).map_err(|e| e.to_string())?;
 
         let user_id = tx.last_insert_rowid();
-        tx.execute(
-            "UPDATE web_invites SET used_at=?1 WHERE id=?2",
-            params![now, token],
-        ).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
 
         Ok(WebUser {

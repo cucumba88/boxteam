@@ -114,16 +114,27 @@ pub type ApiResult<T> = Result<T, ApiError>;
 
 // ── Password / token utilities ───────────────────────────────────────────────
 
+/// Bcrypt work factor. Pinned explicitly so a future `bcrypt` minor release
+/// can't silently lower the default. Verify reads the cost from the stored
+/// hash, so existing accounts continue to work after a bump.
+const BCRYPT_COST: u32 = 13;
+
 pub fn hash_password(password: &str) -> Result<String, String> {
-    bcrypt::hash(password, bcrypt::DEFAULT_COST).map_err(|e| e.to_string())
+    bcrypt::hash(password, BCRYPT_COST).map_err(|e| e.to_string())
 }
 
 pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
     bcrypt::verify(password, hash).map_err(|e| e.to_string())
 }
 
+/// 256-bit cryptographically-random token, hex-encoded. Replaces the previous
+/// UUID v4 (which is 122 effective bits and is debatably appropriate for
+/// session identifiers — best practice is raw OsRng bytes).
 pub fn new_session_token() -> String {
-    uuid::Uuid::new_v4().to_string()
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 pub fn generate_otp() -> String {
