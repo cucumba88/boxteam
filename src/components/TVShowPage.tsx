@@ -861,6 +861,9 @@ export default function TVShowPage({
                       key={`${section.seasonKey}:${group.folder}`}
                       group={group}
                       language={language}
+                      seasonLabel={
+                        activeSeason === "all" ? null : section.seasonLabel
+                      }
                       defaultOpen={
                         section.groups.length === 1 || idx === 0
                       }
@@ -908,6 +911,7 @@ export default function TVShowPage({
 function ReleaseGroupBlock({
   group,
   language,
+  seasonLabel,
   defaultOpen,
   filterDownloadable,
   onDownloadGroup,
@@ -918,6 +922,7 @@ function ReleaseGroupBlock({
 }: {
   group: ReleaseGroup;
   language: AppLanguage;
+  seasonLabel: string | null;
   defaultOpen: boolean;
   filterDownloadable: (eps: MediaItem[]) => MediaItem[];
   onDownloadGroup: (episodes: MediaItem[]) => void;
@@ -975,9 +980,22 @@ function ReleaseGroupBlock({
             minWidth: 0,
             display: "flex",
             flexDirection: "column",
-            gap: 4,
+            gap: 6,
           }}
         >
+          {seasonLabel && (
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 700,
+                color: "var(--color-text)",
+                letterSpacing: "-0.005em",
+                lineHeight: 1.2,
+              }}
+            >
+              {seasonLabel}
+            </div>
+          )}
           <div
             style={{
               display: "flex",
@@ -1022,6 +1040,7 @@ function ReleaseGroupBlock({
               display: "flex",
               gap: 10,
               flexWrap: "wrap",
+              alignItems: "center",
             }}
           >
             <span>
