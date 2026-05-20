@@ -1,5 +1,22 @@
 # Novedades de Oscata
 
+## Versión 0.11.5 — 20 de mayo de 2026
+
+### 🐛 Estilos antiguos mezclándose con los nuevos tras actualizar el contenedor
+
+Varios usuarios reportaron interfaces "rotas" tras actualizar a una versión nueva: la nav superior antigua + el rail de filtros lateral (eliminados en v0.9.0) aparecían pintados *encima* de las tarjetas y toasts nuevos. Síntoma clásico de un `index.html` cacheado que sigue apuntando a hashes de assets de un build anterior.
+
+El servidor del WebGUI servía los archivos estáticos vía `ServeDir` + `ServeFile` sin ningún `Cache-Control`, así que el navegador aplicaba caching heurístico al `index.html` (no hashed). Tras una actualización del contenedor, ese HTML cacheado seguía pidiendo `index-OLDHASH.js` mientras el resto del entorno ya servía bundles nuevos — de ahí el render mezclado.
+
+Nuevo middleware (sólo builds release; `/api` pasa sin tocar):
+
+- `/assets/<hash>.{js,css,…}` → `Cache-Control: public, max-age=31536000, immutable`. Vite content-addressa estos archivos, son seguros de cachear un año.
+- Cualquier otra cosa (incluido `index.html` y el fallback SPA) → `Cache-Control: no-cache, must-revalidate`. El navegador revalida en cada carga y recoge los hashes nuevos inmediatamente tras una actualización.
+
+> ⚠️ Tras actualizar a 0.11.5, la primera vez los usuarios afectados tienen que hacer un hard-refresh (`Cmd/Ctrl + Shift + R`) para invalidar el `index.html` ya cacheado. A partir de ahí cada release se recoge sin intervención manual.
+
+---
+
 ## Versión 0.10.12 — 18 de mayo de 2026
 
 Tres bugs introducidos por los cambios de móvil recientes:
