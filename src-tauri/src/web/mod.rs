@@ -6,16 +6,16 @@ pub mod rate_limit;
 pub mod redact;
 
 use axum::{
+    extract::Request,
     middleware,
-    response::Response as AxumResponse,
+    response::Response,
     routing::{delete, get, post, put},
     Router,
 };
 #[cfg(debug_assertions)]
 use axum::{
     body::Body,
-    extract::Request,
-    response::{IntoResponse, Response},
+    response::IntoResponse,
 };
 #[cfg(not(debug_assertions))]
 use axum::response::Html;
@@ -195,9 +195,17 @@ fn build_router(state: AppState) -> Router {
         }
     }
 
-    // gzip/brotli compression shrinks the /api/media response 5-10x on real
-    // libraries (hundreds of KB of JSON → tens of KB). Big win on slow remote
-    // connections; transparent to browsers.
+    // Layer stack (innermost first, outermost last):
+    //   - static_cache_headers: tells browsers index.html is volatile so a
+    //     container upgrade is picked up after a refresh, and /assets/*
+    //     bundles are immutable. Release builds only — no fallback service
+    //     to wrap in debug.
+    //   - security_headers: CSP, X-Frame-Options, etc. on every response.
+    //   - Compression: gzip/brotli — shrinks /api/media JSON 5–10x.
+    //   - CORS: outermost so it sees the final response.
+    #[cfg(not(debug_assertions))]
+    let root = root.layer(middleware::from_fn(static_cache_headers));
+
     root.layer(middleware::from_fn(security_headers_middleware))
         .layer(CompressionLayer::new())
         .layer(cors)
@@ -273,7 +281,7 @@ fn build_cors_layer(state: &AppState) -> CorsLayer {
 async fn security_headers_middleware(
     req: axum::http::Request<axum::body::Body>,
     next: middleware::Next,
-) -> AxumResponse {
+) -> Response {
     let mut resp = next.run(req).await;
     let h = resp.headers_mut();
     // Inline style/script are used by Vite for HMR in dev and by inline `style` attributes
@@ -351,6 +359,42 @@ async fn vite_proxy(req: Request) -> Response {
     builder.body(Body::from(bytes)).unwrap_or_else(|_| {
         (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "response build error").into_response()
     })
+}
+
+/// Set Cache-Control headers on static responses based on the request path.
+///
+/// Vite hashes everything under `/assets/<name>-<hash>.{js,css,…}` so those
+/// files are content-addressed and safe to cache for a year. `index.html`
+/// is *not* hashed — caching it is what causes "I upgraded but still see
+/// the old UI" because the cached HTML keeps pointing at old asset URLs.
+/// Mark non-asset responses as `no-cache, must-revalidate` so the browser
+/// re-checks freshness on every navigation.
+#[cfg(not(debug_assertions))]
+async fn static_cache_headers(
+    req: Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let path = req.uri().path().to_string();
+    let mut res = next.run(req).await;
+
+    // API routes have their own caching semantics; leave them alone.
+    if path.starts_with("/api/") {
+        return res;
+    }
+
+    let header = if path.starts_with("/assets/") {
+        // Hashed bundle files — never change, cache hard.
+        "public, max-age=31536000, immutable"
+    } else {
+        // index.html (and any other SPA fallback). Revalidate every load
+        // so a new release is picked up immediately after the user refreshes.
+        "no-cache, must-revalidate"
+    };
+
+    if let Ok(value) = axum::http::HeaderValue::from_str(header) {
+        res.headers_mut().insert(axum::http::header::CACHE_CONTROL, value);
+    }
+    res
 }
 
 #[cfg(not(debug_assertions))]
