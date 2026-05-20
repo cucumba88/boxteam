@@ -313,6 +313,18 @@ export function useIndexing() {
           next[index] = { ...next[index], ...(p as Partial<MediaItem>) };
           return next;
         });
+      } else if (event === "ratings:complete") {
+        // The ratings refresh job deliberately doesn't broadcast per-item
+        // updates over WS (it would flood the page with re-renders). When
+        // the job wraps up we pull a fresh snapshot in one shot so the new
+        // IMDb / TVDB columns appear without manual refresh.
+        invalidateMedia();
+        call<MediaItem[]>("get_all_media")
+          .then((loaded) => {
+            rebuildIndex(loaded);
+            setItems(loaded);
+          })
+          .catch(console.error);
       }
     };
 
