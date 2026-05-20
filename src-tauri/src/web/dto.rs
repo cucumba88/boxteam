@@ -220,3 +220,8 @@ pub struct TestFtpRequest {
     pub user: String,
     pub pass: String,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct TestApiKeyRequest {
+    pub api_key: String,
+}

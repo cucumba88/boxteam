@@ -5,7 +5,6 @@ import {
   Download,
   Pencil,
   RefreshCw,
-  Star,
   X,
 } from "lucide-react";
 import { isTauri } from "../lib/transport";
@@ -23,6 +22,14 @@ import {
 import { t } from "../utils/i18n";
 import { GENRE_MAP } from "../utils/genres";
 import { formatBytes } from "../lib/format";
+import {
+  allAvailableRatings,
+  formatRating,
+  ratingLabel,
+  resolveRating,
+  useRatingOrder,
+} from "../lib/ratingSource";
+import RatingSourceLogo from "./RatingSourceLogo";
 import WatchlistButton from "../features/watchlist/WatchlistButton";
 import type { AddWatchlistParams } from "../features/watchlist/types";
 
@@ -111,7 +118,14 @@ export default function DetailPanel({
   const title = getLocalizedTitle(item, language);
   const overview = getLocalizedOverview(item, language);
   const posterPath = getLocalizedPosterPath(item, language);
-  const rating = item.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
+  const ratingOrder = useRatingOrder();
+  const primaryRating = resolveRating(item, ratingOrder);
+  const rating = primaryRating ? formatRating(primaryRating.value) : null;
+  const secondaryRatings = primaryRating
+    ? allAvailableRatings(item, ratingOrder).filter(
+        (r) => r.source !== primaryRating.source,
+      )
+    : [];
   const relatedVersions = groupedView
     ? relatedItems
     : relatedItems.filter((candidate) => candidate.id !== item.id);
@@ -331,17 +345,33 @@ export default function DetailPanel({
                     : item.year}
                 </span>
               )}
-              {rating && (
-                <span style={metaPill}>
-                  <Star
-                    size={13}
-                    strokeWidth={2}
-                    aria-hidden="true"
-                    style={{ display: "block" }}
+              {rating && primaryRating && (
+                <span
+                  style={{ ...metaPill, gap: 6 }}
+                  title={`${ratingLabel[primaryRating.source]} ${rating}`}
+                >
+                  <RatingSourceLogo
+                    source={primaryRating.source}
+                    height={16}
+                    title={ratingLabel[primaryRating.source]}
                   />
                   {rating}
                 </span>
               )}
+              {secondaryRatings.map((r) => (
+                <span
+                  key={r.source}
+                  style={{ ...metaPill, gap: 6, opacity: 0.75 }}
+                  title={`${ratingLabel[r.source]} ${formatRating(r.value)}`}
+                >
+                  <RatingSourceLogo
+                    source={r.source}
+                    height={13}
+                    title={ratingLabel[r.source]}
+                  />
+                  {formatRating(r.value)}
+                </span>
+              ))}
               {genres.map((g) => (
                 <span key={g} style={metaPill}>
                   {g}

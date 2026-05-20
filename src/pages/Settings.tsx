@@ -18,6 +18,10 @@ import {
   parseFolderTypes,
 } from "../utils/folderTypes";
 import { call, isTauri, apiBase } from "../lib/transport";
+import {
+  markRatingsRefreshError,
+  useRatingsRefresh,
+} from "../lib/ratingsRefreshState";
 import { getConfig, invalidateConfig } from "../lib/configCache";
 import { useAuth } from "../lib/AuthContext";
 import { useTheme } from "../hooks/useTheme";
@@ -36,6 +40,14 @@ import {
   type SortKey,
 } from "../utils/userPrefs";
 import { SORT_OPTIONS } from "../components/FilterBar";
+import {
+  CANONICAL_ORDER,
+  parseRatingOrder,
+  ratingLabel,
+  ratingOrderToCsv,
+  setRatingOrder,
+  type RatingSource,
+} from "../lib/ratingSource";
 
 interface Config {
   ftp_host: string;
@@ -63,6 +75,9 @@ interface Config {
   close_to_tray: boolean;
   telegram_bot_token: string;
   telegram_chat_id: string;
+  omdb_api_key: string;
+  tvdb_api_key: string;
+  rating_source_order: string;
 }
 
 interface GenreDestRule {
@@ -737,6 +752,22 @@ export default function Settings({
   const [plexMsg, setPlexMsg] = useState("");
   const [telegramStatus, setTelegramStatus] = useState<ConnectionState>("idle");
   const [telegramMsg, setTelegramMsg] = useState("");
+  const [tmdbTestStatus, setTmdbTestStatus] = useState<ConnectionState>("idle");
+  const [omdbTestStatus, setOmdbTestStatus] = useState<ConnectionState>("idle");
+  const [tvdbTestStatus, setTvdbTestStatus] = useState<ConnectionState>("idle");
+  // Background ratings refresh — state survives Settings unmount via a
+  // module-level store so reopening Settings mid-job shows live progress.
+  const ratingsRefresh = useRatingsRefresh();
+  const ratingsRefreshState = ratingsRefresh.state;
+  const ratingsRefreshMsg =
+    ratingsRefresh.state === "running"
+      ? `${t(language, "settings.refreshRatingsRunning")} (${ratingsRefresh.done}/${ratingsRefresh.total})`
+      : ratingsRefresh.state === "done"
+        ? t(language, "settings.refreshRatingsDone").replace(
+            "{count}",
+            String(ratingsRefresh.total),
+          )
+        : ratingsRefresh.message;
 
   // Personal subscription state
   const [notifTab, setNotifTab] = useState<"bot" | "personal">("bot");
@@ -853,6 +884,7 @@ export default function Settings({
   useEffect(() => {
     if (!canWrite) setNotifTab("personal");
   }, [canWrite]);
+
 
   const changeDbPath = async () => {
     if (!isTauri()) return;
@@ -994,6 +1026,44 @@ export default function Settings({
           : current,
       );
 
+  const testApiKey = async (
+    command: "test_tmdb_key" | "test_omdb_key" | "test_tvdb_key",
+    apiKey: string,
+    setStatus: (s: ConnectionState) => void,
+  ) => {
+    setStatus("testing");
+    try {
+      const ok = await call<boolean>(command, { apiKey });
+      setStatus(ok ? "ok" : "error");
+    } catch {
+      setStatus("error");
+    }
+  };
+
+  // Background-only: the Tauri command spawns the job and returns immediately.
+  // Progress lands on the `ratingsRefresh` singleton via `ratings:*` events.
+  // We just kick it off and let the live store update the UI — including
+  // after the user closes/reopens Settings mid-job.
+  const runRatingsRefresh = async () => {
+    try {
+      await call<void>("refresh_all_ratings");
+    } catch (error: unknown) {
+      markRatingsRefreshError(String(error));
+    }
+  };
+
+  const moveRatingSource = (source: RatingSource, direction: -1 | 1) => {
+    setForm((current) => {
+      if (!current) return current;
+      const order = parseRatingOrder(current.rating_source_order);
+      const idx = order.indexOf(source);
+      const target = idx + direction;
+      if (idx < 0 || target < 0 || target >= order.length) return current;
+      [order[idx], order[target]] = [order[target], order[idx]];
+      return { ...current, rating_source_order: ratingOrderToCsv(order) };
+    });
+  };
+
   const testFtp = async () => {
     setFtpStatus("testing");
     setFtpError("");
@@ -1113,6 +1183,12 @@ export default function Settings({
         max: form.max_concurrent_downloads ?? 2,
       });
       invalidateConfig();
+      // Push the saved rating order into the live store so existing screens
+      // (Library cards, detail panels) re-render with the new preference
+      // without requiring a refresh.
+      if (form.rating_source_order) {
+        setRatingOrder(form.rating_source_order);
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } finally {
@@ -1793,12 +1869,280 @@ export default function Settings({
                     <label style={labelStyle}>
                       {t(language, "settings.tmdbKey")}
                     </label>
-                    <input
-                      style={inputStyle}
-                      value={form.tmdb_api_key}
-                      onChange={set("tmdb_api_key")}
-                      placeholder={t(language, "settings.tmdbPlaceholder")}
-                    />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        style={{ ...inputStyle, flex: 1 }}
+                        value={form.tmdb_api_key}
+                        onChange={set("tmdb_api_key")}
+                        placeholder={t(language, "settings.tmdbPlaceholder")}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          testApiKey(
+                            "test_tmdb_key",
+                            form.tmdb_api_key,
+                            setTmdbTestStatus,
+                          )
+                        }
+                        disabled={tmdbTestStatus === "testing"}
+                        style={{
+                          padding: "0 14px",
+                          borderRadius: 8,
+                          border:
+                            "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+                          background: "var(--color-surface-2)",
+                          color: "var(--color-text)",
+                          fontWeight: 600,
+                          cursor:
+                            tmdbTestStatus === "testing"
+                              ? "wait"
+                              : "pointer",
+                        }}
+                      >
+                        {tmdbTestStatus === "testing"
+                          ? t(language, "settings.testing")
+                          : tmdbTestStatus === "ok"
+                            ? `✓ ${t(language, "settings.tmdbTestOk")}`
+                            : tmdbTestStatus === "error"
+                              ? `✗ ${t(language, "settings.tmdbTestFail")}`
+                              : t(language, "settings.test")}
+                      </button>
+                    </div>
+                  </div>
+                  <div style={fieldStyle}>
+                    <label style={labelStyle}>
+                      {t(language, "settings.omdbKey")}
+                    </label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        style={{ ...inputStyle, flex: 1 }}
+                        value={form.omdb_api_key ?? ""}
+                        onChange={set("omdb_api_key")}
+                        placeholder={t(language, "settings.omdbPlaceholder")}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          testApiKey(
+                            "test_omdb_key",
+                            form.omdb_api_key ?? "",
+                            setOmdbTestStatus,
+                          )
+                        }
+                        disabled={omdbTestStatus === "testing"}
+                        style={{
+                          padding: "0 14px",
+                          borderRadius: 8,
+                          border:
+                            "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+                          background: "var(--color-surface-2)",
+                          color: "var(--color-text)",
+                          fontWeight: 600,
+                          cursor:
+                            omdbTestStatus === "testing"
+                              ? "wait"
+                              : "pointer",
+                        }}
+                      >
+                        {omdbTestStatus === "testing"
+                          ? t(language, "settings.testing")
+                          : omdbTestStatus === "ok"
+                            ? `✓ ${t(language, "settings.omdbTestOk")}`
+                            : omdbTestStatus === "error"
+                              ? `✗ ${t(language, "settings.omdbTestFail")}`
+                              : t(language, "settings.test")}
+                      </button>
+                    </div>
+                    <span style={subtextStyle}>
+                      {t(language, "settings.omdbHelp")}
+                    </span>
+                  </div>
+                  <div style={fieldStyle}>
+                    <label style={labelStyle}>
+                      {t(language, "settings.tvdbKey")}
+                    </label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        style={{ ...inputStyle, flex: 1 }}
+                        value={form.tvdb_api_key ?? ""}
+                        onChange={set("tvdb_api_key")}
+                        placeholder={t(language, "settings.tvdbPlaceholder")}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          testApiKey(
+                            "test_tvdb_key",
+                            form.tvdb_api_key ?? "",
+                            setTvdbTestStatus,
+                          )
+                        }
+                        disabled={tvdbTestStatus === "testing"}
+                        style={{
+                          padding: "0 14px",
+                          borderRadius: 8,
+                          border:
+                            "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+                          background: "var(--color-surface-2)",
+                          color: "var(--color-text)",
+                          fontWeight: 600,
+                          cursor:
+                            tvdbTestStatus === "testing"
+                              ? "wait"
+                              : "pointer",
+                        }}
+                      >
+                        {tvdbTestStatus === "testing"
+                          ? t(language, "settings.testing")
+                          : tvdbTestStatus === "ok"
+                            ? `✓ ${t(language, "settings.tvdbTestOk")}`
+                            : tvdbTestStatus === "error"
+                              ? `✗ ${t(language, "settings.tvdbTestFail")}`
+                              : t(language, "settings.test")}
+                      </button>
+                    </div>
+                    <span style={subtextStyle}>
+                      {t(language, "settings.tvdbHelp")}
+                    </span>
+                  </div>
+                  <div style={fieldStyle}>
+                    <label style={labelStyle}>
+                      {t(language, "settings.ratingOrder")}
+                    </label>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        alignItems: "center",
+                      }}
+                    >
+                      {parseRatingOrder(form.rating_source_order).map(
+                        (source, idx, arr) => (
+                          <span
+                            key={source}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "6px 10px",
+                              borderRadius: 999,
+                              background: "var(--color-surface-2)",
+                              border:
+                                "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+                              fontSize: 12,
+                              fontWeight: 700,
+                            }}
+                          >
+                            <span style={{ opacity: 0.5 }}>{idx + 1}.</span>
+                            <span>{ratingLabel[source]}</span>
+                            <button
+                              type="button"
+                              onClick={() => moveRatingSource(source, -1)}
+                              disabled={idx === 0}
+                              aria-label={t(language, "settings.moveUp")}
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                color: "var(--color-text-muted)",
+                                cursor: idx === 0 ? "default" : "pointer",
+                                fontSize: 14,
+                                lineHeight: 1,
+                                padding: "0 2px",
+                                opacity: idx === 0 ? 0.3 : 1,
+                              }}
+                            >
+                              ◀
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveRatingSource(source, 1)}
+                              disabled={idx === arr.length - 1}
+                              aria-label={t(language, "settings.moveDown")}
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                color: "var(--color-text-muted)",
+                                cursor:
+                                  idx === arr.length - 1
+                                    ? "default"
+                                    : "pointer",
+                                fontSize: 14,
+                                lineHeight: 1,
+                                padding: "0 2px",
+                                opacity: idx === arr.length - 1 ? 0.3 : 1,
+                              }}
+                            >
+                              ▶
+                            </button>
+                          </span>
+                        ),
+                      )}
+                      {/* Render any missing canonical source as a disabled chip — they get auto-appended on save */}
+                      {CANONICAL_ORDER.filter(
+                        (s) =>
+                          !parseRatingOrder(form.rating_source_order).includes(s),
+                      ).map((s) => (
+                        <span
+                          key={`missing-${s}`}
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: 999,
+                            border:
+                              "1px dashed color-mix(in srgb, var(--color-border) 70%, transparent)",
+                            color: "var(--color-text-muted)",
+                            fontSize: 12,
+                          }}
+                        >
+                          {ratingLabel[s]}
+                        </span>
+                      ))}
+                    </div>
+                    <span style={subtextStyle}>
+                      {t(language, "settings.ratingOrderHelp")}
+                    </span>
+                  </div>
+                  <div style={fieldStyle}>
+                    <button
+                      type="button"
+                      onClick={runRatingsRefresh}
+                      disabled={
+                        ratingsRefreshState === "running" ||
+                        (!form.omdb_api_key && !form.tvdb_api_key)
+                      }
+                      style={{
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                        border:
+                          "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+                        background: "var(--color-surface-2)",
+                        color: "var(--color-text)",
+                        fontWeight: 600,
+                        cursor:
+                          ratingsRefreshState === "running"
+                            ? "wait"
+                            : "pointer",
+                        alignSelf: "flex-start",
+                      }}
+                    >
+                      {ratingsRefreshState === "running"
+                        ? t(language, "settings.refreshRatingsRunning")
+                        : t(language, "settings.refreshRatings")}
+                    </button>
+                    {ratingsRefreshMsg && (
+                      <span
+                        style={{
+                          ...subtextStyle,
+                          color:
+                            ratingsRefreshState === "error"
+                              ? "var(--color-danger)"
+                              : "var(--color-success)",
+                        }}
+                      >
+                        {ratingsRefreshMsg}
+                      </span>
+                    )}
                   </div>
                   <div style={fieldStyle}>
                     <label style={labelStyle}>

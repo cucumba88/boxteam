@@ -10,6 +10,13 @@ import {
   getLocalizedTitle,
 } from "../utils/mediaLanguage";
 import { formatBytes } from "../lib/format";
+import {
+  formatRating,
+  ratingLabel,
+  resolveRating,
+  useRatingOrder,
+} from "../lib/ratingSource";
+import RatingSourceLogo from "./RatingSourceLogo";
 import WatchlistButton from "../features/watchlist/WatchlistButton";
 import type { AddWatchlistParams } from "../features/watchlist/types";
 
@@ -138,6 +145,7 @@ function MediaCard({
   disableQuickAction = false,
 }: Props) {
   const [imgLoaded, setImgLoaded] = useState(false);
+  const ratingOrder = useRatingOrder();
   const isTV =
     item.tmdb_type === "tv" ||
     item.media_type === "tv" ||
@@ -463,21 +471,48 @@ function MediaCard({
             value is nowrap so individual chunks like "17.88 GB" never break
             across lines. Hover title gives the full content. */}
         {(() => {
-          const parts: string[] = [];
-          if (year) parts.push(String(year));
-          if (item.tmdb_rating != null && item.tmdb_rating > 0) {
-            parts.push(item.tmdb_rating.toFixed(1));
-          }
+          const resolved = resolveRating(item, ratingOrder);
+          const ratingChip =
+            resolved && resolved.value > 0
+              ? {
+                  text: `${ratingLabel[resolved.source]} ${formatRating(resolved.value)}`,
+                  node: (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        verticalAlign: "-1px",
+                      }}
+                    >
+                      <RatingSourceLogo
+                        source={resolved.source}
+                        height={12}
+                        title={ratingLabel[resolved.source]}
+                      />
+                      <span style={{ fontWeight: 600 }}>
+                        {formatRating(resolved.value)}
+                      </span>
+                    </span>
+                  ),
+                }
+              : null;
+
+          const parts: Array<{ text: string; node: React.ReactNode }> = [];
+          if (year) parts.push({ text: String(year), node: String(year) });
+          if (ratingChip) parts.push(ratingChip);
           if (showFileSize && item.size_bytes != null && item.size_bytes > 0) {
-            parts.push(formatBytes(item.size_bytes));
+            const text = formatBytes(item.size_bytes);
+            parts.push({ text, node: text });
           }
           if (langs.length > 0) {
-            parts.push(langs.map((l) => l.toUpperCase()).join("/"));
+            const text = langs.map((l) => l.toUpperCase()).join("/");
+            parts.push({ text, node: text });
           }
           if (parts.length === 0) return null;
           return (
             <div
-              title={parts.join(" · ")}
+              title={parts.map((p) => p.text).join(" · ")}
               style={{
                 fontSize: "0.7rem",
                 color: "var(--color-text-muted)",
@@ -493,7 +528,7 @@ function MediaCard({
                   {i > 0 && (
                     <span style={{ opacity: 0.4, margin: "0 0.35rem" }}>·</span>
                   )}
-                  {p}
+                  {p.node}
                 </span>
               ))}
             </div>

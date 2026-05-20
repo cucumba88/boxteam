@@ -24,6 +24,14 @@ import {
 import { t } from "../utils/i18n";
 import { GENRE_MAP } from "../utils/genres";
 import { useIsMobile } from "../hooks/useIsMobile";
+import {
+  allAvailableRatings,
+  formatRating,
+  ratingLabel,
+  resolveRating,
+  useRatingOrder,
+} from "../lib/ratingSource";
+import RatingSourceLogo from "./RatingSourceLogo";
 
 function getGroupFolder(ftpPath: string): string {
   return ftpPath.split("/").slice(-2, -1)[0] ?? "";
@@ -192,7 +200,13 @@ function miniBadge(bg: string, text: string, fg = "var(--color-text)") {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({
+  label,
+  value,
+}: {
+  label: React.ReactNode;
+  value: string;
+}) {
   return (
     <div
       style={{
@@ -892,6 +906,13 @@ export default function TVShowPanel({
   const [openingUrl, setOpeningUrl] = useState<string | null>(null);
   const [devChecking, setDevChecking] = useState(false);
   const isMobile = useIsMobile();
+  const ratingOrder = useRatingOrder();
+  const primaryRating = resolveRating(show, ratingOrder);
+  const secondaryRatings = primaryRating
+    ? allAvailableRatings(show, ratingOrder).filter(
+        (r) => r.source !== primaryRating.source,
+      )
+    : [];
 
   const handleOpenUrl = (url: string) => {
     setOpeningUrl(url);
@@ -1186,12 +1207,18 @@ export default function TVShowPanel({
                           : show.year,
                       ),
                     )}
-                  {show.tmdb_rating != null &&
+                  {primaryRating &&
                     miniBadge(
                       "color-mix(in srgb, var(--color-warning) 20%, transparent)",
-                      `★ ${show.tmdb_rating.toFixed(1)}`,
+                      `★ ${formatRating(primaryRating.value)} ${ratingLabel[primaryRating.source]}`,
                       "var(--color-warning)",
                     )}
+                  {secondaryRatings.map((r) =>
+                    miniBadge(
+                      "color-mix(in srgb, var(--color-surface-2) 70%, transparent)",
+                      `${ratingLabel[r.source]} ${formatRating(r.value)}`,
+                    ),
+                  )}
                   {showGenres.slice(0, 2).map((g) =>
                     miniBadge(
                       "color-mix(in srgb, var(--color-teal) 14%, transparent)",
@@ -1643,12 +1670,31 @@ export default function TVShowPanel({
                       ).size,
                     )}
                   />
-                  {show.tmdb_rating != null && (
+                  {primaryRating && (
                     <StatCard
-                      label="TMDB"
-                      value={show.tmdb_rating.toFixed(1)}
+                      label={
+                        <RatingSourceLogo
+                          source={primaryRating.source}
+                          height={16}
+                          title={ratingLabel[primaryRating.source]}
+                        />
+                      }
+                      value={formatRating(primaryRating.value)}
                     />
                   )}
+                  {secondaryRatings.map((r) => (
+                    <StatCard
+                      key={`stat-${r.source}`}
+                      label={
+                        <RatingSourceLogo
+                          source={r.source}
+                          height={16}
+                          title={ratingLabel[r.source]}
+                        />
+                      }
+                      value={formatRating(r.value)}
+                    />
+                  ))}
                 </div>
 
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -1661,12 +1707,18 @@ export default function TVShowPanel({
                           : show.year,
                       ),
                     )}
-                  {show.tmdb_rating != null &&
+                  {primaryRating &&
                     miniBadge(
                       "color-mix(in srgb, var(--color-primary) 18%, transparent)",
-                      `TMDB ${show.tmdb_rating.toFixed(1)}`,
+                      `${ratingLabel[primaryRating.source]} ${formatRating(primaryRating.value)}`,
                       "var(--color-primary)",
                     )}
+                  {secondaryRatings.map((r) =>
+                    miniBadge(
+                      "color-mix(in srgb, var(--color-surface-2) 70%, transparent)",
+                      `${ratingLabel[r.source]} ${formatRating(r.value)}`,
+                    ),
+                  )}
                   {show.media_type &&
                     miniBadge("var(--color-surface-2)", show.media_type)}
                   {showGenres.map((g) =>

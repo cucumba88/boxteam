@@ -675,6 +675,57 @@ const messages = {
     es: "Pega tu API key v3",
     en: "Paste your v3 API key",
   },
+  "settings.tmdbTestOk": { es: "Funciona", en: "Works" },
+  "settings.tmdbTestFail": { es: "Fallo", en: "Failed" },
+  "settings.omdbKey": {
+    es: "Clave OMDb (puntuación IMDb)",
+    en: "OMDb API Key (IMDb rating)",
+  },
+  "settings.omdbPlaceholder": {
+    es: "Pega tu API key de omdbapi.com",
+    en: "Paste your omdbapi.com API key",
+  },
+  "settings.omdbHelp": {
+    es: "OMDb expone la puntuación de IMDb. Saca una clave gratuita en omdbapi.com (1000 peticiones/día).",
+    en: "OMDb exposes IMDb's rating. Get a free key at omdbapi.com (1000 requests/day).",
+  },
+  "settings.omdbTestOk": { es: "Funciona", en: "Works" },
+  "settings.omdbTestFail": { es: "Fallo", en: "Failed" },
+  "settings.tvdbKey": { es: "Clave TheTVDB", en: "TheTVDB API Key" },
+  "settings.tvdbPlaceholder": {
+    es: "Pega tu API key v4 de thetvdb.com",
+    en: "Paste your thetvdb.com v4 API key",
+  },
+  "settings.tvdbHelp": {
+    es: "TheTVDB devuelve un score propio. Saca tu clave gratuita en thetvdb.com/api-information.",
+    en: "TheTVDB returns its own score. Get a free key at thetvdb.com/api-information.",
+  },
+  "settings.tvdbTestOk": { es: "Funciona", en: "Works" },
+  "settings.tvdbTestFail": { es: "Fallo", en: "Failed" },
+  "settings.test": { es: "Probar", en: "Test" },
+  "settings.testing": { es: "Probando…", en: "Testing…" },
+  "settings.ratingOrder": {
+    es: "Orden de preferencia de puntuación",
+    en: "Rating source preference",
+  },
+  "settings.ratingOrderHelp": {
+    es: "La primera fuente con dato gana. Las demás aparecen como complemento en las fichas de detalle.",
+    en: "First source with a value wins. The others appear as secondaries on detail pages.",
+  },
+  "settings.moveUp": { es: "Subir", en: "Move up" },
+  "settings.moveDown": { es: "Bajar", en: "Move down" },
+  "settings.refreshRatings": {
+    es: "Actualizar puntuaciones del catálogo",
+    en: "Refresh catalog ratings",
+  },
+  "settings.refreshRatingsRunning": {
+    es: "Actualizando puntuaciones…",
+    en: "Refreshing ratings…",
+  },
+  "settings.refreshRatingsDone": {
+    es: "Listo — {count} ítems procesados",
+    en: "Done — {count} items processed",
+  },
   "settings.defaultLanguage": {
     es: "Idioma por defecto de la librería",
     en: "Default Library Language",
@@ -1014,6 +1065,22 @@ const messages = {
   "metaRefresh.banner": {
     es: "Actualizando metadatos · {done}/{total}",
     en: "Updating metadata · {done}/{total}",
+  },
+  "ratings.banner": {
+    es: "Actualizando puntuaciones · {done}/{total}",
+    en: "Refreshing ratings · {done}/{total}",
+  },
+  "library.refreshRatings": {
+    es: "Actualizar puntuaciones",
+    en: "Refresh ratings",
+  },
+  "library.refreshingRatings": {
+    es: "Actualizando puntuaciones…",
+    en: "Refreshing ratings…",
+  },
+  "library.refreshRatingsHelp": {
+    es: "Vuelve a pedir las puntuaciones de IMDb (OMDb) y TVDB para todo el catálogo. Funciona en segundo plano.",
+    en: "Re-fetch IMDb (via OMDb) and TVDB ratings for the whole catalog. Runs in the background.",
   },
 
   // Watchlist

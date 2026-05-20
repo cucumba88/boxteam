@@ -9,7 +9,6 @@ import {
   Folder,
   Pencil,
   RefreshCw,
-  Star,
 } from "lucide-react";
 import { isTauri } from "../lib/transport";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -23,6 +22,14 @@ import {
   getLocalizedPosterPath,
   getLocalizedTitle,
 } from "../utils/mediaLanguage";
+import {
+  allAvailableRatings,
+  formatRating,
+  ratingLabel,
+  resolveRating,
+  useRatingOrder,
+} from "../lib/ratingSource";
+import RatingSourceLogo from "./RatingSourceLogo";
 import { t } from "../utils/i18n";
 import { GENRE_MAP } from "../utils/genres";
 import { formatBytes } from "../lib/format";
@@ -99,7 +106,14 @@ export default function DetailPage({
   const title = getLocalizedTitle(item, language);
   const overview = getLocalizedOverview(item, language);
   const posterPath = getLocalizedPosterPath(item, language);
-  const rating = item.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
+  const ratingOrder = useRatingOrder();
+  const primaryRating = resolveRating(item, ratingOrder);
+  const rating = primaryRating ? formatRating(primaryRating.value) : null;
+  const secondaryRatings = primaryRating
+    ? allAvailableRatings(item, ratingOrder).filter(
+        (r) => r.source !== primaryRating.source,
+      )
+    : [];
   const poster = posterPath ? `${TMDB_POSTER_W500}${posterPath}` : null;
   const posterSmall = posterPath ? `${TMDB_POSTER_W342}${posterPath}` : null;
 
@@ -464,23 +478,22 @@ export default function DetailPage({
                 </span>
               </>
             )}
-            {rating && (
+            {rating && primaryRating && (
               <>
                 <span style={{ opacity: 0.4 }}>·</span>
                 <span
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: 4,
-                    color: "var(--color-warning)",
+                    gap: 6,
                     fontWeight: 700,
                   }}
+                  title={`${ratingLabel[primaryRating.source]} ${rating}`}
                 >
-                  <Star
-                    size={13}
-                    strokeWidth={2.2}
-                    fill="currentColor"
-                    aria-hidden="true"
+                  <RatingSourceLogo
+                    source={primaryRating.source}
+                    height={14}
+                    title={ratingLabel[primaryRating.source]}
                   />
                   {rating}
                 </span>
@@ -513,6 +526,45 @@ export default function DetailPage({
               </>
             )}
           </div>
+
+          {/* Secondary ratings — show every available source after the primary
+              so the user can compare at a glance. Always shows the primary
+              source's label too, even when there are no secondaries, so the
+              big star isn't unlabeled. */}
+          {secondaryRatings.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: 12,
+                fontSize: 12,
+                color: "var(--color-text-muted)",
+              }}
+            >
+              {secondaryRatings.map((r) => (
+                <span
+                  key={r.source}
+                  title={`${ratingLabel[r.source]} ${formatRating(r.value)}`}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    opacity: 0.9,
+                  }}
+                >
+                  <RatingSourceLogo
+                    source={r.source}
+                    height={14}
+                    title={ratingLabel[r.source]}
+                  />
+                  <span style={{ color: "var(--color-text)" }}>
+                    {formatRating(r.value)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Genres */}
           {genres.length > 0 && (
