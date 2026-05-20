@@ -143,6 +143,39 @@ fn score_result(result: &TmdbMovie, query: &str, year: Option<u16>) -> f64 {
 }
 
 fn truncate_for_error(value: &str, max_chars: usize) -> String {
+    if value.is_empty() {
+        return "<empty body>".to_string();
+    }
+
+    // If the body looks binary (lots of replacement chars or control bytes),
+    // don't dump random high-bit garbage into the error message — that's how
+    // we ended up with "Body: � \R�n�0 �g7K�4l}…" in user-facing toasts.
+    // Almost always it means the upstream sent compressed bytes we couldn't
+    // decode; surface that clearly instead.
+    let sample = value.chars().take(64);
+    let non_printable = sample
+        .clone()
+        .filter(|c| *c == '\u{FFFD}' || (c.is_control() && *c != '\n' && *c != '\t'))
+        .count();
+    if non_printable > 8 {
+        // Detect common compressed-content signatures from the raw bytes so
+        // the message can name the actual encoding when possible.
+        let bytes = value.as_bytes();
+        let kind = if bytes.starts_with(&[0x1f, 0x8b]) {
+            "gzip"
+        } else if bytes.starts_with(&[0xce, 0xb2, 0xcf, 0x81]) {
+            "brotli"
+        } else if bytes.len() >= 2 && bytes[0] == 0x78 && matches!(bytes[1], 0x01 | 0x5e | 0x9c | 0xda) {
+            "deflate/zlib"
+        } else {
+            "binary"
+        };
+        return format!(
+            "<{kind} response, {} bytes — likely a compression-handling regression>",
+            value.len()
+        );
+    }
+
     let mut out = String::new();
     for (idx, ch) in value.chars().enumerate() {
         if idx >= max_chars {
@@ -151,11 +184,7 @@ fn truncate_for_error(value: &str, max_chars: usize) -> String {
         }
         out.push(ch);
     }
-    if out.is_empty() {
-        "<empty body>".to_string()
-    } else {
-        out
-    }
+    out
 }
 
 async fn throttle_tmdb_request() {
