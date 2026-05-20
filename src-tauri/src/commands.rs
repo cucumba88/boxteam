@@ -1171,17 +1171,23 @@ pub async fn refresh_all_ratings_internal(
         let (omdb, tvdb) =
             enrich_extra_ratings(&db, &config, id, &imdb_id, window.as_ref()).await;
 
-        let update_payload = serde_json::json!({
-            "id": id,
-            "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
-            "imdb_votes":  omdb.as_ref().and_then(|o| o.imdb_votes),
-            "tvdb_id":     tvdb.as_ref().and_then(|t| t.tvdb_id),
-            "tvdb_rating": tvdb.as_ref().and_then(|t| t.rating),
-        });
+        // Push the live patch to the Tauri window (local listener — no
+        // broadcast cost). We deliberately do NOT ws_broadcast each item:
+        // for a 3000-row catalog that produced ~3000 WS messages over the
+        // refresh, each one triggering a React setItems → re-render storm
+        // that starved poster <img> loads of main-thread time in web mode.
+        // Web clients pick up the new ratings through `ratings:complete` →
+        // useIndexing re-fetches /api/media in one shot.
         if let Some(ref w) = window {
-            w.emit("index:update", update_payload.clone()).ok();
+            let update_payload = serde_json::json!({
+                "id": id,
+                "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
+                "imdb_votes":  omdb.as_ref().and_then(|o| o.imdb_votes),
+                "tvdb_id":     tvdb.as_ref().and_then(|t| t.tvdb_id),
+                "tvdb_rating": tvdb.as_ref().and_then(|t| t.rating),
+            });
+            w.emit("index:update", update_payload).ok();
         }
-        crate::ws_broadcast("index:update", update_payload);
 
         let done = idx + 1;
         if done % 10 == 0 || done == total {
