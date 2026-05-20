@@ -71,13 +71,18 @@ git tag v0.X.Y
 git push origin main
 git push origin refs/tags/v0.X.Y      # explicit refspec — the local branch and tag share a name
 git branch -d v0.X.Y
+
+# 8. MANDATORY: write the GitHub release notes (see next section).
+#    A release is NOT done until the GH release page has a title + body.
 ```
 
 [scripts/publish.mjs](scripts/publish.mjs) only bumps versions + verifies builds; it does NOT commit, tag, push, or build the docker image. Those steps are manual (or via CI on tag push).
 
-### Watching CI + writing release notes
+### Writing release notes — MANDATORY, never skip
 
-GitHub releases are auto-created by Build Linux (`softprops/action-gh-release`) with installer assets attached. They start with the tag name as title and no body. After the release exists, edit it:
+**Every `v*` tag MUST get release notes** written via `gh release edit` before the release task is considered complete. The auto-created release ships with just the tag name as title and an empty body — that is **not acceptable as a finished release**. If you forget this step, the release is incomplete.
+
+GitHub releases are auto-created by Build Linux (`softprops/action-gh-release`) with installer assets attached. After the release exists, edit it:
 
 ```bash
 until gh release view v0.X.Y >/dev/null 2>&1; do sleep 20; done
