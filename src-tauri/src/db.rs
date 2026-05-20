@@ -389,10 +389,29 @@ impl Db {
 
     /// The fixed system-level data dir — used to find bootstrap.json regardless
     /// of any custom location configured there.
+    ///
+    /// On a normal Linux desktop session this resolves to
+    /// `$XDG_DATA_HOME/oscata-tauri` or `~/.local/share/oscata-tauri`. The
+    /// previous code silently fell back to the current working directory if
+    /// `dirs_next` couldn't resolve a data dir (e.g., `$HOME` unset, which can
+    /// happen under systemd services, some AppImage launchers, or Snap/Flatpak
+    /// confinement). The CWD fallback wrote `library.db` into wherever the
+    /// user happened to launch from — often unwritable — and the wizard would
+    /// die with a confusing SQLite error several steps later.
+    ///
+    /// We still return *some* PathBuf so the rest of the boot sequence can
+    /// continue, but we log a loud warning so the user can see what happened
+    /// in the terminal / journald.
     fn default_data_dir() -> std::path::PathBuf {
-        dirs_next::data_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("oscata-tauri")
+        if let Some(d) = dirs_next::data_dir() {
+            return d.join("oscata-tauri");
+        }
+        eprintln!(
+            "[oscata] WARNING: could not resolve a user data directory \
+             (dirs_next::data_dir() returned None — is $HOME set?). \
+             Falling back to ./oscata-tauri-data which may not be writable."
+        );
+        std::path::PathBuf::from("./oscata-tauri-data")
     }
 
     /// Detect portable mode: look for `.oscata-portable` next to the executable.
@@ -433,16 +452,37 @@ impl Db {
     }
 
     /// Write (or delete when `None`) the custom db dir to bootstrap.json.
-    pub fn write_bootstrap(dir: Option<&std::path::Path>) {
-        let bootstrap = Self::default_data_dir().join("bootstrap.json");
-        std::fs::create_dir_all(Self::default_data_dir()).ok();
+    ///
+    /// Returns `Err` if the bootstrap file can't be written — historically
+    /// this was `.ok()`'d, which let the wizard think `init_db_path`
+    /// succeeded even when nothing was persisted. The next launch then went
+    /// back to the default dir and the user thought their choice was ignored.
+    pub fn write_bootstrap(dir: Option<&std::path::Path>) -> Result<(), String> {
+        let default_dir = Self::default_data_dir();
+        let bootstrap = default_dir.join("bootstrap.json");
+        std::fs::create_dir_all(&default_dir).map_err(|e| {
+            format!(
+                "Cannot create app data directory {}: {}",
+                default_dir.display(),
+                e
+            )
+        })?;
         match dir {
             Some(d) => {
                 let json = serde_json::json!({ "db_dir": d.to_string_lossy() });
-                std::fs::write(&bootstrap, json.to_string()).ok();
+                std::fs::write(&bootstrap, json.to_string()).map_err(|e| {
+                    format!("Cannot write {}: {}", bootstrap.display(), e)
+                })?;
             }
-            None => { std::fs::remove_file(&bootstrap).ok(); }
+            None => {
+                if bootstrap.exists() {
+                    std::fs::remove_file(&bootstrap).map_err(|e| {
+                        format!("Cannot remove {}: {}", bootstrap.display(), e)
+                    })?;
+                }
+            }
         }
+        Ok(())
     }
 
     /// Resolve the effective data directory using the priority chain:
@@ -681,9 +721,45 @@ impl Db {
 
     pub fn new() -> SqlResult<Self> {
         let (data_dir, is_portable) = Self::resolve_data_dir();
-        std::fs::create_dir_all(&data_dir).ok();
+        println!("[oscata] data dir: {}", data_dir.display());
+
+        // Loudly surface dir-creation failures. Previously this was `.ok()`
+        // which meant a Linux user with an unwritable `~/.local/share/`
+        // (sandboxed Snap, no $HOME, /root-owned dir, etc.) would see a
+        // cryptic "unable to open database file" error several seconds later
+        // instead of the actual permission problem.
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            return Err(rusqlite::Error::InvalidPath(format!(
+                "Cannot create data directory {}: {}",
+                data_dir.display(),
+                e
+            )
+            .into()));
+        }
+
+        // Writability probe — write + delete a 0-byte test file. Catches the
+        // case where create_dir_all succeeded (dir already existed) but the
+        // process can't actually write into it.
+        let probe = data_dir.join(".oscata-write-test");
+        if let Err(e) = std::fs::write(&probe, b"") {
+            return Err(rusqlite::Error::InvalidPath(format!(
+                "Data directory {} is not writable by this process: {}",
+                data_dir.display(),
+                e
+            )
+            .into()));
+        }
+        let _ = std::fs::remove_file(&probe);
+
         let db_path = data_dir.join("library.db");
-        let conn = Connection::open(&db_path)?;
+        let conn = Connection::open(&db_path).map_err(|e| {
+            rusqlite::Error::InvalidPath(format!(
+                "Cannot open SQLite database at {}: {}",
+                db_path.display(),
+                e
+            )
+            .into())
+        })?;
         Self::apply_migrations(&conn)?;
         Ok(Self { conn: Arc::new(Mutex::new(conn)), data_dir, is_portable })
     }
@@ -708,7 +784,7 @@ impl Db {
         conn.execute_batch(&format!("VACUUM INTO '{}';", escaped))
             .map_err(|e| e.to_string())?;
         drop(conn);
-        Self::write_bootstrap(Some(new_dir));
+        Self::write_bootstrap(Some(new_dir))?;
         Ok(())
     }
 
