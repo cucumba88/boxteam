@@ -1035,6 +1035,34 @@ const messages = {
     es: "Perfil de calidad",
     en: "Quality profile",
   },
+  "watchlist.newProfile": {
+    es: "Nuevo perfil",
+    en: "New profile",
+  },
+  "watchlist.useExistingProfile": {
+    es: "Usar uno existente",
+    en: "Use an existing one",
+  },
+  "watchlist.createFirstProfile": {
+    es: "Crea tu primer perfil de calidad",
+    en: "Create your first quality profile",
+  },
+  "watchlist.createFirstProfileHint": {
+    es: "Define qué calidad prefieres para tus descargas. Podrás añadir más perfiles desde Ajustes.",
+    en: "Define which quality you prefer for downloads. You can add more profiles later from Settings.",
+  },
+  "watchlist.newProfileHint": {
+    es: "Configura un perfil específico para este título. Quedará disponible para futuros.",
+    en: "Configure a profile tailored to this title. It'll be reusable for future ones.",
+  },
+  "watchlist.createProfileAndAdd": {
+    es: "Crear perfil y añadir",
+    en: "Create profile and add",
+  },
+  "watchlist.newProfileNameRequired": {
+    es: "Ponle un nombre al perfil.",
+    en: "Give the profile a name.",
+  },
   "watchlist.cancel": { es: "Cancelar", en: "Cancel" },
   "watchlist.adding": { es: "Añadiendo…", en: "Adding…" },
   "watchlist.add": { es: "Agregar", en: "Add" },

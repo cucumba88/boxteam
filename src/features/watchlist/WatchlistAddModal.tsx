@@ -6,6 +6,12 @@ import type { AppLanguage } from "../../utils/mediaLanguage";
 import { t } from "../../utils/i18n";
 import type { AddWatchlistParams } from "./types";
 import { useQualityProfiles } from "./useQualityProfiles";
+import {
+  ProfileEditor,
+  emptyForm,
+  formToParams,
+  type ProfileFormState,
+} from "./ProfileEditor";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import Toggle from "../../components/Toggle";
 import { formSelectStandard } from "../../lib/formStyles";
@@ -48,9 +54,40 @@ export default function WatchlistAddModal({
   const [autoDownload, setAutoDownload] = useState(false);
   const [profileId, setProfileId] = useState<number>(0);
   const [adding, setAdding] = useState(false);
-  const { profiles } = useQualityProfiles();
+  const { profiles, createProfile } = useQualityProfiles();
+  const [newProfileForm, setNewProfileForm] =
+    useState<ProfileFormState>(emptyForm);
+  const [creatingProfile, setCreatingProfile] = useState(false);
   const isMobile = useIsMobile();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Three discrete screens inside the same modal.
+  type Step = "search" | "configure" | "createProfile";
+  const step: Step = !selected
+    ? "search"
+    : creatingProfile || profiles.length === 0
+      ? "createProfile"
+      : "configure";
+
+  const goBack = () => {
+    if (step === "createProfile") {
+      if (profiles.length === 0) {
+        setSelected(null);
+      } else {
+        setCreatingProfile(false);
+        setNewProfileForm(emptyForm());
+      }
+      setError("");
+    } else if (step === "configure") {
+      setSelected(null);
+      setError("");
+    }
+  };
+
+  const headerTitle =
+    step === "createProfile"
+      ? t(language, "watchlist.newProfile")
+      : t(language, "watchlist.addTitle");
 
   // When profiles load, default to the first available profile.
   useEffect(() => {
@@ -92,8 +129,19 @@ export default function WatchlistAddModal({
 
   const confirmAdd = async () => {
     if (!selected) return;
+    const isCreatingProfile = creatingProfile || profiles.length === 0;
+    if (isCreatingProfile && !newProfileForm.name.trim()) {
+      setError(t(language, "watchlist.newProfileNameRequired"));
+      return;
+    }
     setAdding(true);
+    setError("");
     try {
+      let effectiveProfileId = profileId;
+      if (isCreatingProfile) {
+        const created = await createProfile(formToParams(newProfileForm));
+        effectiveProfileId = created.id;
+      }
       const title =
         language === "es"
           ? selected.title
@@ -113,7 +161,7 @@ export default function WatchlistAddModal({
           : undefined,
         scope: mediaType === "tv" ? scope : "all",
         auto_download: autoDownload,
-        profile_id: profileId,
+        profile_id: effectiveProfileId,
       });
       onClose();
     } catch (e) {
@@ -194,10 +242,10 @@ export default function WatchlistAddModal({
               color: "var(--color-text)",
             }}
           >
-            {t(language, "watchlist.addTitle")}
+            {headerTitle}
           </h2>
-          {selected && (
-            <button onClick={() => setSelected(null)} style={ghostBtn}>
+          {step !== "search" && (
+            <button onClick={goBack} style={ghostBtn}>
               ← {t(language, "watchlist.back")}
             </button>
           )}
@@ -206,7 +254,59 @@ export default function WatchlistAddModal({
           </button>
         </div>
 
-        {selected ? (
+        {step === "createProfile" ? (
+          /* Step 3: dedicated profile-creation screen */
+          <div
+            style={{
+              padding: 20,
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+              overflowY: "auto",
+            }}
+          >
+            <p
+              style={{
+                margin: 0,
+                fontSize: 13,
+                color: "var(--color-text-muted)",
+                lineHeight: 1.45,
+              }}
+            >
+              {profiles.length === 0
+                ? t(language, "watchlist.createFirstProfileHint")
+                : t(language, "watchlist.newProfileHint")}
+            </p>
+            <ProfileEditor
+              form={newProfileForm}
+              onChange={setNewProfileForm}
+              language={language}
+            />
+
+            {error && (
+              <div style={{ color: "var(--color-danger)", fontSize: 13 }}>
+                {error}
+              </div>
+            )}
+
+            <div
+              style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}
+            >
+              <button onClick={goBack} style={ghostBtn}>
+                {t(language, "watchlist.cancel")}
+              </button>
+              <button
+                onClick={() => void confirmAdd()}
+                disabled={adding || !newProfileForm.name.trim()}
+                style={primaryBtn}
+              >
+                {adding
+                  ? t(language, "watchlist.adding")
+                  : t(language, "watchlist.createProfileAndAdd")}
+              </button>
+            </div>
+          </div>
+        ) : step === "configure" ? (
           /* Step 2: Confirm + options */
           <div
             style={{
@@ -214,13 +314,14 @@ export default function WatchlistAddModal({
               display: "flex",
               flexDirection: "column",
               gap: 16,
+              overflowY: "auto",
             }}
           >
             <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-              {selected.poster_path && (
+              {selected!.poster_path && (
                 <img
-                  src={`${TMDB_IMG}${selected.poster_path}`}
-                  alt={selected.title}
+                  src={`${TMDB_IMG}${selected!.poster_path}`}
+                  alt={selected!.title}
                   style={{
                     width: 80,
                     borderRadius: "var(--radius)",
@@ -237,17 +338,17 @@ export default function WatchlistAddModal({
                   }}
                 >
                   {language === "es"
-                    ? selected.title
-                    : (selected.title_en ?? selected.title)}
+                    ? selected!.title
+                    : (selected!.title_en ?? selected!.title)}
                 </div>
-                {selected.release_date && (
+                {selected!.release_date && (
                   <div
                     style={{ color: "var(--color-text-muted)", fontSize: 13 }}
                   >
-                    {selected.release_date.slice(0, 4)}
+                    {selected!.release_date.slice(0, 4)}
                   </div>
                 )}
-                {selected.overview && (
+                {selected!.overview && (
                   <div
                     style={{
                       marginTop: 6,
@@ -259,8 +360,8 @@ export default function WatchlistAddModal({
                     }}
                   >
                     {language === "es"
-                      ? selected.overview
-                      : (selected.overview_en ?? selected.overview)}
+                      ? selected!.overview
+                      : (selected!.overview_en ?? selected!.overview)}
                   </div>
                 )}
               </div>
@@ -316,17 +417,36 @@ export default function WatchlistAddModal({
               <Toggle checked={autoDownload} onChange={setAutoDownload} />
             </div>
 
-            {/* Quality profile */}
+            {/* Quality profile — dropdown + always-available "Nuevo perfil" */}
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label
+              <div
                 style={{
-                  fontSize: 13,
-                  color: "var(--color-text-muted)",
-                  fontWeight: 500,
+                  display: "flex",
+                  alignItems: "baseline",
+                  justifyContent: "space-between",
+                  gap: 10,
                 }}
               >
-                {t(language, "watchlist.qualityProfile")}
-              </label>
+                <label
+                  style={{
+                    fontSize: 13,
+                    color: "var(--color-text-muted)",
+                    fontWeight: 500,
+                  }}
+                >
+                  {t(language, "watchlist.qualityProfile")}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreatingProfile(true);
+                    setError("");
+                  }}
+                  style={linkBtn}
+                >
+                  + {t(language, "watchlist.newProfile")}
+                </button>
+              </div>
               <select
                 value={profileId}
                 onChange={(e) => setProfileId(Number(e.target.value))}
@@ -581,6 +701,16 @@ const primaryBtn: React.CSSProperties = {
   cursor: "pointer",
   fontSize: 13,
   fontWeight: 500,
+};
+
+const linkBtn: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  color: "var(--color-primary)",
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: "pointer",
+  padding: 0,
 };
 
 const chipBtn: React.CSSProperties = {
