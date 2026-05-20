@@ -966,6 +966,268 @@ pub async fn test_tmdb_key(api_key: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+pub async fn test_omdb_key(api_key: String) -> Result<bool, String> {
+    Ok(crate::omdb::validate_api_key(&api_key).await)
+}
+
+#[tauri::command]
+pub async fn test_tvdb_key(api_key: String) -> Result<bool, String> {
+    Ok(crate::tvdb::validate_api_key(&api_key).await)
+}
+
+/// Emit a log line into the activity log channel — works in both debug and
+/// release builds (unlike `emit_index_log`) and also broadcasts over the WS
+/// so web-mode clients can see refresh progress.
+fn emit_ratings_log(window: &Option<tauri::WebviewWindow>, msg: impl Into<String>) {
+    let msg = msg.into();
+    eprintln!("[ratings] {msg}");
+    let payload = serde_json::json!({ "msg": msg });
+    if let Some(w) = window {
+        w.emit("index:log", payload.clone()).ok();
+    }
+    crate::ws_broadcast("index:log", payload);
+}
+
+/// Fetch OMDb + TVDB ratings for a single row's IMDb id and persist them.
+/// Soft-fails on every error path — the caller's flow (indexing, refresh)
+/// must never abort because a third-party API is down or rate-limited.
+///
+/// Returns the resolved ratings so callers can emit `index:update` events
+/// without re-reading from disk. `log_window` (when set) receives per-fetch
+/// log lines through the activity-log channel.
+async fn enrich_extra_ratings(
+    db: &crate::db::Db,
+    config: &crate::db::AppConfig,
+    item_id: i64,
+    imdb_id: &str,
+    log_window: Option<&tauri::WebviewWindow>,
+) -> (Option<crate::omdb::OmdbRating>, Option<crate::tvdb::TvdbRating>) {
+    let imdb_id = imdb_id.trim();
+    if imdb_id.is_empty() {
+        return (None, None);
+    }
+
+    let log_target: Option<tauri::WebviewWindow> = log_window.cloned();
+    let omdb_fut = async {
+        if config.omdb_api_key.trim().is_empty() {
+            None
+        } else {
+            match crate::omdb::fetch_by_imdb_id(&config.omdb_api_key, imdb_id).await {
+                Ok(r) => {
+                    if r.imdb_rating.is_none() {
+                        emit_ratings_log(
+                            &log_target,
+                            format!("• OMDb {imdb_id}: no rating returned"),
+                        );
+                    } else {
+                        emit_ratings_log(
+                            &log_target,
+                            format!(
+                                "• OMDb {imdb_id} → {:.1} ({} votes)",
+                                r.imdb_rating.unwrap(),
+                                r.imdb_votes.unwrap_or(0)
+                            ),
+                        );
+                    }
+                    Some(r)
+                }
+                Err(e) => {
+                    emit_ratings_log(&log_target, format!("✗ OMDb {imdb_id}: {e}"));
+                    None
+                }
+            }
+        }
+    };
+    let tvdb_fut = async {
+        if config.tvdb_api_key.trim().is_empty() {
+            None
+        } else {
+            match crate::tvdb::fetch_by_imdb(&config.tvdb_api_key, imdb_id).await {
+                Ok(r) => {
+                    match (r.tvdb_id, r.rating) {
+                        (Some(id), Some(score)) => emit_ratings_log(
+                            &log_target,
+                            format!("• TVDB {imdb_id} → tvdb:{id} score {score:.1}"),
+                        ),
+                        (Some(id), None) => emit_ratings_log(
+                            &log_target,
+                            format!("• TVDB {imdb_id} → tvdb:{id} (no score field)"),
+                        ),
+                        (None, _) => emit_ratings_log(
+                            &log_target,
+                            format!("• TVDB {imdb_id}: no remote-id match"),
+                        ),
+                    }
+                    Some(r)
+                }
+                Err(e) => {
+                    emit_ratings_log(&log_target, format!("✗ TVDB {imdb_id}: {e}"));
+                    None
+                }
+            }
+        }
+    };
+
+    let (omdb, tvdb) = tokio::join!(omdb_fut, tvdb_fut);
+
+    if omdb.is_some() || tvdb.is_some() {
+        if let Err(e) = db.update_extra_ratings(item_id, omdb.as_ref(), tvdb.as_ref()) {
+            emit_ratings_log(
+                &log_target,
+                format!("✗ Persist id={item_id}: {e}"),
+            );
+        }
+    }
+    (omdb, tvdb)
+}
+
+/// Global guard so concurrent "Refresh ratings" presses (or a desktop press
+/// while the web GUI already triggered one) don't double the request load on
+/// OMDb/TVDB. Reset when the job finishes.
+pub static RATINGS_REFRESH_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Re-fetch OMDb + TVDB ratings for every library item with an IMDb id.
+/// Sequential per item so we never have more than one OMDb and one TVDB
+/// request in flight at a time — the per-service throttles enforce pacing
+/// further. By default skips rows that already have both ratings (cheap
+/// resume after an interrupted run); `force=true` re-fetches everything.
+///
+/// Emits `ratings:start`, `ratings:progress` (every 10 items + at completion),
+/// and `ratings:complete` over both Tauri events and the WS broadcast channel.
+pub async fn refresh_all_ratings_internal(
+    db: crate::db::Db,
+    window: Option<tauri::WebviewWindow>,
+    force: bool,
+) -> Result<usize, String> {
+    if RATINGS_REFRESH_RUNNING
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        return Err("Ratings refresh already running".to_string());
+    }
+
+    // RAII-style guard so the flag is always cleared, even on panic / early return.
+    struct RunningGuard;
+    impl Drop for RunningGuard {
+        fn drop(&mut self) {
+            RATINGS_REFRESH_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _guard = RunningGuard;
+
+    let config = db.load_config()?;
+    let omdb_enabled = !config.omdb_api_key.trim().is_empty();
+    let tvdb_enabled = !config.tvdb_api_key.trim().is_empty();
+    if !omdb_enabled && !tvdb_enabled {
+        return Err("Neither OMDb nor TVDB is configured".to_string());
+    }
+
+    // Pull all matched rows and decide locally which still need work — the
+    // shared `get_all_media` query already returns the new rating columns.
+    let media = db.get_all_media()?;
+    let pending: Vec<(i64, String)> = media
+        .into_iter()
+        .filter_map(|item| {
+            let imdb = item.imdb_id.unwrap_or_default();
+            if imdb.trim().is_empty() {
+                return None;
+            }
+            if !force {
+                let omdb_done = !omdb_enabled || item.imdb_rating.is_some();
+                let tvdb_done = !tvdb_enabled || item.tvdb_rating.is_some();
+                if omdb_done && tvdb_done {
+                    return None;
+                }
+            }
+            Some((item.id, imdb))
+        })
+        .collect();
+
+    let total = pending.len();
+
+    if let Some(ref w) = window {
+        w.emit("ratings:start", serde_json::json!({ "total": total })).ok();
+    }
+    crate::ws_broadcast("ratings:start", serde_json::json!({ "total": total }));
+    emit_ratings_log(
+        &window,
+        format!(
+            "🌟 Refreshing ratings for {total} item(s){}",
+            if force { " (forced — re-fetching everything)" } else { "" },
+        ),
+    );
+
+    for (idx, (id, imdb_id)) in pending.into_iter().enumerate() {
+        emit_ratings_log(
+            &window,
+            format!("🌟 [{}/{}] {imdb_id}", idx + 1, total),
+        );
+        let (omdb, tvdb) =
+            enrich_extra_ratings(&db, &config, id, &imdb_id, window.as_ref()).await;
+
+        let update_payload = serde_json::json!({
+            "id": id,
+            "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
+            "imdb_votes":  omdb.as_ref().and_then(|o| o.imdb_votes),
+            "tvdb_id":     tvdb.as_ref().and_then(|t| t.tvdb_id),
+            "tvdb_rating": tvdb.as_ref().and_then(|t| t.rating),
+        });
+        if let Some(ref w) = window {
+            w.emit("index:update", update_payload.clone()).ok();
+        }
+        crate::ws_broadcast("index:update", update_payload);
+
+        let done = idx + 1;
+        if done % 10 == 0 || done == total {
+            let progress = serde_json::json!({ "done": done, "total": total });
+            if let Some(ref w) = window {
+                w.emit("ratings:progress", progress.clone()).ok();
+            }
+            crate::ws_broadcast("ratings:progress", progress);
+        }
+    }
+
+    let complete = serde_json::json!({ "total": total });
+    if let Some(ref w) = window {
+        w.emit("ratings:complete", complete.clone()).ok();
+    }
+    crate::ws_broadcast("ratings:complete", complete);
+    emit_ratings_log(
+        &window,
+        format!("✓ Ratings refresh complete — {total} item(s) processed"),
+    );
+    Ok(total)
+}
+
+/// Spawn-and-return: the Tauri command kicks off the refresh in the
+/// background so the frontend doesn't await the entire job. Progress is
+/// reported via the `ratings:*` events the internal helper emits.
+#[tauri::command]
+pub async fn refresh_all_ratings(
+    state: tauri::State<'_, crate::db::Db>,
+    window: WebviewWindow,
+    force: Option<bool>,
+) -> Result<(), String> {
+    if RATINGS_REFRESH_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("Ratings refresh already running".to_string());
+    }
+    let db = state.inner().clone();
+    let force = force.unwrap_or(false);
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = refresh_all_ratings_internal(db, Some(window), force).await {
+            eprintln!("[ratings] refresh job failed: {e}");
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn test_emby_connection(url: String, api_key: String) -> Result<String, String> {
     let base = url.trim_end_matches('/');
     let endpoint = format!("{base}/System/Info?api_key={api_key}");
@@ -1254,6 +1516,11 @@ pub async fn rematch_all_internal(
                 ),
             );
             db.update_tmdb_auto(item.id, &movie, &actual_type).ok();
+            let (omdb, tvdb) = match movie.imdb_id.as_deref() {
+                Some(imdb) if !imdb.is_empty() =>
+                    enrich_extra_ratings(&db, &config, item.id, imdb, window.as_ref()).await,
+                _ => (None, None),
+            };
             if let Some(ref w) = window {
                 w.emit("index:update", serde_json::json!({
                     "id": item.id,
@@ -1269,6 +1536,10 @@ pub async fn rematch_all_internal(
                     "tmdb_genres": movie.genre_ids,
                     "tmdb_release_date": movie.release_date,
                     "tmdb_type": actual_type,
+                    "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
+                    "imdb_votes":  omdb.as_ref().and_then(|o| o.imdb_votes),
+                    "tvdb_id":     tvdb.as_ref().and_then(|t| t.tvdb_id),
+                    "tvdb_rating": tvdb.as_ref().and_then(|t| t.rating),
                 })).ok();
             }
         } else {
@@ -1470,6 +1741,11 @@ pub async fn start_indexing_internal(
                         Ok(Some((movie, actual_type))) => {
                             on_log_clone(format!("🌐 TMDB: {} → {}", title, movie.title));
                             db_clone.update_tmdb_auto(id, &movie, &actual_type).ok();
+                            let (omdb, tvdb) = match movie.imdb_id.as_deref() {
+                                Some(imdb) if !imdb.is_empty() =>
+                                    enrich_extra_ratings(&db_clone, &config_clone, id, imdb, window_clone.as_ref()).await,
+                                _ => (None, None),
+                            };
                             if let Some(ref w) = window_clone {
                                 w.emit(
                                     "index:update",
@@ -1487,6 +1763,10 @@ pub async fn start_indexing_internal(
                                         "tmdb_genres": movie.genre_ids,
                                         "tmdb_release_date": movie.release_date,
                                         "tmdb_type": actual_type,
+                                        "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
+                                        "imdb_votes":  omdb.as_ref().and_then(|o| o.imdb_votes),
+                                        "tvdb_id":     tvdb.as_ref().and_then(|t| t.tvdb_id),
+                                        "tvdb_rating": tvdb.as_ref().and_then(|t| t.rating),
                                     }),
                                 ).ok();
                             }
@@ -1979,6 +2259,11 @@ pub async fn refresh_all_metadata_internal(
             match resolve_tmdb_match_with_plex(&config, &config.tmdb_api_key, &title, year, tmdb_search_type).await {
                 Ok(Some((movie, actual_type))) => {
                     db.update_tmdb_auto(item.id, &movie, &actual_type).ok();
+                    let (omdb, tvdb) = match movie.imdb_id.as_deref() {
+                        Some(imdb) if !imdb.is_empty() =>
+                            enrich_extra_ratings(&db, &config, item.id, imdb, window.as_ref()).await,
+                        _ => (None, None),
+                    };
                     if let Some(ref w) = window {
                         w.emit("index:update", serde_json::json!({
                             "id": item.id,
@@ -1994,6 +2279,10 @@ pub async fn refresh_all_metadata_internal(
                             "tmdb_genres": movie.genre_ids,
                             "tmdb_release_date": movie.release_date,
                             "tmdb_type": actual_type,
+                            "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
+                            "imdb_votes":  omdb.as_ref().and_then(|o| o.imdb_votes),
+                            "tvdb_id":     tvdb.as_ref().and_then(|t| t.tvdb_id),
+                            "tvdb_rating": tvdb.as_ref().and_then(|t| t.rating),
                         })).ok();
                     }
                 }
@@ -2017,6 +2306,19 @@ pub async fn refresh_all_metadata_internal(
                     &media_type,
                     item.manual_match.unwrap_or(0) != 0,
                 )?;
+                // Only enrich extra ratings when the row is missing them, to
+                // keep this 15-minute refresh pass cheap. New matches (the
+                // other branch) always enrich.
+                let needs_extra_ratings = item.imdb_rating.is_none() && item.tvdb_rating.is_none();
+                let (omdb, tvdb) = if needs_extra_ratings {
+                    match movie.imdb_id.as_deref() {
+                        Some(imdb) if !imdb.is_empty() =>
+                            enrich_extra_ratings(&db, &config, item.id, imdb, window.as_ref()).await,
+                        _ => (None, None),
+                    }
+                } else {
+                    (None, None)
+                };
                 if let Some(ref w) = window {
                     w.emit("index:update", serde_json::json!({
                         "id": item.id,
@@ -2032,6 +2334,10 @@ pub async fn refresh_all_metadata_internal(
                         "tmdb_genres": movie.genre_ids,
                         "tmdb_release_date": movie.release_date,
                         "tmdb_type": media_type,
+                        "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
+                        "imdb_votes":  omdb.as_ref().and_then(|o| o.imdb_votes),
+                        "tvdb_id":     tvdb.as_ref().and_then(|t| t.tvdb_id),
+                        "tvdb_rating": tvdb.as_ref().and_then(|t| t.rating),
                     })).ok();
                 }
             }
@@ -2130,6 +2436,16 @@ pub async fn watchdog_pong(
     Ok(())
 }
 
+/// Fan-out search across TMDB, TVDB and OMDb.
+///
+/// TMDB is the canonical match — display, ratings, and watchlist all key off
+/// TMDB ids. So TVDB and OMDb are used as *discovery* sources: when they
+/// return a hit with an IMDb id we don't already have in the TMDB results,
+/// we look that id up in TMDB and merge it in. The final list is still
+/// `Vec<TmdbMovie>` so nothing downstream changes.
+///
+/// Hits without an IMDb id (rare on TVDB, never on OMDb) are skipped because
+/// we can't anchor them to a TMDB row.
 #[tauri::command]
 pub async fn search_tmdb(
     state: tauri::State<'_, crate::db::Db>,
@@ -2138,7 +2454,77 @@ pub async fn search_tmdb(
     year: Option<u16>,
 ) -> Result<Vec<crate::tmdb::TmdbMovie>, String> {
     let config = state.load_config()?;
-    crate::tmdb::search_tmdb_multi_with_year(&config.tmdb_api_key, &query, &media_type, year).await
+    let tmdb_key = config.tmdb_api_key.clone();
+    let omdb_key = config.omdb_api_key.clone();
+    let tvdb_key = config.tvdb_api_key.clone();
+
+    // 1. Primary TMDB search runs first so its native scoring drives ordering.
+    let mut results = crate::tmdb::search_tmdb_multi_with_year(
+        &tmdb_key,
+        &query,
+        &media_type,
+        year,
+    )
+    .await
+    .unwrap_or_default();
+
+    // 2. Concurrent discovery on TVDB and OMDb — pulls IMDb ids we can
+    //    promote to TMDB matches.
+    let tvdb_fut = async {
+        if tvdb_key.trim().is_empty() {
+            Vec::new()
+        } else {
+            crate::tvdb::search_by_title(&tvdb_key, &query, &media_type).await
+        }
+    };
+    let omdb_fut = async {
+        if omdb_key.trim().is_empty() {
+            Vec::new()
+        } else {
+            let omdb_type = match media_type.as_str() {
+                "tv" => "series",
+                t => t,
+            };
+            crate::omdb::search_by_title(&omdb_key, &query, omdb_type).await
+        }
+    };
+    let (tvdb_hits, omdb_hits) = tokio::join!(tvdb_fut, omdb_fut);
+
+    // De-dupe against TMDB hits we already have, then collect candidate IMDb ids.
+    let mut already_have: std::collections::HashSet<String> = results
+        .iter()
+        .filter_map(|m| m.imdb_id.as_ref().map(|s| s.trim().to_string()))
+        .filter(|s| !s.is_empty())
+        .collect();
+    let mut extra_imdb: Vec<String> = Vec::new();
+    for (imdb, _title) in tvdb_hits {
+        if already_have.insert(imdb.clone()) {
+            extra_imdb.push(imdb);
+        }
+    }
+    for (imdb, _title, _year) in omdb_hits {
+        if already_have.insert(imdb.clone()) {
+            extra_imdb.push(imdb);
+        }
+    }
+
+    // 3. Resolve each candidate IMDb id back to a full TMDB record.
+    //    Done sequentially so the TMDB throttle keeps us under rate-limit
+    //    rather than firing N concurrent /find requests.
+    if !tmdb_key.trim().is_empty() {
+        for imdb_id in extra_imdb {
+            match crate::tmdb::find_by_imdb_id(&tmdb_key, &imdb_id, &media_type).await {
+                Ok(Some(movie)) => results.push(movie),
+                Ok(None) => {} // TVDB/OMDb had it but TMDB doesn't — drop silently.
+                Err(e) => {
+                    eprintln!("[search] TMDB find_by_imdb_id({imdb_id}) failed: {e}");
+                }
+            }
+        }
+    }
+
+    results.truncate(20);
+    Ok(results)
 }
 
 #[tauri::command]

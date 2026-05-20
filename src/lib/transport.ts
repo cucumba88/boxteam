@@ -45,6 +45,10 @@ const WEB_ROUTES: Record<
   get_webgui_config: ["GET", "/webgui/config"],
   save_webgui_config: ["PUT", "/webgui/config"],
   test_smtp: ["POST", "/settings/smtp-test"],
+  test_tmdb_key: (a) => ["POST", "/settings/tmdb-test", { api_key: a.apiKey }],
+  test_omdb_key: (a) => ["POST", "/settings/omdb-test", { api_key: a.apiKey }],
+  test_tvdb_key: (a) => ["POST", "/settings/tvdb-test", { api_key: a.apiKey }],
+  refresh_all_ratings: ["POST", "/ratings/refresh"],
   // Dynamic paths:
   queue_download: (a) => [
     "POST",

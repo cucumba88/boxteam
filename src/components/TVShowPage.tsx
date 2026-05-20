@@ -7,7 +7,6 @@ import {
   Download,
   ExternalLink,
   Pencil,
-  Star,
   Tv2,
 } from "lucide-react";
 import { isTauri } from "../lib/transport";
@@ -26,6 +25,14 @@ import { GENRE_MAP } from "../utils/genres";
 import { formatBytes } from "../lib/format";
 import WatchlistButton from "../features/watchlist/WatchlistButton";
 import type { AddWatchlistParams } from "../features/watchlist/types";
+import {
+  allAvailableRatings,
+  formatRating,
+  ratingLabel,
+  resolveRating,
+  useRatingOrder,
+} from "../lib/ratingSource";
+import RatingSourceLogo from "./RatingSourceLogo";
 
 const TMDB_POSTER_W342 = "https://image.tmdb.org/t/p/w342";
 
@@ -259,7 +266,14 @@ export default function TVShowPage({
   const overview = getLocalizedOverview(show, language);
   const posterPath = getLocalizedPosterPath(show, language);
   const poster = posterPath ? `${TMDB_POSTER_W342}${posterPath}` : null;
-  const rating = show.tmdb_rating ? show.tmdb_rating.toFixed(1) : null;
+  const ratingOrder = useRatingOrder();
+  const primaryRating = resolveRating(show, ratingOrder);
+  const rating = primaryRating ? formatRating(primaryRating.value) : null;
+  const secondaryRatings = primaryRating
+    ? allAvailableRatings(show, ratingOrder).filter(
+        (r) => r.source !== primaryRating.source,
+      )
+    : [];
   const releaseYear = show.year ?? show.tmdb_release_date?.slice(0, 4) ?? null;
 
   const genres = useMemo(() => {
@@ -631,23 +645,50 @@ export default function TVShowPage({
                 {releaseYear}
               </span>
             )}
-            {rating && (
+            {rating && primaryRating && (
               <>
                 <span style={{ opacity: 0.4 }}>·</span>
                 <span
+                  title={`${ratingLabel[primaryRating.source]} ${rating}`}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: 4,
-                    color: "var(--color-warning)",
+                    gap: 6,
                     fontWeight: 700,
                   }}
                 >
-                  <Star size={13} strokeWidth={2.2} fill="currentColor" aria-hidden="true" />
+                  <RatingSourceLogo
+                    source={primaryRating.source}
+                    height={14}
+                    title={ratingLabel[primaryRating.source]}
+                  />
                   {rating}
                 </span>
               </>
             )}
+            {secondaryRatings.map((r) => (
+              <span key={r.source}>
+                <span style={{ opacity: 0.4 }}>·</span>{" "}
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    opacity: 0.85,
+                  }}
+                  title={`${ratingLabel[r.source]} ${formatRating(r.value)}`}
+                >
+                  <RatingSourceLogo
+                    source={r.source}
+                    height={14}
+                    title={ratingLabel[r.source]}
+                  />
+                  <span style={{ color: "var(--color-text)" }}>
+                    {formatRating(r.value)}
+                  </span>
+                </span>
+              </span>
+            ))}
             {totalSeasons > 0 && (
               <>
                 <span style={{ opacity: 0.4 }}>·</span>

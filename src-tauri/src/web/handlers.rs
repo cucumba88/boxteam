@@ -701,6 +701,8 @@ pub async fn get_settings(
     cfg.emby_api_key = redact::mask(&cfg.emby_api_key);
     cfg.plex_token = redact::mask(&cfg.plex_token);
     cfg.telegram_bot_token = redact::mask(&cfg.telegram_bot_token);
+    cfg.omdb_api_key = redact::mask(&cfg.omdb_api_key);
+    cfg.tvdb_api_key = redact::mask(&cfg.tvdb_api_key);
     Ok(Json(cfg))
 }
 
@@ -717,6 +719,8 @@ pub async fn put_settings(
     config.emby_api_key = redact::preserve(&config.emby_api_key, &current.emby_api_key);
     config.plex_token = redact::preserve(&config.plex_token, &current.plex_token);
     config.telegram_bot_token = redact::preserve(&config.telegram_bot_token, &current.telegram_bot_token);
+    config.omdb_api_key = redact::preserve(&config.omdb_api_key, &current.omdb_api_key);
+    config.tvdb_api_key = redact::preserve(&config.tvdb_api_key, &current.tvdb_api_key);
 
     state.db.save_config(&config).map_err(ApiError::from)?;
     // Invalidate badge cache so stale "not-configured" entries are evicted on config changes.
@@ -735,6 +739,70 @@ pub async fn test_ftp_handler(
     crate::ftp::test_connection(&body.host, body.port, &body.user, &body.pass)
         .await
         .map_err(ApiError::from)?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+/// Resolves the REDACTED sentinel back to the stored key so the user can press
+/// "Probar" without retyping the existing credential. An empty `api_key` is
+/// treated as a deliberate "test with no key" — the upstream probe will fail.
+async fn resolve_secret(state: &AppState, provided: &str, current_getter: impl FnOnce(&crate::db::AppConfig) -> String) -> String {
+    if provided == redact::REDACTED {
+        state.db.load_config().ok().map(|c| current_getter(&c)).unwrap_or_default()
+    } else {
+        provided.to_string()
+    }
+}
+
+pub async fn test_tmdb_handler(
+    AuthUser(_u): AuthUser,
+    State(state): State<AppState>,
+    Json(body): Json<crate::web::dto::TestApiKeyRequest>,
+) -> ApiResult<Json<Value>> {
+    let key = resolve_secret(&state, &body.api_key, |c| c.tmdb_api_key.clone()).await;
+    let ok = crate::tmdb::validate_api_key(&key).await;
+    Ok(Json(serde_json::json!(ok)))
+}
+
+pub async fn test_omdb_handler(
+    AuthUser(_u): AuthUser,
+    State(state): State<AppState>,
+    Json(body): Json<crate::web::dto::TestApiKeyRequest>,
+) -> ApiResult<Json<Value>> {
+    let key = resolve_secret(&state, &body.api_key, |c| c.omdb_api_key.clone()).await;
+    let ok = crate::omdb::validate_api_key(&key).await;
+    Ok(Json(serde_json::json!(ok)))
+}
+
+pub async fn test_tvdb_handler(
+    AuthUser(_u): AuthUser,
+    State(state): State<AppState>,
+    Json(body): Json<crate::web::dto::TestApiKeyRequest>,
+) -> ApiResult<Json<Value>> {
+    let key = resolve_secret(&state, &body.api_key, |c| c.tvdb_api_key.clone()).await;
+    let ok = crate::tvdb::validate_api_key(&key).await;
+    Ok(Json(serde_json::json!(ok)))
+}
+
+pub async fn refresh_ratings_handler(
+    AuthUser(_u): AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Value>> {
+    if crate::commands::RATINGS_REFRESH_RUNNING
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Ok(Json(serde_json::json!({
+            "ok": false,
+            "error": "Ratings refresh already running"
+        })));
+    }
+    let db = state.db.clone();
+    // Fire-and-forget: progress is broadcast over the WS channel, the HTTP
+    // response just acknowledges the job started.
+    tokio::spawn(async move {
+        if let Err(e) = crate::commands::refresh_all_ratings_internal(db, None, false).await {
+            eprintln!("[ratings] refresh job failed: {e}");
+        }
+    });
     Ok(Json(serde_json::json!({"ok": true})))
 }
 

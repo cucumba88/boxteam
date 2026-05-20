@@ -3,9 +3,11 @@ mod commands;
 mod db;
 mod downloads;
 mod ftp;
+mod omdb;
 mod parser;
 mod telegram;
 mod tmdb;
+mod tvdb;
 mod uploads;
 mod web;
 
@@ -127,6 +129,9 @@ pub fn run() {
             commands::ftp_list_raw,
             commands::test_ftp_connection,
             commands::test_tmdb_key,
+            commands::test_omdb_key,
+            commands::test_tvdb_key,
+            commands::refresh_all_ratings,
             commands::test_emby_connection,
             commands::test_plex_connection,
             commands::save_config,
@@ -388,6 +393,18 @@ pub fn run() {
                 commands::resume_pending_downloads(db.clone(), queue.clone(), visible_main_window(&handle)).await.ok();
                 commands::resume_pending_uploads(db.clone(), handle.state::<uploads::SharedUploadQueue>().inner().clone(), handle.clone()).await.ok();
                 commands::refresh_all_metadata_internal(db.clone(), visible_main_window(&handle)).await.ok();
+                // Auto-enrich ratings (IMDb via OMDb + TVDB) for any rows that
+                // are missing them. The job is sequential, throttled per
+                // service, and skips items that already have both — so it's a
+                // cheap no-op when everything's up to date. Errors are
+                // silently swallowed (e.g. neither key is configured).
+                {
+                    let db_clone = db.clone();
+                    let window = visible_main_window(&handle);
+                    tauri::async_runtime::spawn(async move {
+                        commands::refresh_all_ratings_internal(db_clone, window, false).await.ok();
+                    });
+                }
                 let last_indexed_at = db.load_last_indexed_at().ok().flatten();
                 let should_run_now = last_indexed_at
                     .as_deref()
@@ -447,7 +464,15 @@ pub fn run() {
                     crate::INDEXING_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
                     commands::start_indexing_internal(db.clone(), window.clone(), Some(queue.clone())).await.ok();
                     crate::INDEXING_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
-                    commands::refresh_all_metadata_internal(db.clone(), window).await.ok();
+                    commands::refresh_all_metadata_internal(db.clone(), window.clone()).await.ok();
+                    // Top up missing IMDb / TVDB ratings on every cycle.
+                    // The internal guard prevents this from stacking if a
+                    // previous tick is still running.
+                    let db_clone = db.clone();
+                    let win_clone = window;
+                    tauri::async_runtime::spawn(async move {
+                        commands::refresh_all_ratings_internal(db_clone, win_clone, false).await.ok();
+                    });
                 }
             });
             Ok(())

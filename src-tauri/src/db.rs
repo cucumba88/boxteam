@@ -67,6 +67,16 @@ pub struct AppConfig {
     pub telegram_bot_token: String,      // "" = disabled
     #[serde(default)]
     pub telegram_chat_id: String,        // "" = disabled
+    #[serde(default)]
+    pub omdb_api_key: String,            // "" = IMDb ratings disabled
+    #[serde(default)]
+    pub tvdb_api_key: String,            // "" = TVDB ratings disabled
+    #[serde(default = "default_rating_source_order")]
+    pub rating_source_order: String,     // CSV like "imdb,tmdb,tvdb"
+}
+
+pub fn default_rating_source_order() -> String {
+    "tmdb,imdb,tvdb".to_string()
 }
 
 fn default_alphabetical_subfolders() -> bool {
@@ -169,6 +179,11 @@ pub struct MediaItem {
     pub metadata_at: Option<String>,
     #[serde(skip_serializing)]
     pub manual_match: Option<i64>,
+    pub imdb_rating: Option<f64>,
+    pub imdb_votes: Option<i64>,
+    pub tvdb_id: Option<i64>,
+    pub tvdb_rating: Option<f64>,
+    pub ratings_fetched_at: Option<String>,
 }
 
 #[derive(Clone)]
@@ -567,6 +582,13 @@ impl Db {
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN tmdb_poster_en TEXT;").ok();
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN imdb_id TEXT;").ok();
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN ftp_relative_path TEXT;").ok();
+        // Multi-source rating fields. OMDb supplies imdb_rating + imdb_votes
+        // (by IMDb id); TVDB supplies tvdb_id + tvdb_rating (TVDB's `score`).
+        conn.execute_batch("ALTER TABLE media_items ADD COLUMN imdb_rating REAL;").ok();
+        conn.execute_batch("ALTER TABLE media_items ADD COLUMN imdb_votes INTEGER;").ok();
+        conn.execute_batch("ALTER TABLE media_items ADD COLUMN tvdb_id INTEGER;").ok();
+        conn.execute_batch("ALTER TABLE media_items ADD COLUMN tvdb_rating REAL;").ok();
+        conn.execute_batch("ALTER TABLE media_items ADD COLUMN ratings_fetched_at TEXT;").ok();
         // Web GUI auth tables
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS web_users (
@@ -1518,6 +1540,9 @@ impl Db {
             ),
             ("telegram_bot_token", config.telegram_bot_token.as_str()),
             ("telegram_chat_id", config.telegram_chat_id.as_str()),
+            ("omdb_api_key", config.omdb_api_key.as_str()),
+            ("tvdb_api_key", config.tvdb_api_key.as_str()),
+            ("rating_source_order", config.rating_source_order.as_str()),
         ];
         let port_str = config.ftp_port.to_string();
         for (k, v) in &pairs {
@@ -1970,6 +1995,12 @@ impl Db {
                 .unwrap_or(true),
             telegram_bot_token: get("telegram_bot_token").unwrap_or_default(),
             telegram_chat_id: get("telegram_chat_id").unwrap_or_default(),
+            omdb_api_key: get("omdb_api_key").unwrap_or_default(),
+            tvdb_api_key: get("tvdb_api_key").unwrap_or_default(),
+            rating_source_order: get("rating_source_order")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or_else(default_rating_source_order),
         })
     }
 
@@ -2344,13 +2375,48 @@ impl Db {
         self.update_tmdb_with_mode(id, movie, media_type, manual_match)
     }
 
+    /// Persist OMDb / TVDB ratings on a media row. Either side may be `None`
+    /// (the corresponding service is disabled or had no data); columns are
+    /// only overwritten when the new value is `Some`, so disabling OMDb later
+    /// won't wipe a previously-saved IMDb rating.
+    pub fn update_extra_ratings(
+        &self,
+        id: i64,
+        omdb: Option<&crate::omdb::OmdbRating>,
+        tvdb: Option<&crate::tvdb::TvdbRating>,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE media_items SET
+                imdb_rating       = COALESCE(?1, imdb_rating),
+                imdb_votes        = COALESCE(?2, imdb_votes),
+                tvdb_id           = COALESCE(?3, tvdb_id),
+                tvdb_rating       = COALESCE(?4, tvdb_rating),
+                ratings_fetched_at= ?5
+             WHERE id = ?6",
+            params![
+                omdb.and_then(|o| o.imdb_rating),
+                omdb.and_then(|o| o.imdb_votes),
+                tvdb.and_then(|t| t.tvdb_id),
+                tvdb.and_then(|t| t.rating),
+                now,
+                id,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+
     pub fn get_all_media(&self) -> Result<Vec<MediaItem>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare("SELECT id, ftp_path, filename, size_bytes, title, year, season, episode, episode_end, \
                       resolution, codec, audio_codec, languages, hdr, release_type, release_group, \
                       media_type, tmdb_id, imdb_id, tmdb_type, tmdb_title, tmdb_title_en, tmdb_year, tmdb_release_date, \
-                      tmdb_overview, tmdb_overview_en, tmdb_poster, tmdb_poster_en, tmdb_rating, tmdb_genres, indexed_at, metadata_at, manual_match \
+                      tmdb_overview, tmdb_overview_en, tmdb_poster, tmdb_poster_en, tmdb_rating, tmdb_genres, indexed_at, metadata_at, manual_match, \
+                      imdb_rating, imdb_votes, tvdb_id, tvdb_rating, ratings_fetched_at \
                       FROM media_items ORDER BY COALESCE(tmdb_title, title, filename)")
             .map_err(|e| e.to_string())?;
 
@@ -2390,6 +2456,11 @@ impl Db {
                     indexed_at: row.get(30)?,
                     metadata_at: row.get(31)?,
                     manual_match: row.get(32)?,
+                    imdb_rating: row.get(33)?,
+                    imdb_votes: row.get(34)?,
+                    tvdb_id: row.get(35)?,
+                    tvdb_rating: row.get(36)?,
+                    ratings_fetched_at: row.get(37)?,
                 })
             })
             .map_err(|e| e.to_string())?

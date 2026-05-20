@@ -74,6 +74,12 @@ import { AppLanguage, getLocalizedTitle } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
 import { formatBytes } from "../lib/format";
 import {
+  resolveRating,
+  setRatingOrder,
+  useRatingOrder,
+} from "../lib/ratingSource";
+import { useRatingsRefresh } from "../lib/ratingsRefreshState";
+import {
   SLUG_TO_TAB,
   TAB_SLUGS,
   TABS,
@@ -496,6 +502,8 @@ export default function Library({
   const [showMobileNavMenu, setShowMobileNavMenu] = useState(false);
   const mobileNavMenuRef = useRef<HTMLDivElement>(null);
   const [language, setLanguage] = useState<AppLanguage>("es");
+  const ratingOrder = useRatingOrder();
+  const ratingsRefresh = useRatingsRefresh();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [ftpHost, setFtpHost] = useState<string | null>(null);
   const [badgeMap, setBadgeMap] = useState<
@@ -749,6 +757,16 @@ export default function Library({
       console.error("Failed to re-match metadata:", error);
     } finally {
       setRematching(false);
+    }
+  };
+
+  const runRefreshRatings = async () => {
+    if (showDevLog) setShowLog(true);
+    setShowActionsMenu(false);
+    try {
+      await call("refresh_all_ratings");
+    } catch (error) {
+      console.error("Failed to refresh ratings:", error);
     }
   };
 
@@ -1069,8 +1087,11 @@ export default function Library({
           return (b.item.year ?? 0) - (a.item.year ?? 0);
         case "year-asc":
           return (a.item.year ?? 0) - (b.item.year ?? 0);
-        case "rating-desc":
-          return (b.item.tmdb_rating ?? 0) - (a.item.tmdb_rating ?? 0);
+        case "rating-desc": {
+          const ra = resolveRating(a.item, ratingOrder)?.value ?? -1;
+          const rb = resolveRating(b.item, ratingOrder)?.value ?? -1;
+          return rb - ra;
+        }
         case "added-desc": {
           const ta = getAddedTimestamp(a.item);
           const tb = getAddedTimestamp(b.item);
@@ -1083,7 +1104,7 @@ export default function Library({
     const sortedItems = keyed.map(({ item }) => item);
 
     return useGroupedMovies ? deduplicateByTitle(sortedItems) : sortedItems;
-  }, [filterableItems, filters, language, parsedGenreMap, useGroupedMovies]);
+  }, [filterableItems, filters, language, parsedGenreMap, useGroupedMovies, ratingOrder]);
 
   const viewResetKey = `${activeTab}:${filters.search}:${filters.releaseType}:${filters.resolution}:${filters.hdr}:${filters.codec}:${filters.genre}:${filters.sort}:${tvView}:${movieView}`;
 
@@ -1257,13 +1278,17 @@ export default function Library({
 
   useEffect(() => {
     let cancelled = false;
-    call<{ default_language?: AppLanguage }>("get_config")
+    call<{
+      default_language?: AppLanguage;
+      rating_source_order?: string;
+    }>("get_config")
       .then((config) => {
-        if (
-          !cancelled &&
-          (config.default_language === "es" || config.default_language === "en")
-        ) {
+        if (cancelled) return;
+        if (config.default_language === "es" || config.default_language === "en") {
           setLanguage(config.default_language);
+        }
+        if (config.rating_source_order) {
+          setRatingOrder(config.rating_source_order);
         }
       })
       .catch(() => {});
@@ -3132,6 +3157,32 @@ export default function Library({
                             : t(language, "library.rematchAllPlex")}
                         </button>
                         <button
+                          onClick={runRefreshRatings}
+                          disabled={ratingsRefresh.state === "running"}
+                          title={t(language, "library.refreshRatingsHelp")}
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            borderRadius: "var(--radius)",
+                            border: "none",
+                            background: "transparent",
+                            color: "var(--color-text)",
+                            textAlign: "left",
+                            cursor:
+                              ratingsRefresh.state === "running"
+                                ? "default"
+                                : "pointer",
+                            opacity:
+                              ratingsRefresh.state === "running" ? 0.7 : 1,
+                            fontSize: 13,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {ratingsRefresh.state === "running"
+                            ? `${t(language, "library.refreshingRatings")} (${ratingsRefresh.done}/${ratingsRefresh.total})`
+                            : t(language, "library.refreshRatings")}
+                        </button>
+                        <button
                           onClick={clearAllMetadata}
                           disabled={
                             clearingAll ||
@@ -3522,6 +3573,63 @@ export default function Library({
             {t(language, "metaRefresh.banner", {
               done: metaRefreshProgress.done,
               total: metaRefreshProgress.total,
+            })}
+          </span>
+        </div>
+      )}
+      {ratingsRefresh.state === "running" && (
+        <div
+          style={{
+            position: "fixed",
+            left: 18,
+            bottom: isMobile
+              ? "calc(64px + env(safe-area-inset-bottom, 0px) + 64px)"
+              : 64,
+            zIndex: 52,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "0.6rem 0.85rem",
+            borderRadius: 999,
+            border: "1px solid var(--color-border)",
+            background: "var(--color-surface)",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+            fontSize: 12,
+            color: "var(--color-text-muted)",
+            fontWeight: 600,
+          }}
+        >
+          <div
+            style={{
+              width: 80,
+              height: 4,
+              borderRadius: 999,
+              overflow: "hidden",
+              background: "var(--color-surface-2)",
+            }}
+          >
+            <div
+              style={{
+                width: `${
+                  ratingsRefresh.total > 0
+                    ? Math.min(
+                        100,
+                        Math.round(
+                          (ratingsRefresh.done / ratingsRefresh.total) * 100,
+                        ),
+                      )
+                    : 0
+                }%`,
+                height: "100%",
+                background: "var(--color-primary)",
+                transition: "width 0.3s ease",
+              }}
+            />
+          </div>
+          <span>
+            {t(language, "ratings.banner", {
+              done: ratingsRefresh.done,
+              total: ratingsRefresh.total,
             })}
           </span>
         </div>

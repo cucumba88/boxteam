@@ -36,6 +36,11 @@ export interface MediaItem {
   tmdb_genres?: number[] | string;
   indexed_at?: string;
   metadata_at?: string;
+  imdb_rating?: number;
+  imdb_votes?: number;
+  tvdb_id?: number;
+  tvdb_rating?: number;
+  ratings_fetched_at?: string;
 }
 
 const MAX_LOG = 500;
@@ -173,6 +178,11 @@ export function useIndexing() {
                   tmdb_rating: memItem.tmdb_rating,
                   tmdb_genres: memItem.tmdb_genres,
                   metadata_at: memItem.metadata_at,
+                  imdb_rating: memItem.imdb_rating,
+                  imdb_votes: memItem.imdb_votes,
+                  tvdb_id: memItem.tvdb_id,
+                  tvdb_rating: memItem.tvdb_rating,
+                  ratings_fetched_at: memItem.ratings_fetched_at,
                 };
               }
               return dbItem;
