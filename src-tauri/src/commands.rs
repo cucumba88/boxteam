@@ -1113,13 +1113,32 @@ pub async fn get_db_path(
 
 /// First-run only: record the desired data directory in bootstrap.json without
 /// performing a VACUUM (the DB hasn't been used yet, so nothing to migrate).
+///
+/// Validates that the chosen directory exists (creating it if needed) and is
+/// writable by this process *before* persisting the choice — so the wizard
+/// fails here, where the user picked it, instead of on the next launch with
+/// a cryptic "unable to open database file" error.
 #[tauri::command]
 pub async fn init_db_path(
     _state: tauri::State<'_, crate::db::Db>,
     dir: String,
 ) -> Result<(), String> {
-    crate::db::Db::write_bootstrap(Some(std::path::Path::new(&dir)));
-    Ok(())
+    let path = std::path::Path::new(&dir);
+    if dir.trim().is_empty() {
+        return Err("Selected data directory is empty".into());
+    }
+    std::fs::create_dir_all(path)
+        .map_err(|e| format!("Cannot create {}: {}", path.display(), e))?;
+    let probe = path.join(".oscata-write-test");
+    std::fs::write(&probe, b"").map_err(|e| {
+        format!(
+            "Selected data directory {} is not writable: {}",
+            path.display(),
+            e
+        )
+    })?;
+    let _ = std::fs::remove_file(&probe);
+    crate::db::Db::write_bootstrap(Some(path))
 }
 
 /// Migrate the live database to a new directory and persist the path in
@@ -1146,8 +1165,7 @@ pub async fn is_portable_mode(
 pub async fn reset_db_path(
     _state: tauri::State<'_, crate::db::Db>,
 ) -> Result<(), String> {
-    crate::db::Db::write_bootstrap(None);
-    Ok(())
+    crate::db::Db::write_bootstrap(None)
 }
 
 #[tauri::command]
