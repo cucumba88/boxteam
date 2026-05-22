@@ -397,6 +397,8 @@ export default function Library({
     uploads,
     cancelUpload,
     retryUpload,
+    retryGroup,
+    retryAllFailed,
     deleteUpload,
     clearCompleted: clearCompletedUploads,
   } = useUploads();
@@ -3358,6 +3360,8 @@ export default function Library({
                 language={language}
                 onCancel={cancelUpload}
                 onRetry={retryUpload}
+                onRetryGroup={retryGroup}
+                onRetryAllFailed={retryAllFailed}
                 onDelete={deleteUpload}
                 onClearCompleted={clearCompletedUploads}
               />

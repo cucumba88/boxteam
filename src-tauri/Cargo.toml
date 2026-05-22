@@ -1,6 +1,6 @@
 [package]
 name = "oscata-tauri"
-version = "0.12.1"
+version = "0.13.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -42,3 +42,4 @@ uuid = { version = "1", features = ["v4", "serde"] }
 rand = "0.8"
 lettre = { version = "0.11", features = ["tokio1-native-tls"] }
 async-trait = "0.1"
+socket2 = "0.5"

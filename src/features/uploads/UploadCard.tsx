@@ -172,6 +172,31 @@ export default function UploadCard({
           {STATUS_ICONS[item.status]}
           {t(language, STATUS_LABEL_KEY[item.status])}
         </span>
+        {/* Retry-in-progress chip — only visible mid-upload when we've already
+            failed at least once and a retry is in flight. */}
+        {item.status === "uploading" &&
+          (item.attempt ?? 0) > 0 &&
+          (item.max_attempts ?? 0) > 1 && (
+            <span
+              title={item.error ?? undefined}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 11,
+                fontWeight: 600,
+                color: "var(--color-warning)",
+                background: "rgba(200,147,42,0.12)",
+                borderRadius: "var(--radius-full)",
+                padding: "2px 8px",
+                flexShrink: 0,
+                marginLeft: 6,
+              }}
+            >
+              <RefreshCw size={11} />
+              Reintentando {(item.attempt ?? 0) + 1}/{item.max_attempts}
+            </span>
+          )}
       </div>
 
       {/* Progress (uploading) */}

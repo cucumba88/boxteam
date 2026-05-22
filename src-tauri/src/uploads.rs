@@ -11,6 +11,8 @@ pub enum UploadStatus {
     Cancelled,
 }
 
+fn default_max_attempts() -> u8 { 3 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UploadItem {
     pub id: u64,
@@ -43,6 +45,14 @@ pub struct UploadItem {
     pub subtitle_tracks: Vec<crate::analysis::SubtitleTrack>,
     /// Optional group id linking all episodes from the same season batch upload.
     pub group_id: Option<String>,
+    /// 0-based index of the current/most-recent upload attempt for this item.
+    /// Reset to 0 by `retry(...)` and incremented by `mark_attempt(...)` when
+    /// the spawned job decides to retry after a transient FTP error.
+    #[serde(default)]
+    pub attempt: u8,
+    /// Maximum number of attempts the job will make before giving up.
+    #[serde(default = "default_max_attempts")]
+    pub max_attempts: u8,
 }
 
 pub struct UploadQueue {
@@ -50,6 +60,12 @@ pub struct UploadQueue {
     pub next_id: u64,
     pub semaphore: Arc<tokio::sync::Semaphore>,
     pub cancel_flags: std::collections::HashMap<u64, Arc<std::sync::atomic::AtomicBool>>,
+    /// In-memory set of `group_id`s that have already received their
+    /// season-complete Telegram notification. Prevents double-fires when
+    /// multiple tasks race to observe `all_finished == true`. Not persisted —
+    /// after a process restart, at-most-once becomes at-most-twice in the
+    /// pathological crash-during-notify case, which is acceptable.
+    pub notified_groups: std::collections::HashSet<String>,
 }
 
 fn now_ms() -> u64 {
@@ -66,6 +82,7 @@ impl UploadQueue {
             next_id: 1,
             semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrent)),
             cancel_flags: std::collections::HashMap::new(),
+            notified_groups: std::collections::HashSet::new(),
         }
     }
 
@@ -116,6 +133,8 @@ impl UploadQueue {
             audio_tracks,
             subtitle_tracks,
             group_id,
+            attempt: 0,
+            max_attempts: default_max_attempts(),
         });
         (id, self.semaphore.clone(), cancel_flag)
     }
@@ -130,6 +149,10 @@ impl UploadQueue {
         item.started_at_ms = None;
         item.completed_at_ms = None;
         item.bytes_done = 0;
+        item.attempt = 0;
+        if item.max_attempts == 0 {
+            item.max_attempts = default_max_attempts();
+        }
         let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.cancel_flags.insert(id, cancel_flag.clone());
         Ok((item.clone(), self.semaphore.clone(), cancel_flag))
@@ -139,6 +162,13 @@ impl UploadQueue {
         if let Some(item) = self.items.iter_mut().find(|i| i.id == id) {
             item.status = UploadStatus::Uploading;
             item.started_at_ms = Some(now_ms());
+        }
+    }
+
+    /// Record that the job for `id` is now on its `attempt`-th try (0-based).
+    pub fn mark_attempt(&mut self, id: u64, attempt: u8) {
+        if let Some(item) = self.items.iter_mut().find(|i| i.id == id) {
+            item.attempt = attempt;
         }
     }
 

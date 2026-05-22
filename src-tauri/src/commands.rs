@@ -3886,59 +3886,138 @@ fn spawn_upload_job(
         {
             let mut q = upload_queue.lock().unwrap();
             q.mark_started(id);
+            q.mark_attempt(id, 0);
         }
         persist_upload_state(&db, &upload_queue);
 
         app.emit("upload:update", serde_json::json!({
             "id": id,
             "status": "uploading",
+            "attempt": 0,
         })).ok();
 
         let config = match db.load_config() {
             Ok(c) => c,
             Err(e) => {
+                let human = crate::ftp::humanize_ftp_error(&e);
                 {
                     let mut q = upload_queue.lock().unwrap();
-                    q.mark_error(id, e.clone());
+                    q.mark_error(id, human.clone());
                 }
                 persist_upload_state(&db, &upload_queue);
                 app.emit("upload:update", serde_json::json!({
-                    "id": id, "status": "error", "error": e
+                    "id": id, "status": "error", "error": human
                 })).ok();
                 return;
             }
         };
 
-        let app_clone = app.clone();
-        let upload_id = id;
-        let result = crate::ftp::upload_file(
-            &config.ftp_host,
-            config.ftp_port,
-            &config.ftp_user,
-            &config.ftp_pass,
-            &ftp_dest_path,
-            &filename,
-            &local_path,
-            move |done, total| {
-                if cancel_flag.load(Ordering::SeqCst) {
-                    return false;
-                }
-                let ts = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-                app_clone.emit("upload:progress", serde_json::json!({
-                    "id": upload_id,
-                    "bytes_done": done,
-                    "bytes_total": total,
-                    "timestamp_ms": ts,
-                })).ok();
-                true
-            },
-        )
-        .await;
+        // ── Retry loop ────────────────────────────────────────────────────
+        // Read max_attempts from the queue; falls back to 3 if for any
+        // reason the item is missing (defensive — shouldn't happen).
+        let max_attempts = {
+            let q = upload_queue.lock().unwrap();
+            q.items.iter().find(|i| i.id == id).map(|i| i.max_attempts).unwrap_or(3).max(1)
+        };
 
-        match result {
+        let mut last_err: Option<String> = None;
+        let mut final_result: Result<(), String> = Err("upload did not start".to_string());
+        let mut last_attempt: u8 = 0;
+
+        for attempt in 0..max_attempts {
+            last_attempt = attempt;
+            if attempt > 0 {
+                {
+                    let mut q = upload_queue.lock().unwrap();
+                    q.mark_attempt(id, attempt);
+                }
+                persist_upload_state(&db, &upload_queue);
+                app.emit("upload:update", serde_json::json!({
+                    "id": id,
+                    "status": "uploading",
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "error": last_err.clone(),
+                })).ok();
+            }
+
+            if cancel_flag.load(Ordering::SeqCst) {
+                final_result = Err("Cancelled".to_string());
+                break;
+            }
+
+            let app_clone = app.clone();
+            let upload_id = id;
+            let cancel_flag_progress = cancel_flag.clone();
+            let result = crate::ftp::upload_file(
+                &config.ftp_host,
+                config.ftp_port,
+                &config.ftp_user,
+                &config.ftp_pass,
+                &ftp_dest_path,
+                &filename,
+                &local_path,
+                move |done, total| {
+                    if cancel_flag_progress.load(Ordering::SeqCst) {
+                        return false;
+                    }
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    app_clone.emit("upload:progress", serde_json::json!({
+                        "id": upload_id,
+                        "bytes_done": done,
+                        "bytes_total": total,
+                        "timestamp_ms": ts,
+                    })).ok();
+                    true
+                },
+            )
+            .await;
+
+            match result {
+                Ok(()) => {
+                    final_result = Ok(());
+                    break;
+                }
+                Err(e) if e == "Cancelled" => {
+                    final_result = Err("Cancelled".to_string());
+                    break;
+                }
+                Err(e) => {
+                    let is_transient = crate::ftp::is_transient_ftp_error(&e);
+                    last_err = Some(e.clone());
+                    if !is_transient || attempt + 1 >= max_attempts {
+                        final_result = Err(e);
+                        break;
+                    }
+                    // Backoff: 1s, 3s, 9s — but cancellable via cancel_flag.
+                    let backoff_secs: u64 = 3u64.pow(attempt as u32);
+                    let target = std::time::Instant::now()
+                        + std::time::Duration::from_secs(backoff_secs);
+                    while std::time::Instant::now() < target {
+                        if cancel_flag.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    }
+                    if cancel_flag.load(Ordering::SeqCst) {
+                        final_result = Err("Cancelled".to_string());
+                        break;
+                    }
+                    eprintln!(
+                        "[upload {id}] transient error on attempt {}/{}: {} — retrying",
+                        attempt + 1,
+                        max_attempts,
+                        last_err.as_deref().unwrap_or(""),
+                    );
+                }
+            }
+        }
+
+        // ── Persist terminal state ────────────────────────────────────────
+        match &final_result {
             Ok(()) => {
                 {
                     let mut q = upload_queue.lock().unwrap();
@@ -3948,22 +4027,82 @@ fn spawn_upload_job(
                 app.emit("upload:update", serde_json::json!({
                     "id": id, "status": "done",
                 })).ok();
+            }
+            Err(e) if e == "Cancelled" => {
+                {
+                    let mut q = upload_queue.lock().unwrap();
+                    q.mark_cancelled(id);
+                }
+                persist_upload_state(&db, &upload_queue);
+                app.emit("upload:update", serde_json::json!({
+                    "id": id, "status": "cancelled",
+                })).ok();
+            }
+            Err(e) => {
+                let human = crate::ftp::humanize_ftp_error(e);
+                let display = if max_attempts > 1 {
+                    format!("{} ({}/{} intentos)", human, last_attempt + 1, max_attempts)
+                } else {
+                    human
+                };
+                {
+                    let mut q = upload_queue.lock().unwrap();
+                    q.mark_error(id, display.clone());
+                }
+                persist_upload_state(&db, &upload_queue);
+                app.emit("upload:update", serde_json::json!({
+                    "id": id, "status": "error", "error": display
+                })).ok();
+            }
+        }
 
-                // Telegram notification
-                let tg_token = config.telegram_bot_token.clone();
-                let tg_chat = config.telegram_chat_id.clone();
-                if !tg_token.is_empty() && !tg_chat.is_empty() {
-                    // For grouped season uploads: only notify when the last episode finishes.
-                    let should_notify = if let Some(ref gid) = group_id {
-                        let q = upload_queue.lock().unwrap();
-                        let (done, _total, all_finished) = q.group_status(gid);
-                        let _ = done;
-                        all_finished
-                    } else {
-                        true
-                    };
+        // ── Telegram notification ─────────────────────────────────────────
+        // Fires regardless of this item's terminal status so partial-failure
+        // batches still notify. For grouped uploads we only notify once,
+        // when the group reaches `all_finished` for the first time.
+        {
+            let tg_token = config.telegram_bot_token.clone();
+            let tg_chat = config.telegram_chat_id.clone();
+            if !tg_token.is_empty() && !tg_chat.is_empty() {
+                // For grouped uploads, claim the notification slot atomically:
+                // only the first task to observe `all_finished` AND insert into
+                // `notified_groups` proceeds. Singletons (no group_id) only
+                // notify on success — error/cancel for a single item is shown
+                // in the UI and doesn't merit a Telegram message.
+                let proceed = if let Some(ref gid) = group_id {
+                    let mut q = upload_queue.lock().unwrap();
+                    let (_done, _total, all_finished) = q.group_status(gid);
+                    if !all_finished { false }
+                    else { q.notified_groups.insert(gid.clone()) }
+                } else {
+                    matches!(final_result, Ok(()))
+                };
 
-                    if should_notify {
+                if proceed {
+                    // For grouped batches we compute success/failure breakdown
+                    // up front so we can branch on "all done" vs. "partial".
+                    let (group_done, group_total, group_failed_names): (usize, usize, Vec<String>) =
+                        if let Some(ref gid) = group_id {
+                            let q = upload_queue.lock().unwrap();
+                            let total = q.items.iter()
+                                .filter(|i| i.group_id.as_deref() == Some(gid))
+                                .count();
+                            let done = q.items.iter()
+                                .filter(|i| i.group_id.as_deref() == Some(gid)
+                                    && matches!(i.status, crate::uploads::UploadStatus::Done))
+                                .count();
+                            let failed: Vec<String> = q.items.iter()
+                                .filter(|i| i.group_id.as_deref() == Some(gid)
+                                    && !matches!(i.status, crate::uploads::UploadStatus::Done))
+                                .map(|i| i.filename.clone())
+                                .collect();
+                            (done, total, failed)
+                        } else {
+                            (1, 1, vec![])
+                        };
+
+                    let is_partial_failure = !group_failed_names.is_empty();
+                    if !is_partial_failure {
                         // Derive display folder: everything from "Compartida" onwards (case-insensitive).
                         // Falls back to the full path if the anchor segment is not found.
                         let dest_display = {
@@ -4222,31 +4361,58 @@ fn spawn_upload_job(
                                 }
                             }
                         }
+                    } else {
+                        // ── Partial-failure card ──────────────────────────
+                        // Lists up to 10 failed filenames; counts remainder.
+                        let dest_display = {
+                            let path = ftp_dest_path.trim_end_matches('/');
+                            let segments: Vec<&str> = path.split('/').collect();
+                            let anchor = segments.iter().position(|s| s.to_lowercase() == "compartida");
+                            match anchor {
+                                Some(idx) => segments[idx..].join("/"),
+                                None => path.to_string(),
+                            }
+                        };
+                        let display_title = media_title
+                            .clone()
+                            .unwrap_or_else(|| filename.clone());
+                        let shown: Vec<String> = group_failed_names.iter()
+                            .take(10)
+                            .map(|n| format!("• <code>{}</code>", html_escape(n)))
+                            .collect();
+                        let more = if group_failed_names.len() > 10 {
+                            format!("\n…y {} más", group_failed_names.len() - 10)
+                        } else {
+                            String::new()
+                        };
+                        let body = format!(
+                            "⚠️ <b>Subida parcial</b>\n\n\
+                            <b><u>{}</u></b>\n\
+                            ✅ {} de {} episodios subidos\n\
+                            ❌ Fallaron {} episodios:\n{}{}\n\n\
+                            📂 <code>{}</code>",
+                            html_escape(&display_title),
+                            group_done,
+                            group_total,
+                            group_failed_names.len(),
+                            shown.join("\n"),
+                            more,
+                            html_escape(&dest_display),
+                        );
+                        if let Err(e) = crate::telegram::send_message(&tg_token, &tg_chat, &body).await {
+                            eprintln!("[upload] Telegram partial-failure notify failed: {e}");
+                        }
                     }
                 }
             }
-            Err(e) if e == "Cancelled" => {
-                {
-                    let mut q = upload_queue.lock().unwrap();
-                    q.mark_cancelled(id);
-                }
-                persist_upload_state(&db, &upload_queue);
-                app.emit("upload:update", serde_json::json!({
-                    "id": id, "status": "cancelled",
-                })).ok();
-            }
-            Err(e) => {
-                {
-                    let mut q = upload_queue.lock().unwrap();
-                    q.mark_error(id, e.clone());
-                }
-                persist_upload_state(&db, &upload_queue);
-                app.emit("upload:update", serde_json::json!({
-                    "id": id, "status": "error", "error": e
-                })).ok();
-            }
         }
     });
+}
+
+/// Minimal HTML escape for Telegram HTML-mode message text. Telegram does NOT
+/// support `&apos;` so we only escape the bare-minimum entities.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 #[tauri::command]
@@ -4431,6 +4597,148 @@ pub async fn delete_upload(
     upload_queue.lock().unwrap().delete(id);
     persist_upload_state(db.inner(), upload_queue.inner());
     Ok(())
+}
+
+/// Stat each path locally and return its byte size (0 on error). Used by the
+/// upload prepare flow so multi-episode batches can pass real per-episode
+/// sizes to `queue_upload` (otherwise progress bars stay at 0% throughout).
+#[tauri::command]
+pub fn stat_local_files(paths: Vec<String>) -> Vec<u64> {
+    paths.iter()
+        .map(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+        .collect()
+}
+
+/// Re-spawn all `Error`/`Cancelled` items in the same group_id. Returns the
+/// number of items that were requeued.
+#[tauri::command]
+pub async fn retry_group_uploads(
+    group_id: String,
+    upload_queue: tauri::State<'_, crate::uploads::SharedUploadQueue>,
+    db: tauri::State<'_, crate::db::Db>,
+    app: tauri::AppHandle,
+) -> Result<u32, String> {
+    let ids_to_retry: Vec<u64> = {
+        let q = upload_queue.lock().unwrap();
+        q.items.iter()
+            .filter(|i| i.group_id.as_deref() == Some(group_id.as_str())
+                && matches!(i.status, crate::uploads::UploadStatus::Error | crate::uploads::UploadStatus::Cancelled))
+            .map(|i| i.id)
+            .collect()
+    };
+
+    // Clear any prior "this group has been notified" flag so a retry can
+    // re-fire the Telegram notification on completion.
+    {
+        let mut q = upload_queue.lock().unwrap();
+        q.notified_groups.remove(&group_id);
+    }
+
+    let mut count: u32 = 0;
+    for id in ids_to_retry {
+        let (item, semaphore, cancel_flag) = {
+            let mut q = upload_queue.lock().unwrap();
+            match q.retry(id) {
+                Ok(t) => t,
+                Err(_) => continue,
+            }
+        };
+        spawn_upload_job(
+            db.inner().clone(),
+            upload_queue.inner().clone(),
+            app.clone(),
+            id,
+            item.local_path,
+            item.ftp_dest_path,
+            item.filename,
+            item.media_title,
+            item.tmdb_id,
+            item.bytes_total,
+            item.resolution,
+            item.hdr,
+            item.languages,
+            item.codec,
+            item.video_bitrate_kbps,
+            item.audio_codec,
+            item.subtitle_langs,
+            item.audio_tracks,
+            item.subtitle_tracks,
+            item.group_id,
+            semaphore,
+            cancel_flag,
+        );
+        count += 1;
+    }
+    persist_upload_state(db.inner(), upload_queue.inner());
+    Ok(count)
+}
+
+/// Re-spawn every `Error` item across the entire queue (any group, plus
+/// ungrouped singletons). Returns the number requeued.
+#[tauri::command]
+pub async fn retry_all_failed_uploads(
+    upload_queue: tauri::State<'_, crate::uploads::SharedUploadQueue>,
+    db: tauri::State<'_, crate::db::Db>,
+    app: tauri::AppHandle,
+) -> Result<u32, String> {
+    let ids_to_retry: Vec<u64> = {
+        let q = upload_queue.lock().unwrap();
+        q.items.iter()
+            .filter(|i| matches!(i.status, crate::uploads::UploadStatus::Error))
+            .map(|i| i.id)
+            .collect()
+    };
+
+    // Clear "notified" markers for every affected group so completion fires
+    // a fresh Telegram message.
+    {
+        let mut q = upload_queue.lock().unwrap();
+        let affected_groups: std::collections::HashSet<String> = q.items.iter()
+            .filter(|i| ids_to_retry.contains(&i.id))
+            .filter_map(|i| i.group_id.clone())
+            .collect();
+        for gid in &affected_groups {
+            q.notified_groups.remove(gid);
+        }
+    }
+
+    let mut count: u32 = 0;
+    for id in ids_to_retry {
+        let (item, semaphore, cancel_flag) = {
+            let mut q = upload_queue.lock().unwrap();
+            match q.retry(id) {
+                Ok(t) => t,
+                Err(_) => continue,
+            }
+        };
+        spawn_upload_job(
+            db.inner().clone(),
+            upload_queue.inner().clone(),
+            app.clone(),
+            id,
+            item.local_path,
+            item.ftp_dest_path,
+            item.filename,
+            item.media_title,
+            item.tmdb_id,
+            item.bytes_total,
+            item.resolution,
+            item.hdr,
+            item.languages,
+            item.codec,
+            item.video_bitrate_kbps,
+            item.audio_codec,
+            item.subtitle_langs,
+            item.audio_tracks,
+            item.subtitle_tracks,
+            item.group_id,
+            semaphore,
+            cancel_flag,
+        );
+        count += 1;
+    }
+    persist_upload_state(db.inner(), upload_queue.inner());
+    Ok(count)
 }
 
 #[tauri::command]
