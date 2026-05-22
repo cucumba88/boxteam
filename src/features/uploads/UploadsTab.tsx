@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   XCircle,
   Trash2,
+  RefreshCw,
 } from "lucide-react";
 import UploadCard from "./UploadCard";
 import UploadPrepareModal from "./UploadPrepareModal";
@@ -19,6 +20,8 @@ interface UploadsTabProps {
   language: AppLanguage;
   onCancel: (id: number) => void;
   onRetry: (id: number) => void;
+  onRetryGroup?: (groupId: string) => Promise<unknown>;
+  onRetryAllFailed?: () => Promise<unknown>;
   onDelete: (id: number) => void;
   onClearCompleted: () => void;
 }
@@ -28,6 +31,8 @@ export default function UploadsTab({
   language,
   onCancel,
   onRetry,
+  onRetryGroup,
+  onRetryAllFailed,
   onDelete,
   onClearCompleted,
 }: UploadsTabProps) {
@@ -115,6 +120,34 @@ export default function UploadsTab({
           )}
 
           <div style={{ flex: 1 }} />
+
+          {errors > 0 && onRetryAllFailed && (
+            <button
+              onClick={() => {
+                void onRetryAllFailed();
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                height: 34,
+                padding: "0 12px",
+                borderRadius: "var(--radius)",
+                border:
+                  "1px solid color-mix(in srgb, var(--color-warning) 50%, transparent)",
+                background:
+                  "color-mix(in srgb, var(--color-warning) 12%, transparent)",
+                color: "var(--color-warning)",
+                fontSize: 12.5,
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              <RefreshCw size={13} strokeWidth={2.5} aria-hidden="true" />
+              Reintentar fallidos ({errors})
+            </button>
+          )}
 
           <button
             disabled={!checkingWrite && writeOk === false}
@@ -210,7 +243,8 @@ export default function UploadsTab({
         </Section>
       )}
 
-      {/* History */}
+      {/* History — grouped by group_id when present; ungrouped items render
+          flat below the grouped batches. */}
       {history.length > 0 && (
         <Section
           title={`Historial (${history.length})`}
@@ -235,16 +269,139 @@ export default function UploadsTab({
             </button>
           }
         >
-          {history.map((item) => (
-            <UploadCard
-              key={item.id}
-              item={item}
-              language={language}
-              onCancel={onCancel}
-              onRetry={onRetry}
-              onDelete={onDelete}
-            />
-          ))}
+          {(() => {
+            // Build groups in insertion order: each unique group_id keeps the
+            // position of its first-encountered item; ungrouped items are
+            // rendered as singletons in their original position.
+            type Group = { groupId: string | null; items: UploadItem[] };
+            const groups: Group[] = [];
+            const byId = new Map<string, Group>();
+            for (const item of history) {
+              const gid = item.group_id ?? null;
+              if (gid) {
+                let g = byId.get(gid);
+                if (!g) {
+                  g = { groupId: gid, items: [] };
+                  byId.set(gid, g);
+                  groups.push(g);
+                }
+                g.items.push(item);
+              } else {
+                groups.push({ groupId: null, items: [item] });
+              }
+            }
+            return groups.map((g) => {
+              if (g.groupId === null) {
+                const item = g.items[0];
+                return (
+                  <UploadCard
+                    key={item.id}
+                    item={item}
+                    language={language}
+                    onCancel={onCancel}
+                    onRetry={onRetry}
+                    onDelete={onDelete}
+                  />
+                );
+              }
+              const errCount = g.items.filter(
+                (i) => i.status === "error",
+              ).length;
+              const showGroupRetry = errCount > 0 && !!onRetryGroup;
+              const firstTitle =
+                g.items[0]?.media_title ?? g.items[0]?.filename ?? "Lote";
+              return (
+                <div
+                  key={g.groupId}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 10px",
+                      background:
+                        errCount > 0
+                          ? "color-mix(in srgb, var(--color-warning) 8%, transparent)"
+                          : "var(--color-surface-2)",
+                      border:
+                        errCount > 0
+                          ? "1px solid color-mix(in srgb, var(--color-warning) 36%, transparent)"
+                          : "1px solid var(--color-border)",
+                      borderRadius: "var(--radius)",
+                      fontSize: 12,
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: "var(--color-text)",
+                        fontWeight: 600,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        flex: 1,
+                      }}
+                      title={firstTitle}
+                    >
+                      Lote · {g.items.length} episodios
+                      {errCount > 0 && (
+                        <span
+                          style={{
+                            color: "var(--color-warning)",
+                            marginLeft: 6,
+                            fontWeight: 700,
+                          }}
+                        >
+                          · {errCount} con errores
+                        </span>
+                      )}
+                    </span>
+                    {showGroupRetry && (
+                      <button
+                        onClick={() => {
+                          void onRetryGroup!(g.groupId!);
+                        }}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5,
+                          background:
+                            "color-mix(in srgb, var(--color-warning) 16%, transparent)",
+                          border:
+                            "1px solid color-mix(in srgb, var(--color-warning) 50%, transparent)",
+                          borderRadius: "var(--radius)",
+                          color: "var(--color-warning)",
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          padding: "3px 9px",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        <RefreshCw size={11} strokeWidth={2.5} />
+                        Reintentar fallidos
+                      </button>
+                    )}
+                  </div>
+                  {g.items.map((item) => (
+                    <UploadCard
+                      key={item.id}
+                      item={item}
+                      language={language}
+                      onCancel={onCancel}
+                      onRetry={onRetry}
+                      onDelete={onDelete}
+                    />
+                  ))}
+                </div>
+              );
+            });
+          })()}
         </Section>
       )}
 

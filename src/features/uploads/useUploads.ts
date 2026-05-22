@@ -147,6 +147,9 @@ export function useUploads() {
 
   const cancelUpload = (id: number) => call("cancel_upload", { id });
   const retryUpload = (id: number) => call("retry_upload", { id });
+  const retryGroup = (groupId: string) =>
+    call<number>("retry_group_uploads", { groupId });
+  const retryAllFailed = () => call<number>("retry_all_failed_uploads");
   const deleteUpload = (id: number) =>
     call("delete_upload", { id }).then(() =>
       setUploads((prev) => prev.filter((u) => u.id !== id)),
@@ -158,5 +161,13 @@ export function useUploads() {
       ),
     );
 
-  return { uploads, cancelUpload, retryUpload, deleteUpload, clearCompleted };
+  return {
+    uploads,
+    cancelUpload,
+    retryUpload,
+    retryGroup,
+    retryAllFailed,
+    deleteUpload,
+    clearCompleted,
+  };
 }

@@ -87,6 +87,12 @@ export interface UploadItem {
   hdr?: string | null;
   languages?: string[];
   codec?: string | null;
+  /** Group id linking all episodes from the same season batch upload. */
+  group_id?: string | null;
+  /** 0-based index of the current attempt; >0 means we are retrying. */
+  attempt?: number;
+  /** Maximum number of attempts before the job gives up. */
+  max_attempts?: number;
   speed_bps?: number; // computed in hook
 }
 

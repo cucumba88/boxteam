@@ -279,14 +279,24 @@ export default function UploadPrepareModal({
           // All episodes in this batch share the same group_id so only one Telegram
           // notification is sent when the last episode finishes.
           const groupId = crypto.randomUUID();
-          for (const ep of f.episodePlan) {
+          // Stat each episode locally so progress bars + group_total_bytes work.
+          let sizes: number[] = [];
+          try {
+            sizes = await invoke<number[]>("stat_local_files", {
+              paths: f.episodePlan.map((ep) => ep.localPath),
+            });
+          } catch {
+            sizes = f.episodePlan.map(() => 0);
+          }
+          for (let i = 0; i < f.episodePlan.length; i++) {
+            const ep = f.episodePlan[i];
             await invoke("queue_upload", {
               localPath: ep.localPath,
               ftpDestPath: f.customDest,
               filename: ep.filename,
               mediaTitle: f.tmdbMatch?.title ?? null,
               tmdbId: f.tmdbMatch?.id ?? null,
-              sizeBytes: 0,
+              sizeBytes: sizes[i] ?? 0,
               resolution,
               hdr,
               languages,
