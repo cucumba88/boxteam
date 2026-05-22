@@ -10,6 +10,92 @@ fn clean_ftp_error(e: impl std::fmt::Display) -> String {
     e.to_string().replace("`\"", "").replace("\"`", "")
 }
 
+/// Classify an FTP error message as transient (worth retrying) vs. permanent.
+///
+/// We intentionally pattern-match on the human-readable error text rather than
+/// the underlying `std::io::ErrorKind` because suppaftp surfaces most failures
+/// as `FtpError::ConnectionError(io::Error)` whose Display is the only stable
+/// surface across versions.  Matches are case-insensitive substrings.
+pub fn is_transient_ftp_error(e: &str) -> bool {
+    let s = e.to_lowercase();
+    // Never retry an explicit cancellation.
+    if s.contains("cancelled") { return false; }
+    // Permission / auth — these will never recover by retrying.
+    if s.contains("530") { return false; }
+    // Local file read failure — disk problem on our side, retry is pointless.
+    if s.contains("cannot open local file") { return false; }
+    if s.contains("read error:") { return false; }
+    // Server-side / network transients.
+    const TRANSIENT_NEEDLES: &[&str] = &[
+        "broken pipe",
+        "connection reset",
+        "connection aborted",
+        "connection closed",
+        "unexpected eof",
+        "timed out",
+        "timeout",
+        "eof while reading",
+        "421", // service not available / too many connections
+        "425", // can't open data connection
+        "426", // transfer aborted
+        "450", // file unavailable
+        "451", // local error
+    ];
+    TRANSIENT_NEEDLES.iter().any(|n| s.contains(n))
+}
+
+/// Translate a raw FTP/IO error string into a Spanish, user-facing message.
+/// Falls back to the original string when no rule matches.
+pub fn humanize_ftp_error(raw: &str) -> String {
+    let s = raw.to_lowercase();
+    let map: &[(&str, &str)] = &[
+        ("broken pipe", "Conexión interrumpida durante la transferencia"),
+        ("connection reset", "Conexión cerrada por el servidor"),
+        ("connection aborted", "Conexión cerrada por el servidor"),
+        ("connection closed", "Conexión cerrada por el servidor"),
+        ("unexpected eof", "Conexión cerrada de forma inesperada"),
+        ("eof while reading", "Conexión cerrada de forma inesperada"),
+        ("timed out", "Tiempo de espera agotado"),
+        ("timeout", "Tiempo de espera agotado"),
+        ("421", "Servidor FTP saturado (demasiadas conexiones simultáneas)"),
+        ("425", "No se pudo abrir el canal de datos FTP"),
+        ("426", "Transferencia cancelada por el servidor"),
+        ("530", "Credenciales FTP rechazadas por el servidor"),
+        ("550", "El servidor rechazó la operación (permiso o ruta inválida)"),
+        ("cannot open local file", "No se pudo leer el archivo local"),
+    ];
+    for (needle, msg) in map {
+        if s.contains(needle) {
+            return (*msg).to_string();
+        }
+    }
+    raw.to_string()
+}
+
+/// Best-effort: enable TCP keepalive on a stream so a half-dead FTP connection
+/// surfaces as an error promptly instead of hanging until the OS default
+/// (~2 hours on Linux). Errors are silently ignored — a failed keepalive isn't
+/// worth aborting the upload over.
+#[cfg(unix)]
+fn apply_keepalive<S: std::os::unix::io::AsRawFd>(stream: &S) {
+    use std::os::unix::io::BorrowedFd;
+    let raw = stream.as_raw_fd();
+    // SAFETY: `stream` is borrowed for the lifetime of this call and owns the
+    // fd, so the BorrowedFd we construct here can't outlive it.
+    let borrowed = unsafe { BorrowedFd::borrow_raw(raw) };
+    let sock = socket2::SockRef::from(&borrowed);
+    let ka = socket2::TcpKeepalive::new()
+        .with_time(std::time::Duration::from_secs(30))
+        .with_interval(std::time::Duration::from_secs(10));
+    let _ = sock.set_tcp_keepalive(&ka);
+}
+
+#[cfg(not(unix))]
+fn apply_keepalive<S>(_stream: &S) {
+    // Non-Unix targets fall through silently; the desktop and docker
+    // deployments are macOS/Linux so this is acceptable.
+}
+
 /// Like [`clean_ftp_error`] but also scrubs the FTP password from the message
 /// in case a misbehaving server echoes it back in an error (e.g. "530 Login
 /// incorrect: cucumba88:hunter2"). Only used at the login/connect boundary
@@ -38,6 +124,7 @@ async fn connect(host: &str, port: u16, user: &str, pass: &str) -> Result<AsyncF
     let mut ftp = AsyncFtpStream::connect(format!("{host}:{port}"))
         .await
         .map_err(|e| clean_ftp_error_redacted(e, pass))?;
+    apply_keepalive(ftp.get_ref());
     ftp.login(user, pass).await.map_err(|e| clean_ftp_error_redacted(e, pass))?;
     Ok(ftp)
 }
@@ -532,6 +619,9 @@ pub async fn upload_file(
     // Disable Nagle's algorithm so each chunk goes out immediately without
     // waiting to coalesce with the next write.
     data_stream.get_ref().set_nodelay(true).ok();
+    // Keepalive on the data stream — long uploads of large files can otherwise
+    // exceed the server's idle timeout on the data channel.
+    apply_keepalive(data_stream.get_ref());
 
     use futures::io::AsyncWriteExt;
     use tokio::io::AsyncReadExt;
