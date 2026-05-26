@@ -5,6 +5,7 @@ import {
   Settings as SettingsIcon,
   type LucideIcon,
 } from "lucide-react";
+import oscataMark from "../assets/brand/oscata-mark.svg";
 
 const COLLAPSED_KEY = "oscata.sidebar.collapsed";
 
@@ -75,8 +76,9 @@ export default function AppSidebar<TabId extends string>({
     <aside className={`shell-sidebar${collapsed ? " collapsed" : ""}`}>
       <div className="shell-sidebar-header">
         {!collapsed && (
-          <span className="shell-sidebar-wordmark">
-            osc<span className="accent">ata</span>
+          <span className="shell-sidebar-wordmark" aria-label="Oscata">
+            <img src={oscataMark} alt="" aria-hidden="true" />
+            <span>scata</span>
           </span>
         )}
         <button

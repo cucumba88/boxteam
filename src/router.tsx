@@ -9,6 +9,7 @@ import { prefetchMedia } from "./lib/mediaCache";
 import { AuthProvider, useAuth } from "./lib/AuthContext";
 import { apiBase } from "./lib/transport";
 import ThemeToggle from "./components/ThemeToggle";
+import oscataMark from "./assets/brand/oscata-mark.svg";
 const AccountModal = lazy(() => import("./components/AccountModal"));
 
 // Code-split rarely-mounted routes. None of these are hit on the hot path
@@ -514,47 +515,33 @@ function LoadingScreen() {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 28,
+        gap: 18,
         background: "var(--color-bg)",
       }}
     >
-      {/* Wordmark */}
+      {/* Spinning notched-O mark — the notch acts as the loading head */}
+      <img
+        src={oscataMark}
+        alt=""
+        aria-hidden="true"
+        width={64}
+        height={64}
+        style={{ animation: "spin 1.4s linear infinite" }}
+      />
+
+      {/* Wordmark text — muted, sits beneath the mark */}
       <div
         style={{
-          fontSize: 28,
-          fontWeight: 800,
-          letterSpacing: "-0.03em",
-          color: "var(--color-text)",
+          fontSize: 18,
+          fontWeight: 700,
+          letterSpacing: "-0.01em",
+          color: "var(--color-text-muted)",
           fontFamily: "var(--font-sans)",
           userSelect: "none",
         }}
       >
-        osc
-        <span style={{ color: "var(--color-primary)" }}>ata</span>
+        Oscata
       </div>
-
-      {/* Spinner ring */}
-      <svg
-        width="36"
-        height="36"
-        viewBox="0 0 36 36"
-        fill="none"
-        style={{ animation: "spin 0.9s linear infinite" }}
-      >
-        <circle
-          cx="18"
-          cy="18"
-          r="15"
-          stroke="var(--color-border)"
-          strokeWidth="3"
-        />
-        <path
-          d="M18 3 A15 15 0 0 1 33 18"
-          stroke="var(--color-primary)"
-          strokeWidth="3"
-          strokeLinecap="round"
-        />
-      </svg>
     </div>
   );
 }
