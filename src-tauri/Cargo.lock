@@ -2955,7 +2955,7 @@ dependencies = [
 
 [[package]]
 name = "oscata-tauri"
-version = "0.13.1"
+version = "0.13.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -3732,6 +3732,7 @@ dependencies = [
  "bytes",
  "encoding_rs",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",
@@ -3743,6 +3744,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "mime_guess",
  "native-tls",
  "percent-encoding",
  "pin-project-lite",

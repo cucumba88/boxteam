@@ -4340,8 +4340,21 @@ fn spawn_upload_job(
                             .and_then(|m| m.poster_path.as_deref())
                             .map(|p| format!("https://image.tmdb.org/t/p/w500{p}"));
 
-                        let notify_result = if let Some(url) = poster_url {
-                            crate::telegram::send_photo(&tg_token, &tg_chat, &url, &msg).await
+                        // Prefer sendPhoto when we have a poster. If it fails (caption
+                        // too long, Telegram can't pull from image.tmdb.org, network
+                        // blip, etc.) fall back to sendMessage with the FULL text so
+                        // the user still gets the upload notification — just without
+                        // the cover image. The send_photo helper logs the underlying
+                        // Telegram `description` on its own, so we don't need to
+                        // re-log here on the photo path.
+                        let notify_result = if let Some(ref url) = poster_url {
+                            match crate::telegram::send_photo(&tg_token, &tg_chat, url, &msg).await {
+                                Ok(()) => Ok(()),
+                                Err(photo_err) => {
+                                    eprintln!("[upload] sendPhoto failed, falling back to text-only: {photo_err}");
+                                    crate::telegram::send_message(&tg_token, &tg_chat, &msg).await
+                                }
+                            }
                         } else {
                             crate::telegram::send_message(&tg_token, &tg_chat, &msg).await
                         };
