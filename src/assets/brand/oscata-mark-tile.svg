@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Oscata">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1d1d26"/>
+      <stop offset="1" stop-color="#0d0d0f"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="200" y1="200" x2="824" y2="824" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c4baff"/>
+      <stop offset="0.45" stop-color="#7c6ef7"/>
+      <stop offset="1" stop-color="#4a3fd4"/>
+    </linearGradient>
+    <radialGradient id="haze" cx="380" cy="360" r="600" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7c6ef7" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#7c6ef7" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Shrink visible content into 824×824 inner safe area per Apple's macOS icon spec
+       (100px transparent margin on every side). This is what makes the dock icon
+       display at the same size as system icons. -->
+  <g transform="translate(100 100) scale(0.8047)">
+    <rect width="1024" height="1024" rx="225" fill="url(#bg)"/>
+    <rect width="1024" height="1024" rx="225" fill="url(#haze)"/>
+    <!-- Inset highlight stroke — gives the squircle definition against the dock,
+         standard on macOS Big Sur+ system icons. -->
+    <rect x="5" y="5" width="1014" height="1014" rx="220"
+          fill="none" stroke="#ffffff" stroke-opacity="0.32" stroke-width="10"/>
+    <path d="M 606 185 A 340 340 0 1 0 748 267"
+          fill="none"
+          stroke="url(#ring)"
+          stroke-width="116"
+          stroke-linecap="round"/>
+  </g>
+</svg>

@@ -141,18 +141,30 @@
 }
 
 .shell-sidebar-wordmark {
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--color-text);
+  /* Composed of the mark SVG (purple from its own gradient) + "scata" text
+     in the theme-aware text color. Composing in JSX lets the text inherit
+     --color-text so the wordmark works in both light and dark themes. */
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   user-select: none;
-  white-space: nowrap;
-  overflow: hidden;
 }
 
-.shell-sidebar-wordmark .accent {
-  color: var(--color-primary);
+.shell-sidebar-wordmark > img {
+  height: 22px;
+  width: 22px;
+  display: block;
 }
+
+.shell-sidebar-wordmark > span {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  line-height: 1;
+}
+
 
 .shell-sidebar-collapse {
   margin-left: auto;

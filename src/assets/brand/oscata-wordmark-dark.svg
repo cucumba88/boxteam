@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 196 80" role="img" aria-label="Oscata">
+  <defs>
+    <linearGradient id="ring" x1="200" y1="200" x2="824" y2="824" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c4baff"/>
+      <stop offset="0.45" stop-color="#7c6ef7"/>
+      <stop offset="1" stop-color="#4a3fd4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Wordmark for dark surfaces — explicit light text. -->
+  <g transform="translate(4 13.4) scale(0.052)">
+    <path d="M 606 185 A 340 340 0 1 0 748 267"
+          fill="none" stroke="url(#ring)" stroke-width="116" stroke-linecap="round"/>
+  </g>
+
+  <text x="54" y="56"
+        font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', 'Segoe UI', Roboto, system-ui, sans-serif"
+        font-size="52"
+        font-weight="700"
+        letter-spacing="-1"
+        fill="#e8e8f0">scata</text>
+</svg>

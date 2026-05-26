@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Oscata">
+  <defs>
+    <linearGradient id="ring" x1="200" y1="200" x2="824" y2="824" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c4baff"/>
+      <stop offset="0.45" stop-color="#7c6ef7"/>
+      <stop offset="1" stop-color="#4a3fd4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Notched O — precision-cut wedge at ~2 o'clock (16° arc removed). -->
+  <path d="M 606 185 A 340 340 0 1 0 748 267"
+        fill="none"
+        stroke="url(#ring)"
+        stroke-width="116"
+        stroke-linecap="round"/>
+</svg>
