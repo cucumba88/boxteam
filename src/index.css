@@ -343,15 +343,19 @@ select {
   }
 
   /* Bottom tab bar clears scrollable content. Bar's intrinsic content
-     is ~52px (icon 20 + label + tight padding) — kept as 56 for an extra
-     scroll buffer that doesn't hide the last row's IMDb/size meta. */
+     is ~52px (icon 20 + label + tight padding); its bottom padding
+     `clamps` the iOS safe-area to a max of 20px so total bar height is
+     ~72px. Add a small extra buffer here so the last row's IMDb / size
+     meta isn't flush against the bar. */
   .mobile-content-area {
-    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(72px + 8px);
   }
 
-  /* Bottom tab bar itself gets safe-area padding */
+  /* Bottom tab bar safe-area inset — clamped to keep the home-indicator
+     zone proportional. Matches the inline style in Library.tsx so the
+     fallback (without the inline style) still looks correct. */
   .bottom-tabs {
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: clamp(8px, env(safe-area-inset-bottom, 16px), 20px);
   }
 
   /* Detail / TV panels take full viewport width on mobile */

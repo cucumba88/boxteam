@@ -2459,7 +2459,13 @@ export default function Library({
               "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
             boxShadow:
               "0 -8px 24px color-mix(in srgb, black 22%, transparent)",
-            paddingBottom: "env(safe-area-inset-bottom, 0px)",
+            // iPhone reports safe-area-inset-bottom anywhere from 34px
+            // (older models / browser Safari) to ~50px (Pro Max in PWA
+            // standalone mode). The full value leaves an oversized empty
+            // zone below the labels. `clamp` caps at 20px — still safely
+            // clears the ~5px home indicator pill, but stays visually
+            // proportional to the icons + labels above it.
+            paddingBottom: "clamp(8px, env(safe-area-inset-bottom, 16px), 20px)",
           }}
         >
           {mobileBottomTabs.map((tab) => {
