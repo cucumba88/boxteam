@@ -2056,18 +2056,18 @@ export default function Library({
           position: "sticky",
           top: 0,
           zIndex: 50,
-          height: 68,
-          // Opaque gradient — no backdrop-filter. On iOS Safari a fixed
-          // backdrop-filter atop a scrolling list forces the browser to
-          // recompute the blur on every paint frame, which destroys 120Hz
-          // scroll perf. The background is already ~98% opaque so visually
-          // the blur was barely doing anything anyway.
+          // In PWA standalone mode `top: 0` puts the navbar under the
+          // dynamic island / notch / status bar. Pad the safe-area-inset-top
+          // *inside* the nav and grow its height to match so the content
+          // (logo, search, burger) sits below iOS's status chrome but the
+          // nav bg still bleeds up to the very top edge of the screen.
+          height: "calc(56px + env(safe-area-inset-top, 0px))",
           background:
             "linear-gradient(180deg, var(--color-bg), color-mix(in srgb, var(--color-bg) 96%, black))",
           borderBottom: "1px solid color-mix(in srgb, white 10%, transparent)",
           boxShadow: "0 1px 24px color-mix(in srgb, black 28%, transparent)",
           alignItems: "center",
-          padding: "0 1.5rem",
+          padding: "env(safe-area-inset-top, 0px) 1.5rem 0",
           gap: "1rem",
           flexShrink: 0,
           isolation: "isolate",
@@ -2449,13 +2449,16 @@ export default function Library({
             right: 0,
             zIndex: "var(--z-bottom-tabs)" as never,
             display: "flex",
-            // Opaque background — no backdrop-filter. Fixed-position blur
-            // over a scrolling list is the #1 iOS Safari scroll-perf
-            // killer; we trade an imperceptible glass look for smooth
-            // 120Hz scrolling.
-            background: "var(--color-bg)",
+            // Slightly elevated surface so the bar reads as a distinct
+            // chrome element instead of bleeding into the page bg. The
+            // bottom safe-area zone (home indicator area) now visually
+            // belongs to the bar instead of looking like dead space.
+            background:
+              "linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 92%, var(--color-bg)), color-mix(in srgb, var(--color-surface) 76%, var(--color-bg)))",
             borderTop:
-              "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+              "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
+            boxShadow:
+              "0 -8px 24px color-mix(in srgb, black 22%, transparent)",
             paddingBottom: "env(safe-area-inset-bottom, 0px)",
           }}
         >
