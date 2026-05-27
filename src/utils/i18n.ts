@@ -1077,6 +1077,10 @@ const messages = {
     es: "Actualizando metadatos · {done}/{total}",
     en: "Updating metadata · {done}/{total}",
   },
+  "watchProviders.banner": {
+    es: "Actualizando plataformas · {done}/{total}",
+    en: "Refreshing platforms · {done}/{total}",
+  },
   "ratings.banner": {
     es: "Actualizando puntuaciones · {done}/{total}",
     en: "Refreshing ratings · {done}/{total}",

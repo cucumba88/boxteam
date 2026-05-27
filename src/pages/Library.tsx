@@ -373,6 +373,7 @@ export default function Library({
     progress,
     tmdbProgress,
     metaRefreshProgress,
+    watchProvidersProgress,
     completionSummary,
     dismissCompletion,
     forceClearIndexing,
@@ -3661,6 +3662,59 @@ export default function Library({
             {t(language, "metaRefresh.banner", {
               done: metaRefreshProgress.done,
               total: metaRefreshProgress.total,
+            })}
+          </span>
+        </div>
+      )}
+      {watchProvidersProgress !== null && !isIndexing && (
+        <div
+          style={{
+            position: "fixed",
+            left: 18,
+            // Stack above the metadata-refresh banner when both are visible.
+            bottom: isMobile
+              ? metaRefreshProgress !== null
+                ? "calc(64px + env(safe-area-inset-bottom, 0px) + 64px)"
+                : "calc(64px + env(safe-area-inset-bottom, 0px) + 22px)"
+              : metaRefreshProgress !== null
+                ? 64
+                : 22,
+            zIndex: 52,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "0.6rem 0.85rem",
+            borderRadius: 999,
+            border: "1px solid var(--color-border)",
+            background: "var(--color-surface)",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+            fontSize: 12,
+            color: "var(--color-text-muted)",
+            fontWeight: 600,
+          }}
+        >
+          <div
+            style={{
+              width: 80,
+              height: 4,
+              borderRadius: 999,
+              overflow: "hidden",
+              background: "var(--color-surface-2)",
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.min(100, Math.round((watchProvidersProgress.done / watchProvidersProgress.total) * 100))}%`,
+                height: "100%",
+                background: "var(--color-primary)",
+                transition: "width 0.3s ease",
+              }}
+            />
+          </div>
+          <span>
+            {t(language, "watchProviders.banner", {
+              done: watchProvidersProgress.done,
+              total: watchProvidersProgress.total,
             })}
           </span>
         </div>
