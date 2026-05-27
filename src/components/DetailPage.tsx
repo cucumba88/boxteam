@@ -604,12 +604,12 @@ export default function DetailPage({
               fontSize: 13,
             }}
           >
-            {/* Hero download CTA only renders when this is a single-file
-                view. In grouped mode (multiple versions exist) it's
-                ambiguous which version to download — the user picks one
-                from "Versiones disponibles" below. Matches the TV show
-                detail behavior. */}
-            {!groupedView && (
+            {/* Hero download CTA renders unless we're in grouped mode AND
+                there are actually multiple versions to choose from. With
+                only one version the "pick below" hint has nothing to pick,
+                so we fall back to the direct download button. Matches the
+                TV show detail behavior. */}
+            {(!groupedView || relatedVersions.length === 0) && (
               <button
                 type="button"
                 onClick={handlePrimaryDownload}
@@ -704,7 +704,7 @@ export default function DetailPage({
               </div>
             )}
 
-            {groupedView && (
+            {groupedView && relatedVersions.length > 0 && (
               <span style={{ opacity: 0.75 }}>
                 {language === "es"
                   ? "Elige una versión más abajo para descargar."
