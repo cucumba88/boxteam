@@ -73,6 +73,10 @@ export function useIndexing() {
     done: number;
     total: number;
   } | null>(null);
+  const [watchProvidersProgress, setWatchProvidersProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   const itemIndexRef = useRef<Map<number, number>>(new Map());
 
   const rebuildIndex = (nextItems: MediaItem[]) => {
@@ -265,6 +269,19 @@ export function useIndexing() {
       },
     );
 
+    const unWatchProviders = listen<{ done: number; total: number }>(
+      "watch_providers:refresh_progress",
+      ({ payload }) => {
+        // Skip the noisy "0/0" event the backend emits when nothing's missing
+        // — otherwise users would see an empty banner flash on every app boot.
+        if (payload.total === 0) return;
+        setWatchProvidersProgress({ done: payload.done, total: payload.total });
+        if (payload.done >= payload.total) {
+          setTimeout(() => setWatchProvidersProgress(null), 1500);
+        }
+      },
+    );
+
     return () => {
       unProgress.then((f) => f());
       unUpdate.then((f) => f());
@@ -274,6 +291,7 @@ export function useIndexing() {
       unLog.then((f) => f());
       unTmdbProgress.then((f) => f());
       unMetaRefresh.then((f) => f());
+      unWatchProviders.then((f) => f());
     };
   }, []);
 
@@ -328,6 +346,14 @@ export function useIndexing() {
           next[index] = { ...next[index], ...patch };
           return next;
         });
+      } else if (event === "watch_providers:refresh_progress") {
+        const done = (p.done as number) ?? 0;
+        const total = (p.total as number) ?? 0;
+        if (total === 0) return;
+        setWatchProvidersProgress({ done, total });
+        if (done >= total) {
+          setTimeout(() => setWatchProvidersProgress(null), 1500);
+        }
       } else if (event === "ratings:complete") {
         // The ratings refresh job deliberately doesn't broadcast per-item
         // updates over WS (it would flood the page with re-renders). When
@@ -408,6 +434,7 @@ export function useIndexing() {
     progress,
     tmdbProgress,
     metaRefreshProgress,
+    watchProvidersProgress,
     completionSummary,
     dismissCompletion: () => setCompletionSummary(null),
     /** Force-clear all indexing/TMDB state. Use when tasks are stuck and never complete. */
