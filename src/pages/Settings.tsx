@@ -1407,7 +1407,7 @@ export default function Settings({
         // the whole overlay's content up by the tab bar height + safe-area
         // so the footer is always tappable.
         paddingBottom: isMobile
-          ? "calc(64px + env(safe-area-inset-bottom, 0px))"
+          ? "calc(56px + env(safe-area-inset-bottom, 0px))"
           : undefined,
         animation: "detail-page-in 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
       }}
