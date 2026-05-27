@@ -4,28 +4,28 @@
       <stop offset="0" stop-color="#1d1d26"/>
       <stop offset="1" stop-color="#0d0d0f"/>
     </linearGradient>
-    <linearGradient id="ring" x1="200" y1="200" x2="824" y2="824" gradientUnits="userSpaceOnUse">
+    <linearGradient id="ring" x1="160" y1="160" x2="864" y2="864" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#c4baff"/>
       <stop offset="0.45" stop-color="#7c6ef7"/>
       <stop offset="1" stop-color="#4a3fd4"/>
     </linearGradient>
-    <radialGradient id="haze" cx="380" cy="360" r="600" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7c6ef7" stop-opacity="0.28"/>
+    <radialGradient id="haze" cx="380" cy="360" r="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7c6ef7" stop-opacity="0.30"/>
       <stop offset="1" stop-color="#7c6ef7" stop-opacity="0"/>
     </radialGradient>
   </defs>
 
-  <!-- Dark squircle background fills the full canvas (iOS handles its own
-       corner rounding on apple-touch-icon, so no transparent margin needed).
-       Ring sits at its natural radius (340 — same as the in-app mark),
-       which leaves ~16% of breathing room on every side. That's the
-       designed proportion for the brand mark; squeezing the ring out to
-       the edges destroyed the silhouette. -->
+  <!-- Background fills the full canvas (iOS handles its own corner-rounding
+       so no transparent margin is needed). Ring at radius 380 with stroke
+       124 puts the outer edge at ~86% of the canvas — large enough to match
+       the visual weight of solid-content app icons even with the notch
+       cutting the silhouette, while still leaving a clean ~7% margin
+       around the glyph. -->
   <rect width="1024" height="1024" fill="url(#bg)"/>
   <rect width="1024" height="1024" fill="url(#haze)"/>
-  <path d="M 606 185 A 340 340 0 1 0 748 267"
+  <path d="M 617 147 A 380 380 0 1 0 776 239"
         fill="none"
         stroke="url(#ring)"
-        stroke-width="116"
+        stroke-width="124"
         stroke-linecap="round"/>
 </svg>
