@@ -342,9 +342,11 @@ select {
     min-height: 0;
   }
 
-  /* Bottom tab bar clears scrollable content */
+  /* Bottom tab bar clears scrollable content. Bar's intrinsic content
+     is ~52px (icon 20 + label + tight padding) — kept as 56 for an extra
+     scroll buffer that doesn't hide the last row's IMDb/size meta. */
   .mobile-content-area {
-    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Bottom tab bar itself gets safe-area padding */

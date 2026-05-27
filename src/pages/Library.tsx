@@ -2474,8 +2474,13 @@ export default function Library({
                   flexDirection: "column",
                   alignItems: "center",
                   justifyContent: "center",
-                  padding: "10px 4px 10px",
-                  gap: 3,
+                  // Tighter padding so the bar's visible content height
+                  // shrinks to ~46px (was ~58px). Combined with the iOS
+                  // home-indicator safe-area the total bar still has
+                  // breathing room, but the icons sit closer to the
+                  // home indicator like native iOS tab bars do.
+                  padding: "6px 4px 4px",
+                  gap: 2,
                   border: "none",
                   background: "transparent",
                   color: active
@@ -2487,12 +2492,12 @@ export default function Library({
                 }}
               >
                 <tab.icon
-                  size={22}
-                  strokeWidth={active ? 2.4 : 2.0}
+                  size={20}
+                  strokeWidth={active ? 2.5 : 2.0}
                   aria-hidden="true"
                   style={{ display: "block", flexShrink: 0 }}
                 />
-                <span style={{ fontSize: 10, fontWeight: active ? 700 : 500 }}>
+                <span style={{ fontSize: 10, fontWeight: active ? 700 : 500, letterSpacing: 0.1 }}>
                   {t(language, tab.labelKey as never)}
                 </span>
                 {tabCounts[tab.id] > 0 && (
