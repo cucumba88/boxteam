@@ -165,6 +165,7 @@ pub fn run() {
             commands::clear_show_metadata,
             commands::clear_all_metadata,
             commands::refresh_all_metadata,
+            commands::refresh_watch_providers,
             commands::check_media_badges,
             commands::ftp_list_root_dirs,
             commands::ftp_list_root_dirs_preview,

@@ -32,6 +32,8 @@ import {
 import RatingSourceLogo from "./RatingSourceLogo";
 import { t } from "../utils/i18n";
 import { GENRE_MAP } from "../utils/genres";
+import { PROVIDER_BY_ID, parseProviders } from "../utils/providers";
+import PlatformLogo from "./PlatformLogo";
 import { formatBytes } from "../lib/format";
 import WatchlistButton from "../features/watchlist/WatchlistButton";
 import type { AddWatchlistParams } from "../features/watchlist/types";
@@ -135,6 +137,14 @@ export default function DetailPage({
       .filter((key): key is string => Boolean(key))
       .map((key) => t(language, key as never));
   }, [item.tmdb_genres, language]);
+
+  const watchProviders = useMemo(
+    () =>
+      parseProviders(item.tmdb_watch_providers).filter((id) =>
+        PROVIDER_BY_ID.has(id),
+      ),
+    [item.tmdb_watch_providers],
+  );
 
   const langs =
     item.languages
@@ -589,6 +599,57 @@ export default function DetailPage({
                   {g}
                 </span>
               ))}
+            </div>
+          )}
+
+          {/* Streaming platforms */}
+          {watchProviders.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 8,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: "uppercase" as const,
+                  letterSpacing: "0.08em",
+                  color: "var(--color-text-muted)",
+                }}
+              >
+                {t(language, "detail.availableOn")}
+              </span>
+              {watchProviders.map((id) => {
+                const provider = PROVIDER_BY_ID.get(id);
+                if (!provider) return null;
+                return (
+                  <span
+                    key={`provider-${id}`}
+                    title={provider.name}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background:
+                        "color-mix(in srgb, var(--color-surface-2) 80%, transparent)",
+                      border:
+                        "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+                      color: "var(--color-text)",
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                    }}
+                  >
+                    <PlatformLogo providerId={id} size={13} />
+                    <span>{provider.name}</span>
+                  </span>
+                );
+              })}
             </div>
           )}
 

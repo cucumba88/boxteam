@@ -29,6 +29,13 @@ pub struct TmdbMovie {
     pub runtime_mins: Option<u32>,
     /// ISO 3166-1 alpha-2 production/origin country code (e.g. "DE", "US").
     pub origin_country: Option<String>,
+    /// Streaming-platform TMDB provider IDs for the configured watch region
+    /// (subscription / `flatrate` only). `None` means "not fetched" — distinct
+    /// from `Some(vec![])` which means "fetched, none available". The DB layer
+    /// uses this distinction to avoid clobbering previously-stored data when a
+    /// search-result-only path triggers an update.
+    #[serde(default)]
+    pub watch_providers: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Clone)]
@@ -453,6 +460,7 @@ async fn search_endpoint_results(
                 genres: result.genres,
                 runtime_mins: result.runtime_mins,
                 origin_country: result.origin_country,
+                watch_providers: None,
             });
     }
 
@@ -495,6 +503,7 @@ async fn search_endpoint_results(
                 genres: result.genres,
                 runtime_mins: result.runtime_mins,
                 origin_country: result.origin_country,
+                watch_providers: None,
             });
     }
 
@@ -714,6 +723,49 @@ async fn fetch_detail_lang(
     })
 }
 
+/// Hard-coded watch-provider region (TMDB returns availability per country).
+/// All users today are in Spain; promote this to a config setting later if needed.
+pub const WATCH_REGION: &str = "ES";
+
+/// Fetch the streaming-subscription providers (`flatrate` only) available in
+/// `WATCH_REGION` for a given TMDB id. Returns provider IDs (e.g. 8 = Netflix,
+/// 337 = Disney+). Empty vec on missing region or no providers; bubbles HTTP
+/// errors so callers can decide whether to treat them as "unknown" (don't
+/// overwrite previous data) vs "definitely empty".
+pub async fn fetch_watch_providers(
+    api_key: &str,
+    tmdb_id: i64,
+    endpoint: &str,
+) -> Result<Vec<i64>, String> {
+    let endpoint = if endpoint == "tv" { "tv" } else { "movie" };
+    let url = format!(
+        "https://api.themoviedb.org/3/{endpoint}/{tmdb_id}/watch/providers?api_key={api_key}"
+    );
+
+    #[derive(Deserialize)]
+    struct Provider {
+        provider_id: i64,
+    }
+    #[derive(Deserialize)]
+    struct RegionEntry {
+        #[serde(default)]
+        flatrate: Vec<Provider>,
+    }
+    #[derive(Deserialize)]
+    struct ApiResponse {
+        #[serde(default)]
+        results: HashMap<String, RegionEntry>,
+    }
+
+    let body: ApiResponse =
+        fetch_json_with_retry(&url, "watch providers request").await?;
+    Ok(body
+        .results
+        .get(WATCH_REGION)
+        .map(|r| r.flatrate.iter().map(|p| p.provider_id).collect())
+        .unwrap_or_default())
+}
+
 async fn fetch_imdb_id(
     api_key: &str,
     tmdb_id: i64,
@@ -747,10 +799,11 @@ async fn fetch_imdb_id(
 pub async fn fetch_movie_by_id(api_key: &str, tmdb_id: i64, media_type: &str) -> Result<TmdbMovie, String> {
     let endpoint = if media_type == "tv" { "tv" } else { "movie" };
 
-    let (spanish, english, imdb_id) = tokio::join!(
+    let (spanish, english, imdb_id, providers) = tokio::join!(
         fetch_detail_lang(api_key, tmdb_id, endpoint, "es-ES"),
         fetch_detail_lang(api_key, tmdb_id, endpoint, "en-US"),
         async { fetch_imdb_id(api_key, tmdb_id, endpoint).await.ok().flatten() },
+        async { fetch_watch_providers(api_key, tmdb_id, endpoint).await.ok() },
     );
     let spanish = spanish?;
     let english = english?;
@@ -786,6 +839,7 @@ pub async fn fetch_movie_by_id(api_key: &str, tmdb_id: i64, media_type: &str) ->
         },
         runtime_mins: spanish.runtime_mins.or(english.runtime_mins),
         origin_country: spanish.origin_country.or(english.origin_country),
+        watch_providers: providers,
     })
 }
 
@@ -933,6 +987,7 @@ mod tests {
             genres: vec![],
             origin_country: None,
             runtime_mins: None,
+            watch_providers: None,
         }
     }
 

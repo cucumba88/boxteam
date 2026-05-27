@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { MediaItem } from "../hooks/useIndexing";
 import { formSelectCompact } from "../lib/formStyles";
 import AppIcon from "./AppIcon";
+import PlatformLogo from "./PlatformLogo";
 import type { AppLanguage } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
 import { GENRE_LIST } from "../utils/genres";
+import { PROVIDER_LIST, parseProviders } from "../utils/providers";
 import {
   type Filters,
   normalizeResolution,
@@ -70,6 +72,16 @@ function countGenres(items: MediaItem[]): Map<number, number> {
         : gs
       : [];
     for (const id of genres) {
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function countPlatforms(items: MediaItem[]): Map<number, number> {
+  const counts = new Map<number, number>();
+  for (const item of items) {
+    for (const id of parseProviders(item.tmdb_watch_providers)) {
       counts.set(id, (counts.get(id) ?? 0) + 1);
     }
   }
@@ -151,11 +163,14 @@ function Pill({
   count,
   active,
   onClick,
+  icon,
 }: {
   label: string;
   count?: number;
   active: boolean;
   onClick: () => void;
+  /** Optional leading slot (e.g. a small platform SVG). Inherits chip text color. */
+  icon?: React.ReactNode;
 }) {
   const [hovered, setHovered] = useState(false);
   return (
@@ -190,6 +205,7 @@ function Pill({
         whiteSpace: "nowrap",
       }}
     >
+      {icon}
       <span>{label}</span>
       {count != null && (
         <span
@@ -290,6 +306,7 @@ export default function FilterBar({
     filters.hdr,
     filters.codec,
     filters.genre,
+    filters.platform,
   ].filter(Boolean).length;
 
   const releaseTypeFilterOptions = releaseTypeOptions.filter(
@@ -312,6 +329,13 @@ export default function FilterBar({
     resolutionFilterOptions.length > 1 || !!filters.resolution;
   const showHdrSection = hdrFilterOptions.length > 1 || !!filters.hdr;
   const showCodecSection = codecFilterOptions.length > 1 || !!filters.codec;
+
+  const platformCounts = countPlatforms(items);
+  const platformOptions = PROVIDER_LIST.filter(
+    (p) => platformCounts.has(p.id) || filters.platform === String(p.id),
+  );
+  const showPlatformSection =
+    platformOptions.length > 0 || !!filters.platform;
 
   const genreCounts = countGenres(items);
   const genreOptions = [...GENRE_LIST]
@@ -385,6 +409,7 @@ export default function FilterBar({
               hdr: "",
               codec: "",
               genre: "",
+              platform: "",
             })
           }
           disabled={activeFilterCount === 0}
@@ -602,6 +627,32 @@ export default function FilterBar({
                 onClick={() =>
                   set({
                     genre: filters.genre === String(g.id) ? "" : String(g.id),
+                  })
+                }
+              />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Platform (streaming service) */}
+      {showPlatformSection && (
+        <Section
+          label={t(language, "filter.platform")}
+          hasActive={!!filters.platform}
+        >
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+            {platformOptions.map((p) => (
+              <Pill
+                key={p.id}
+                icon={<PlatformLogo providerId={p.id} size={12} />}
+                label={p.name}
+                count={platformCounts.get(p.id) ?? 0}
+                active={filters.platform === String(p.id)}
+                onClick={() =>
+                  set({
+                    platform:
+                      filters.platform === String(p.id) ? "" : String(p.id),
                   })
                 }
               />

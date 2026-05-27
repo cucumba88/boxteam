@@ -4,6 +4,8 @@ import type { MediaItem } from "../hooks/useIndexing";
 import type { AppLanguage } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
 import { GENRE_LIST } from "../utils/genres";
+import { PROVIDER_BY_ID } from "../utils/providers";
+import PlatformLogo from "./PlatformLogo";
 import { type Filters } from "../utils/filterUtils";
 
 const SORT_OPTIONS = [
@@ -49,7 +51,12 @@ export default function FilterChipRow({
   const inputRef = searchInputRef ?? localRef;
 
   const activeChips = useMemo(() => {
-    const chips: { key: string; label: string; clear: () => void }[] = [];
+    const chips: {
+      key: string;
+      label: string;
+      icon?: React.ReactNode;
+      clear: () => void;
+    }[] = [];
     if (filters.releaseType) {
       chips.push({
         key: `type:${filters.releaseType}`,
@@ -87,6 +94,16 @@ export default function FilterChipRow({
         clear: () => onChange({ ...filters, genre: "" }),
       });
     }
+    if (filters.platform) {
+      const id = Number(filters.platform);
+      const provider = PROVIDER_BY_ID.get(id);
+      chips.push({
+        key: `platform:${filters.platform}`,
+        label: provider ? provider.name : filters.platform,
+        icon: <PlatformLogo providerId={id} size={11} />,
+        clear: () => onChange({ ...filters, platform: "" }),
+      });
+    }
     return chips;
     // items is intentionally excluded; chips don't depend on the catalog.
   }, [filters, language, onChange]);
@@ -116,6 +133,7 @@ export default function FilterChipRow({
       hdr: "",
       codec: "",
       genre: "",
+      platform: "",
     });
 
   // De-emphasise unused stats (e.g. when items is empty we still render so the
@@ -245,6 +263,7 @@ export default function FilterChipRow({
             cursor: "pointer",
           }}
         >
+          {chip.icon}
           <span>{chip.label}</span>
           <X size={11} strokeWidth={2.4} aria-hidden="true" />
         </button>

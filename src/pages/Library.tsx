@@ -132,6 +132,7 @@ const defaultFilters = (tab: TabId, prefs: UserPrefs): Filters => ({
   hdr: "",
   codec: "",
   genre: "",
+  platform: "",
   sort: isSortableTab(tab) ? prefs.defaultSort[tab] : "added-desc",
 });
 
@@ -145,6 +146,7 @@ function filtersFromSearchParams(fallbackSort: string): Filters {
     hdr: p.get("hdr") ?? "",
     codec: p.get("codec") ?? "",
     genre: p.get("genre") ?? "",
+    platform: p.get("platform") ?? "",
     sort: p.get("sort") ?? fallbackSort,
   };
 }
@@ -156,6 +158,7 @@ function filtersToSearchParams(filters: Filters, defaultSort: string): string {
   if (filters.hdr) p.set("hdr", filters.hdr);
   if (filters.codec) p.set("codec", filters.codec);
   if (filters.genre) p.set("genre", filters.genre);
+  if (filters.platform) p.set("platform", filters.platform);
   if (filters.sort && filters.sort !== defaultSort) p.set("sort", filters.sort);
   const qs = p.toString();
   return qs ? "?" + qs : "";
@@ -462,6 +465,7 @@ export default function Library({
   const [clearingAll, setClearingAll] = useState(false);
   const [refreshingLibrary, setRefreshingLibrary] = useState(false);
   const [refreshingMetadata, setRefreshingMetadata] = useState(false);
+  const [refreshingWatchProviders, setRefreshingWatchProviders] = useState(false);
   const [tvShow, setTvShow] = useState<MediaItem | null>(null);
   const [fixMatchRequest, setFixMatchRequest] = useState<{
     itemIds: number[];
@@ -831,6 +835,19 @@ export default function Library({
     }
   };
 
+  const refreshWatchProviders = async () => {
+    setRefreshingWatchProviders(true);
+    if (showDevLog) setShowLog(true);
+    setShowActionsMenu(false);
+    try {
+      await call("refresh_watch_providers");
+    } catch (error) {
+      console.error("Failed to refresh watch providers:", error);
+    } finally {
+      setRefreshingWatchProviders(false);
+    }
+  };
+
   const switchTab = (tab: TabId) => {
     // Close any takeovers first — Settings / user-management paint on top
     // of the library content, so without this the new tab would render
@@ -968,6 +985,23 @@ export default function Library({
     return map;
   }, [items]);
 
+  // Same trick for tmdb_watch_providers (filter-by-platform).
+  const parsedPlatformMap = useMemo(() => {
+    const map = new Map<number, number[]>();
+    for (const item of items) {
+      const ps = item.tmdb_watch_providers;
+      map.set(
+        item.id,
+        ps
+          ? typeof ps === "string"
+            ? (JSON.parse(ps) as number[])
+            : ps
+          : [],
+      );
+    }
+    return map;
+  }, [items]);
+
   const getMovieVersions = (movie: MediaItem): MediaItem[] =>
     items.filter(
       (entry) =>
@@ -1046,6 +1080,11 @@ export default function Library({
         const matchesGenre =
           !filters.genre ||
           (parsedGenreMap.get(item.id) ?? []).includes(Number(filters.genre));
+        const matchesPlatform =
+          !filters.platform ||
+          (parsedPlatformMap.get(item.id) ?? []).includes(
+            Number(filters.platform),
+          );
         return (
           matchesSearch &&
           (!filters.releaseType ||
@@ -1054,7 +1093,8 @@ export default function Library({
             normalizeResolution(item.resolution) === filters.resolution) &&
           (!filters.hdr || normalizeHdr(item.hdr) === filters.hdr) &&
           (!filters.codec || normalizeCodec(item.codec) === filters.codec) &&
-          matchesGenre
+          matchesGenre &&
+          matchesPlatform
         );
       });
 
@@ -1106,9 +1146,9 @@ export default function Library({
     const sortedItems = keyed.map(({ item }) => item);
 
     return useGroupedMovies ? deduplicateByTitle(sortedItems) : sortedItems;
-  }, [filterableItems, filters, language, parsedGenreMap, useGroupedMovies, ratingOrder]);
+  }, [filterableItems, filters, language, parsedGenreMap, parsedPlatformMap, useGroupedMovies, ratingOrder]);
 
-  const viewResetKey = `${activeTab}:${filters.search}:${filters.releaseType}:${filters.resolution}:${filters.hdr}:${filters.codec}:${filters.genre}:${filters.sort}:${tvView}:${movieView}`;
+  const viewResetKey = `${activeTab}:${filters.search}:${filters.releaseType}:${filters.resolution}:${filters.hdr}:${filters.codec}:${filters.genre}:${filters.platform}:${filters.sort}:${tvView}:${movieView}`;
 
   const isAlphaSort =
     filters.sort === "title-asc" || filters.sort === "title-desc";
@@ -3081,6 +3121,50 @@ export default function Library({
                           {refreshingMetadata
                             ? t(language, "library.refreshingMetadata")
                             : t(language, "library.refreshAllMetadata")}
+                        </button>
+                        <button
+                          onClick={refreshWatchProviders}
+                          disabled={
+                            refreshingWatchProviders ||
+                            refreshingMetadata ||
+                            rematching ||
+                            clearingAll ||
+                            refreshingLibrary ||
+                            isIndexing
+                          }
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            borderRadius: "var(--radius)",
+                            border: "none",
+                            background: "transparent",
+                            color: "var(--color-text)",
+                            textAlign: "left",
+                            cursor:
+                              refreshingWatchProviders ||
+                              refreshingMetadata ||
+                              rematching ||
+                              clearingAll ||
+                              refreshingLibrary ||
+                              isIndexing
+                                ? "default"
+                                : "pointer",
+                            opacity:
+                              refreshingWatchProviders ||
+                              refreshingMetadata ||
+                              rematching ||
+                              clearingAll ||
+                              refreshingLibrary ||
+                              isIndexing
+                                ? 0.5
+                                : 1,
+                            fontSize: 13,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {refreshingWatchProviders
+                            ? t(language, "library.refreshingWatchProviders")
+                            : t(language, "library.refreshWatchProviders")}
                         </button>
                         <button
                           onClick={runRematchAll}
