@@ -9,23 +9,24 @@
       <stop offset="0.45" stop-color="#7c6ef7"/>
       <stop offset="1" stop-color="#4a3fd4"/>
     </linearGradient>
-    <radialGradient id="haze" cx="380" cy="360" r="640" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7c6ef7" stop-opacity="0.30"/>
+    <radialGradient id="haze" cx="380" cy="340" r="680" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7c6ef7" stop-opacity="0.42"/>
       <stop offset="1" stop-color="#7c6ef7" stop-opacity="0"/>
     </radialGradient>
   </defs>
 
-  <!-- Background fills the full canvas (iOS handles its own corner-rounding
-       so no transparent margin is needed). Ring at radius 380 with stroke
-       124 puts the outer edge at ~86% of the canvas — large enough to match
-       the visual weight of solid-content app icons even with the notch
-       cutting the silhouette, while still leaving a clean ~7% margin
-       around the glyph. -->
+  <!-- Background fills the full canvas. Ring uses a heavy stroke (180 =
+       ~18% of canvas) so the visual mass survives downscaling — iOS
+       renders home-screen icons at ~60-80 logical px, where a thin stroke
+       (~12% of canvas) becomes a hairline and the mark reads as small
+       compared to solid-content competitors like Spotify or WubbaLubba.
+       At r=360 with stroke 180 the outer edge sits at ~88% of canvas
+       (450/512) and the visible ring band is ~35% of canvas wide. -->
   <rect width="1024" height="1024" fill="url(#bg)"/>
   <rect width="1024" height="1024" fill="url(#haze)"/>
-  <path d="M 617 147 A 380 380 0 1 0 776 239"
+  <path d="M 611 166 A 360 360 0 1 0 762 253"
         fill="none"
         stroke="url(#ring)"
-        stroke-width="124"
+        stroke-width="180"
         stroke-linecap="round"/>
 </svg>
