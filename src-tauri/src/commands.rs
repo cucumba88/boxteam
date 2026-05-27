@@ -1350,6 +1350,12 @@ pub async fn seed_starter_library(
     state.import_database_from(&seed_path.to_string_lossy())?;
     state.clear_app_config()?;
     state.save_last_indexed_at(&chrono::Utc::now().to_rfc3339())?;
+    // The seed DB predates v0.14.0 so its rows arrive without watch-provider
+    // data. Fill them in from the bundled JSON snapshot — NULL-only, so it
+    // won't touch anything that's somehow already populated.
+    if let Err(err) = state.apply_bundle_to_null_rows() {
+        eprintln!("[watch-providers-bundle] post-seed apply failed: {err}");
+    }
     Ok(true)
 }
 
