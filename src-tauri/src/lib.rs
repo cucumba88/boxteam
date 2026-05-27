@@ -409,6 +409,17 @@ pub fn run() {
                         commands::refresh_all_ratings_internal(db_clone, window, false).await.ok();
                     });
                 }
+                // Auto-backfill streaming-platform availability for any
+                // TMDB-matched rows still missing it. Grouped by tmdb_id so a
+                // whole series is one HTTP call; no-ops when fully populated.
+                // Errors are swallowed (TMDB key missing, network blip, etc.).
+                {
+                    let db_clone = db.clone();
+                    let window = visible_main_window(&handle);
+                    tauri::async_runtime::spawn(async move {
+                        commands::refresh_watch_providers_internal(db_clone, window).await.ok();
+                    });
+                }
                 let last_indexed_at = db.load_last_indexed_at().ok().flatten();
                 let should_run_now = last_indexed_at
                     .as_deref()
@@ -472,11 +483,21 @@ pub fn run() {
                     // Top up missing IMDb / TVDB ratings on every cycle.
                     // The internal guard prevents this from stacking if a
                     // previous tick is still running.
-                    let db_clone = db.clone();
-                    let win_clone = window;
-                    tauri::async_runtime::spawn(async move {
-                        commands::refresh_all_ratings_internal(db_clone, win_clone, false).await.ok();
-                    });
+                    {
+                        let db_clone = db.clone();
+                        let win_clone = window.clone();
+                        tauri::async_runtime::spawn(async move {
+                            commands::refresh_all_ratings_internal(db_clone, win_clone, false).await.ok();
+                        });
+                    }
+                    // Top up missing watch-providers on every cycle too.
+                    {
+                        let db_clone = db.clone();
+                        let win_clone = window;
+                        tauri::async_runtime::spawn(async move {
+                            commands::refresh_watch_providers_internal(db_clone, win_clone).await.ok();
+                        });
+                    }
                 }
             });
             Ok(())
