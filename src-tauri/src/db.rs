@@ -207,6 +207,29 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
+/// Shape of `src-tauri/resources/watch_providers.json` — a build-time snapshot
+/// of `{tmdb_id, type, providers}` mappings used to pre-fill the new
+/// `tmdb_watch_providers` column on existing installs without depending on
+/// TMDB being reachable at boot. Bumping `version` triggers a re-run of the
+/// bundle migration on already-upgraded installs.
+#[derive(Debug, Deserialize)]
+struct WatchProvidersBundle {
+    version: u32,
+    #[allow(dead_code)]
+    region: String,
+    #[allow(dead_code)]
+    generated_at: String,
+    entries: Vec<WatchProvidersBundleEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WatchProvidersBundleEntry {
+    tmdb_id: i64,
+    #[serde(rename = "type")]
+    tmdb_type: String,
+    providers: Vec<i64>,
+}
+
 // ── Quality profiles ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -788,7 +811,104 @@ impl Db {
             .into())
         })?;
         Self::apply_migrations(&conn)?;
+        // Best-effort offline backfill of streaming providers from the
+        // bundled JSON snapshot. Defensive by design: parse errors, missing
+        // rows, and per-row failures are all logged and skipped — they never
+        // abort startup or roll back the DB to an inconsistent state.
+        if let Err(err) = Self::apply_bundled_watch_providers(&conn) {
+            eprintln!("[watch-providers-bundle] skipped: {err}");
+        }
         Ok(Self { conn: Arc::new(Mutex::new(conn)), data_dir, is_portable })
+    }
+
+    /// Embedded JSON snapshot of `{tmdb_id, type, providers}` for known
+    /// titles. Generated from a real library at build time, ships read-only.
+    /// See `src-tauri/resources/watch_providers.json`.
+    const WATCH_PROVIDERS_BUNDLE: &'static str =
+        include_str!("../resources/watch_providers.json");
+
+    /// Boot-time entry: skipped (cheap no-op) once the migration has run for
+    /// this `version`. Bump the JSON's `version` to force a re-run on existing
+    /// installs when shipping fresh bundled data.
+    fn apply_bundled_watch_providers(conn: &Connection) -> Result<(), String> {
+        let bundle = Self::parse_watch_providers_bundle()?;
+        let migration_id = format!("bundle_watch_providers_v{}", bundle.version);
+        if Self::migration_applied(conn, &migration_id)? {
+            return Ok(());
+        }
+        let (updated, errors) = Self::apply_bundle_inner(conn, &bundle)?;
+        Self::mark_migration_applied(conn, &migration_id)?;
+        if updated > 0 || errors > 0 {
+            eprintln!(
+                "[watch-providers-bundle] {}: {} rows filled, {} errors, {} bundle entries",
+                migration_id,
+                updated,
+                errors,
+                bundle.entries.len(),
+            );
+        }
+        Ok(())
+    }
+
+    /// Idempotent NULL-only fill — safe to call any number of times. Used by
+    /// `apply_bundled_watch_providers` (boot) and `seed_starter_library` (after
+    /// new rows arrive from the starter library bundle).
+    pub fn apply_bundle_to_null_rows(&self) -> Result<(usize, usize), String> {
+        let conn = self.conn.lock().unwrap();
+        let bundle = Self::parse_watch_providers_bundle()?;
+        Self::apply_bundle_inner(&conn, &bundle)
+    }
+
+    fn parse_watch_providers_bundle() -> Result<WatchProvidersBundle, String> {
+        serde_json::from_str(Self::WATCH_PROVIDERS_BUNDLE)
+            .map_err(|e| format!("bundle parse failed: {e}"))
+    }
+
+    /// The actual UPDATE loop, factored out so it can run with or without the
+    /// migration-applied gate. Safety contract:
+    /// - WHERE `tmdb_watch_providers IS NULL` — never overwrites existing data.
+    /// - Per-row error → log + skip, never aborts the batch.
+    /// - Runs inside a transaction; commit failure leaves the DB untouched.
+    fn apply_bundle_inner(
+        conn: &Connection,
+        bundle: &WatchProvidersBundle,
+    ) -> Result<(usize, usize), String> {
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+
+        let mut stmt = tx
+            .prepare(
+                "UPDATE media_items
+                 SET tmdb_watch_providers = ?1
+                 WHERE tmdb_id = ?2
+                   AND COALESCE(tmdb_type, media_type, 'movie') = ?3
+                   AND tmdb_watch_providers IS NULL",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let mut updated_rows: usize = 0;
+        let mut row_errors: usize = 0;
+        for entry in &bundle.entries {
+            let providers_json = match serde_json::to_string(&entry.providers) {
+                Ok(s) => s,
+                Err(_) => {
+                    row_errors += 1;
+                    continue;
+                }
+            };
+            match stmt.execute(params![providers_json, entry.tmdb_id, entry.tmdb_type]) {
+                Ok(n) => updated_rows += n,
+                Err(e) => {
+                    row_errors += 1;
+                    eprintln!(
+                        "[watch-providers-bundle] row error tmdb_id={} type={}: {}",
+                        entry.tmdb_id, entry.tmdb_type, e
+                    );
+                }
+            }
+        }
+        drop(stmt);
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok((updated_rows, row_errors))
     }
 
     /// The directory where the database and backups are stored.

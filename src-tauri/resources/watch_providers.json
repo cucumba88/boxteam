@@ -1,0 +1,1980 @@
+{
+  "version": 1,
+  "region": "ES",
+  "generated_at": "2026-05-27",
+  "entries": [
+    {
+      "tmdb_id": 458220,
+      "type": "movie",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 516486,
+      "type": "movie",
+      "providers": [
+        350,
+        2241,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 1097311,
+      "type": "movie",
+      "providers": [
+        350,
+        2241,
+        149,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 1276073,
+      "type": "movie",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 1492341,
+      "type": "movie",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 1684246,
+      "type": "movie",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 4556,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 37854,
+      "type": "tv",
+      "providers": [
+        8,
+        119,
+        1796,
+        283,
+        1968
+      ]
+    },
+    {
+      "tmdb_id": 39334,
+      "type": "tv",
+      "providers": [
+        62
+      ]
+    },
+    {
+      "tmdb_id": 71915,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 72039,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 76479,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 79824,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 94954,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 103913,
+      "type": "tv",
+      "providers": [
+        350,
+        2241,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 106148,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 106379,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 108181,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 111841,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 112581,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 114922,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 124800,
+      "type": "tv",
+      "providers": [
+        8,
+        149,
+        1899,
+        1796,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 127865,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 128019,
+      "type": "tv",
+      "providers": [
+        62
+      ]
+    },
+    {
+      "tmdb_id": 131142,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 135373,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 154385,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 155495,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 156240,
+      "type": "tv",
+      "providers": [
+        196,
+        528,
+        2034,
+        1854
+      ]
+    },
+    {
+      "tmdb_id": 157395,
+      "type": "tv",
+      "providers": [
+        196,
+        528,
+        2034,
+        1854
+      ]
+    },
+    {
+      "tmdb_id": 198102,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 198178,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 200875,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 201289,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 202208,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 202411,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 202555,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 203616,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 204490,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 206828,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 208921,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 211172,
+      "type": "tv",
+      "providers": [
+        2561
+      ]
+    },
+    {
+      "tmdb_id": 211240,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 211288,
+      "type": "tv",
+      "providers": [
+        337,
+        2241,
+        149,
+        62
+      ]
+    },
+    {
+      "tmdb_id": 212588,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 215512,
+      "type": "tv",
+      "providers": [
+        1838,
+        2561
+      ]
+    },
+    {
+      "tmdb_id": 215552,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 216412,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 217528,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 218342,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 218351,
+      "type": "tv",
+      "providers": [
+        63
+      ]
+    },
+    {
+      "tmdb_id": 218557,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 218589,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 219080,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 220377,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 220801,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 223300,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 223326,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 223386,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 223438,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 223530,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 224263,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 224372,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 224941,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 224942,
+      "type": "tv",
+      "providers": [
+        63
+      ]
+    },
+    {
+      "tmdb_id": 225171,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 225780,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 225823,
+      "type": "tv",
+      "providers": [
+        119,
+        149,
+        1773,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 225891,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 226071,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 226259,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 226637,
+      "type": "tv",
+      "providers": [
+        337,
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 226749,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 227042,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 232342,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 233079,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 233592,
+      "type": "tv",
+      "providers": [
+        8,
+        62,
+        1796,
+        1838
+      ]
+    },
+    {
+      "tmdb_id": 235769,
+      "type": "tv",
+      "providers": [
+        2561
+      ]
+    },
+    {
+      "tmdb_id": 236235,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 237232,
+      "type": "tv",
+      "providers": [
+        528,
+        1854
+      ]
+    },
+    {
+      "tmdb_id": 238128,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 238339,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 238458,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 238585,
+      "type": "tv",
+      "providers": [
+        528,
+        1854
+      ]
+    },
+    {
+      "tmdb_id": 240459,
+      "type": "tv",
+      "providers": [
+        2141
+      ]
+    },
+    {
+      "tmdb_id": 240740,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 240920,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 241278,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 241372,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 241473,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 241554,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 244244,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 244447,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 244623,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 244628,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 245318,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 245441,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 245703,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 245927,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 246386,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 246412,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 246473,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 246799,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 246864,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 247168,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 247704,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 247723,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 247732,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 248984,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 249597,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 250307,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 250504,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 250505,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 250996,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 252000,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 253368,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 253736,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 253750,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 253941,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 254013,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 254071,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 254953,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 255251,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 255522,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 255570,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 255661,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 255719,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 256201,
+      "type": "tv",
+      "providers": [
+        528,
+        1854
+      ]
+    },
+    {
+      "tmdb_id": 256248,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 256585,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 256711,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 257519,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 257534,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 257992,
+      "type": "tv",
+      "providers": [
+        350
+      ]
+    },
+    {
+      "tmdb_id": 258036,
+      "type": "tv",
+      "providers": [
+        528,
+        1854
+      ]
+    },
+    {
+      "tmdb_id": 258742,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 258842,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 259259,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 259265,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 259405,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 259731,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 259856,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 260650,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 261668,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 262262,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 262280,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 262793,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 262848,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 263346,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 269160,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 269161,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 270444,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 270476,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 270572,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 270600,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 270734,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 271267,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 271823,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 271938,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 272586,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 273160,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 273247,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 273414,
+      "type": "tv",
+      "providers": [
+        63
+      ]
+    },
+    {
+      "tmdb_id": 273801,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 273918,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 274017,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 274379,
+      "type": "tv",
+      "providers": [
+        63
+      ]
+    },
+    {
+      "tmdb_id": 274479,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 274642,
+      "type": "tv",
+      "providers": [
+        196,
+        528,
+        2034,
+        1854
+      ]
+    },
+    {
+      "tmdb_id": 274776,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 274979,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 276643,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 277752,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 278100,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 278274,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 279116,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 279471,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 279601,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 279603,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 280571,
+      "type": "tv",
+      "providers": [
+        196,
+        528,
+        2034,
+        1854
+      ]
+    },
+    {
+      "tmdb_id": 280860,
+      "type": "tv",
+      "providers": [
+        2561
+      ]
+    },
+    {
+      "tmdb_id": 280888,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 280893,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 281005,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 281401,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 283133,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 283228,
+      "type": "tv",
+      "providers": [
+        2141
+      ]
+    },
+    {
+      "tmdb_id": 283370,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 283484,
+      "type": "tv",
+      "providers": [
+        8
+      ]
+    },
+    {
+      "tmdb_id": 283673,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 283853,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 284478,
+      "type": "tv",
+      "providers": [
+        63
+      ]
+    },
+    {
+      "tmdb_id": 284656,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 284879,
+      "type": "tv",
+      "providers": [
+        62
+      ]
+    },
+    {
+      "tmdb_id": 285404,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    },
+    {
+      "tmdb_id": 285739,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 285807,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 286056,
+      "type": "tv",
+      "providers": [
+        149
+      ]
+    },
+    {
+      "tmdb_id": 286702,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 286801,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 287167,
+      "type": "tv",
+      "providers": [
+        63
+      ]
+    },
+    {
+      "tmdb_id": 287231,
+      "type": "tv",
+      "providers": [
+        2141
+      ]
+    },
+    {
+      "tmdb_id": 287355,
+      "type": "tv",
+      "providers": [
+        63
+      ]
+    },
+    {
+      "tmdb_id": 287740,
+      "type": "tv",
+      "providers": [
+        63
+      ]
+    },
+    {
+      "tmdb_id": 287978,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 288362,
+      "type": "tv",
+      "providers": [
+        62
+      ]
+    },
+    {
+      "tmdb_id": 289196,
+      "type": "tv",
+      "providers": [
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 289219,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 289485,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 289560,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 290295,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 290511,
+      "type": "tv",
+      "providers": [
+        528,
+        1854
+      ]
+    },
+    {
+      "tmdb_id": 290856,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 291506,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 292069,
+      "type": "tv",
+      "providers": [
+        63
+      ]
+    },
+    {
+      "tmdb_id": 292474,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 292557,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 293118,
+      "type": "tv",
+      "providers": [
+        1838,
+        2561
+      ]
+    },
+    {
+      "tmdb_id": 293542,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 293940,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 296276,
+      "type": "tv",
+      "providers": [
+        63
+      ]
+    },
+    {
+      "tmdb_id": 296523,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 296821,
+      "type": "tv",
+      "providers": [
+        528,
+        1854
+      ]
+    },
+    {
+      "tmdb_id": 299130,
+      "type": "tv",
+      "providers": [
+        2561
+      ]
+    },
+    {
+      "tmdb_id": 300529,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 300787,
+      "type": "tv",
+      "providers": [
+        2561
+      ]
+    },
+    {
+      "tmdb_id": 301058,
+      "type": "tv",
+      "providers": [
+        119,
+        62,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 301498,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 301507,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 302034,
+      "type": "tv",
+      "providers": [
+        149,
+        1773
+      ]
+    },
+    {
+      "tmdb_id": 302060,
+      "type": "tv",
+      "providers": [
+        337
+      ]
+    },
+    {
+      "tmdb_id": 303072,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 303173,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 304199,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 304371,
+      "type": "tv",
+      "providers": [
+        2241,
+        149
+      ]
+    },
+    {
+      "tmdb_id": 304510,
+      "type": "tv",
+      "providers": [
+        528,
+        1854
+      ]
+    },
+    {
+      "tmdb_id": 306502,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 307635,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 308014,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 308606,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 309400,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 310045,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 310239,
+      "type": "tv",
+      "providers": [
+        8,
+        1796
+      ]
+    },
+    {
+      "tmdb_id": 310800,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 311013,
+      "type": "tv",
+      "providers": [
+        119,
+        2100
+      ]
+    },
+    {
+      "tmdb_id": 312073,
+      "type": "tv",
+      "providers": [
+        149,
+        1899,
+        1825
+      ]
+    },
+    {
+      "tmdb_id": 316832,
+      "type": "tv",
+      "providers": [
+        350,
+        2243
+      ]
+    }
+  ]
+}
