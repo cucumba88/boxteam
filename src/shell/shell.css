@@ -150,10 +150,61 @@
   user-select: none;
 }
 
-.shell-sidebar-wordmark > img {
+.shell-sidebar-wordmark > .oscata-mark {
   height: 22px;
   width: 22px;
   display: block;
+  flex-shrink: 0;
+}
+
+/* Brand mark — default state is fully drawn. `pathLength="2000"` on the
+   path normalizes the dash math regardless of SVG scale, so the values
+   below are stable in any render size. */
+.shell-sidebar-wordmark > .oscata-mark .oscata-mark-ring {
+  stroke-dasharray: 2000;
+  stroke-dashoffset: 0;
+}
+
+/* Draw-in entrance — only applied once the component has mounted and the
+   `data-animate-in` attribute flips to "true". Defaulting the path to fully
+   drawn (above) means even if this animation never fires, the user still
+   sees a complete logo instead of a blank space. */
+.shell-sidebar-wordmark > .oscata-mark[data-animate-in="true"] .oscata-mark-ring {
+  animation: oscata-mark-draw 1100ms cubic-bezier(0.65, 0.05, 0.36, 1)
+    forwards;
+}
+
+/* Loop during indexing — the same gesture used for the entrance becomes the
+   loading indicator, so the visual language stays coherent. */
+body[data-oscata-indexing="true"]
+  .shell-sidebar-wordmark
+  > .oscata-mark
+  .oscata-mark-ring {
+  animation: oscata-mark-loop 2200ms cubic-bezier(0.65, 0.05, 0.36, 1)
+    infinite;
+}
+
+@keyframes oscata-mark-draw {
+  from { stroke-dashoffset: 2000; }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes oscata-mark-loop {
+  0%   { stroke-dashoffset: 2000; }
+  45%  { stroke-dashoffset: 0; }
+  55%  { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -2000; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-sidebar-wordmark > .oscata-mark[data-animate-in="true"] .oscata-mark-ring,
+  body[data-oscata-indexing="true"]
+    .shell-sidebar-wordmark
+    > .oscata-mark
+    .oscata-mark-ring {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
 }
 
 .shell-sidebar-wordmark > span {
@@ -337,11 +388,15 @@
 /* ── Status bar ───────────────────────────────────────────────────────── */
 
 .shell-statusbar {
+  /* Idle: a slim 28px strip. Active: 40px so the progress bar and the
+     percentage actually have room to breathe — the user shouldn't have to
+     squint to know what the app is doing. Smooth height transition keeps
+     the layout shift from feeling jarring. */
   height: 28px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 0 14px;
   gap: 16px;
   background: color-mix(in srgb, var(--color-bg) 96%, black 4%);
   border-top: 1px solid
@@ -349,12 +404,69 @@
   font-size: 11.5px;
   color: var(--color-text-muted);
   z-index: 30;
+  position: relative;
+  transition:
+    height 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    background 220ms ease,
+    border-color 220ms ease;
+}
+
+.shell-statusbar.working {
+  height: 40px;
+  font-size: 12.5px;
+  color: var(--color-text);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-primary) 6%, transparent),
+    color-mix(in srgb, var(--color-bg) 96%, black 4%)
+  );
+  border-top: 1px solid
+    color-mix(in srgb, var(--color-primary) 32%, var(--color-border));
+}
+
+/* Accent strip that runs along the top edge of the status bar while work
+   is happening — a 2px brand-purple line with a soft shimmer. Doubles as
+   the "I'm alive" signal even if the user is scrolled away from the bar. */
+.shell-statusbar.working::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-primary) 20%,
+    color-mix(in srgb, var(--color-primary) 50%, white 50%) 50%,
+    var(--color-primary) 80%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: oscata-statusbar-shimmer 2.4s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes oscata-statusbar-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+.shell-statusbar.flashing::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-success) 30%,
+    color-mix(in srgb, var(--color-success) 50%, white 50%) 50%,
+    var(--color-success) 70%,
+    transparent 100%
+  );
 }
 
 .shell-statusbar-section {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .shell-statusbar-section.center {
@@ -389,18 +501,102 @@
   color: var(--color-text);
 }
 
+/* Brand-purple spinner in the working state — color-coordinates with the
+   accent strip and progress bar so the eye reads the whole bar as one
+   "working" affordance. */
+.shell-statusbar-icon-spin {
+  color: var(--color-primary);
+  animation: spin 1.4s linear infinite;
+  flex-shrink: 0;
+}
+
+.shell-statusbar-label {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 38vw;
+}
+
 .shell-statusbar-progress {
-  width: 110px;
-  height: 4px;
-  background: color-mix(in srgb, var(--color-surface-2) 80%, transparent);
+  width: 240px;
+  height: 6px;
+  background: color-mix(in srgb, var(--color-surface-2) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
   border-radius: 999px;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .shell-statusbar-progress > div {
   height: 100%;
-  background: var(--color-primary);
-  transition: width 0.25s ease;
+  background: linear-gradient(
+    90deg,
+    var(--color-primary),
+    color-mix(in srgb, var(--color-primary) 70%, white 30%)
+  );
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 60%, transparent);
+  transition: width 0.3s ease;
+}
+
+.shell-statusbar-percent {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--color-text);
+  min-width: 36px;
+  text-align: right;
+}
+
+/* Inline success flash shown when an indexing run finishes — replaces the
+   old floating "INDEXACIÓN COMPLETA" toast. Prominent green chip that
+   slides in, holds for ~4s, then is replaced by the idle item count. */
+.shell-statusbar-flash {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--color-success) 42%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-success) 14%, transparent),
+    0 4px 14px color-mix(in srgb, var(--color-success) 28%, transparent);
+  animation: oscata-flash-in 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@keyframes oscata-flash-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Narrower viewports — drop the progress bar width so the label still
+   fits before the percent. */
+@media (max-width: 900px) {
+  .shell-statusbar-progress {
+    width: 140px;
+  }
+  .shell-statusbar-label {
+    max-width: 32vw;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-statusbar,
+  .shell-statusbar.working::before,
+  .shell-statusbar-icon-spin {
+    transition: none;
+    animation: none;
+  }
 }
 
 /* ── Command palette ──────────────────────────────────────────────────── */
@@ -608,6 +804,129 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* ── Mobile progress strip ────────────────────────────────────────────────
+   Sits directly below the mobile top navbar. Mirrors the desktop status
+   bar's signals — brand-purple shimmer when work happens, green flash on
+   completion — but in a layout suited to a narrow viewport. */
+.mobile-progress-strip {
+  position: sticky;
+  top: 68px; /* matches the mobile top navbar height */
+  z-index: 49;
+  background: color-mix(in srgb, var(--mobile-strip-accent) 8%, var(--color-bg));
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--mobile-strip-accent) 28%, transparent);
+  animation: mobile-strip-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.mobile-progress-strip-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  font-size: 12.5px;
+  color: var(--color-text);
+}
+
+.mobile-progress-strip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mobile-strip-accent) 18%, transparent);
+  color: var(--mobile-strip-accent);
+  flex-shrink: 0;
+}
+
+.mobile-progress-strip-spinner {
+  animation: spin 1.4s linear infinite;
+}
+
+.mobile-progress-strip-label {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mobile-progress-strip-percent {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.mobile-progress-strip-bar {
+  height: 3px;
+  background: color-mix(in srgb, var(--color-surface-2) 90%, transparent);
+  overflow: hidden;
+  position: relative;
+}
+
+.mobile-progress-strip-bar-fill {
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    var(--color-primary),
+    color-mix(in srgb, var(--color-primary) 70%, white 30%)
+  );
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-primary) 60%, transparent);
+  transition: width 0.3s ease;
+}
+
+/* Indeterminate phase — a comet-style segment travels across the bar.
+   38% width matches what Material/iOS use for indeterminate progress. */
+.mobile-progress-strip-bar-shimmer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 38%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-primary),
+    transparent
+  );
+  animation: mobile-strip-shimmer 1.4s ease-in-out infinite;
+}
+
+.mobile-progress-strip-bar.flash {
+  background: linear-gradient(
+    90deg,
+    var(--color-success),
+    color-mix(in srgb, var(--color-success) 70%, white 30%),
+    var(--color-success)
+  );
+}
+
+@keyframes mobile-strip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes mobile-strip-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(266%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-progress-strip,
+  .mobile-progress-strip-spinner,
+  .mobile-progress-strip-bar-shimmer {
+    animation: none;
   }
 }
 
