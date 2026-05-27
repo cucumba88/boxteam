@@ -813,7 +813,9 @@ body[data-oscata-indexing="true"]
    completion — but in a layout suited to a narrow viewport. */
 .mobile-progress-strip {
   position: sticky;
-  top: 68px; /* matches the mobile top navbar height */
+  /* Must match the mobile top navbar height: 56px content + safe-area-inset-top
+     (notch / dynamic island padding) — set in Library.tsx. */
+  top: calc(56px + env(safe-area-inset-top, 0px));
   z-index: 49;
   background: color-mix(in srgb, var(--mobile-strip-accent) 8%, var(--color-bg));
   border-bottom: 1px solid
