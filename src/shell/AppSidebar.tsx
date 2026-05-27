@@ -5,7 +5,7 @@ import {
   Settings as SettingsIcon,
   type LucideIcon,
 } from "lucide-react";
-import oscataMark from "../assets/brand/oscata-mark.svg";
+import OscataMark from "../components/OscataMark";
 
 const COLLAPSED_KEY = "oscata.sidebar.collapsed";
 
@@ -77,7 +77,7 @@ export default function AppSidebar<TabId extends string>({
       <div className="shell-sidebar-header">
         {!collapsed && (
           <span className="shell-sidebar-wordmark" aria-label="Oscata">
-            <img src={oscataMark} alt="" aria-hidden="true" />
+            <OscataMark size={22} />
             <span>scata</span>
           </span>
         )}

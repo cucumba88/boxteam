@@ -44,7 +44,6 @@ import {
   normalizeCodec,
 } from "../utils/filterUtils";
 import { foldForSearch } from "../utils/textSearch";
-import IndexStatus from "../components/IndexStatus";
 // Lazy-load the two content-area takeover pages — Settings is 4 000+ lines
 // (the biggest single module in the bundle) and WebUsers is admin-only.
 // Splitting them out shaves ~30 KB gzipped off the Library hot path.
@@ -70,6 +69,8 @@ import SkeletonGrid from "../components/SkeletonGrid";
 import AlphaJumpRail from "../components/AlphaJumpRail";
 import { buildAlphaIndex, titleSortKey } from "../utils/alphaJump";
 import ThemeToggle from "../components/ThemeToggle";
+import OscataMark from "../components/OscataMark";
+import MobileProgressStrip from "../components/MobileProgressStrip";
 import { AppLanguage, getLocalizedTitle } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
 import { formatBytes } from "../lib/format";
@@ -376,7 +377,6 @@ export default function Library({
     watchProvidersProgress,
     completionSummary,
     dismissCompletion,
-    forceClearIndexing,
     indexError,
     clearIndexError,
     retryIndexing,
@@ -385,6 +385,21 @@ export default function Library({
     clearLog,
     initialLoading,
   } = useIndexing();
+
+  // Drive the brand-mark animation from a body data-attribute so both the
+  // sidebar wordmark and the mobile header logo react without prop drilling.
+  // CSS in shell.css listens for `body[data-oscata-indexing="true"]` and
+  // accelerates the ring rotation.
+  useEffect(() => {
+    if (isIndexing) {
+      document.body.setAttribute("data-oscata-indexing", "true");
+    } else {
+      document.body.removeAttribute("data-oscata-indexing");
+    }
+    return () => {
+      document.body.removeAttribute("data-oscata-indexing");
+    };
+  }, [isIndexing]);
   const { quitDialogVisible, activeCount, confirmQuit, cancelQuit } =
     useQuitHandler();
   const { startDownload, isDownloadPending } = useDownload();
@@ -756,7 +771,6 @@ export default function Library({
 
   const runRematchAll = async () => {
     setRematching(true);
-    if (showDevLog) setShowLog(true);
     setShowActionsMenu(false);
     try {
       await call("rematch_all");
@@ -768,7 +782,6 @@ export default function Library({
   };
 
   const runRefreshRatings = async () => {
-    if (showDevLog) setShowLog(true);
     setShowActionsMenu(false);
     try {
       await call("refresh_all_ratings");
@@ -779,7 +792,6 @@ export default function Library({
 
   const runRematchAllPlex = async () => {
     setRematching(true);
-    if (showDevLog) setShowLog(true);
     setShowActionsMenu(false);
     try {
       // Uses the backend rematch flow, which now tries Plex->IMDb->TMDB fallback.
@@ -811,7 +823,6 @@ export default function Library({
     )
       return;
     setClearingAll(true);
-    if (showDevLog) setShowLog(true);
     setShowActionsMenu(false);
     try {
       await call("clear_all_metadata");
@@ -825,7 +836,6 @@ export default function Library({
 
   const refreshAllMetadata = async () => {
     setRefreshingMetadata(true);
-    if (showDevLog) setShowLog(true);
     setShowActionsMenu(false);
     try {
       await call("refresh_all_metadata");
@@ -1937,6 +1947,65 @@ export default function Library({
               : t(language, "toast.scanning")
           : `${items.length} ${language === "es" ? "elementos" : "items"}`,
       }}
+      // Inline progress for background refreshes — replaces the floating
+      // bottom-right pills. Each surfaces in the status-bar center slot
+      // (with priority: indexing > meta > ratings) so we never have more
+      // than one progress indicator visible at a time, and never floating
+      // over the page content.
+      metaRefresh={
+        metaRefreshProgress
+          ? {
+              label: t(language, "metaRefresh.banner", {
+                done: metaRefreshProgress.done,
+                total: metaRefreshProgress.total,
+              }),
+              done: metaRefreshProgress.done,
+              total: metaRefreshProgress.total,
+            }
+          : null
+      }
+      ratingsRefresh={
+        ratingsRefresh.state === "running"
+          ? {
+              label: t(language, "ratings.banner", {
+                done: ratingsRefresh.done,
+                total: ratingsRefresh.total,
+              }),
+              done: ratingsRefresh.done,
+              total: ratingsRefresh.total,
+            }
+          : null
+      }
+      watchProvidersRefresh={
+        watchProvidersProgress
+          ? {
+              label: t(language, "watchProviders.banner", {
+                done: watchProvidersProgress.done,
+                total: watchProvidersProgress.total,
+              }),
+              done: watchProvidersProgress.done,
+              total: watchProvidersProgress.total,
+            }
+          : null
+      }
+      // Inline success flash — replaces the floating "INDEXACIÓN COMPLETA"
+      // toast. The status bar shows a brief green chip in the same slot
+      // for ~4s, then reverts to the item-count label. Same intent, zero
+      // overlap with page content.
+      completionFlash={
+        completionSummary && !isIndexing
+          ? {
+              label: t(language, "toast.indexComplete"),
+              sublabel:
+                completionSummary.newItems > 0
+                  ? t(language, "toast.newItemsAdded", {
+                      count: completionSummary.newItems,
+                    })
+                  : t(language, "toast.noNewItems"),
+            }
+          : null
+      }
+      onCompletionFlashClear={dismissCompletion}
       transfers={{
         downloads: tabCounts.downloads ?? 0,
         uploads: tabCounts.uploads ?? 0,
@@ -2004,36 +2073,19 @@ export default function Library({
           isolation: "isolate",
         }}
       >
-        {/* Logo */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            marginRight: 8,
-          }}
+        {/* Logo — mirrors the desktop sidebar wordmark (`oscata-mark` + "scata"
+            text). Sharing the same `.shell-sidebar-wordmark` class keeps the
+            sizing, gap, gradient, and animation consistent across surfaces.
+            Rotation speed reacts to the indexing state via
+            body[data-oscata-indexing="true"] — see shell.css. */}
+        <span
+          className="shell-sidebar-wordmark"
+          aria-label="Oscata"
+          style={{ marginRight: 8 }}
         >
-          <span
-            style={{
-              color: "var(--color-text)",
-              fontWeight: 700,
-              fontSize: 17,
-              letterSpacing: "0.06em",
-            }}
-          >
-            OSCATA
-          </span>
-          <span
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
-              background: "var(--color-primary)",
-              display: "inline-block",
-              flexShrink: 0,
-            }}
-          />
-        </div>
+          <OscataMark size={22} />
+          <span>scata</span>
+        </span>
 
         {/* Nav pills — hidden on mobile (tabs move to bottom bar) */}
         {!isMobile && (
@@ -2311,6 +2363,80 @@ export default function Library({
           </button>
         </div>
       </nav>)}
+
+      {/* MOBILE PROGRESS STRIP — equivalent of the desktop status bar
+          (hidden on mobile via display:none) for indexing / metaRefresh /
+          ratingsRefresh / completion feedback. Sits directly below the
+          mobile top navbar so it doesn't compete with content. */}
+      {isMobile && (
+        <MobileProgressStrip
+          indexing={{
+            isActive: isIndexing,
+            progress,
+            label: progress
+              ? t(language, "toast.enriching", {
+                  current: progress.current,
+                  total: progress.total,
+                })
+              : tmdbProgress
+                ? t(language, "toast.tmdbOf", {
+                    done: tmdbProgress.done,
+                    total: tmdbProgress.total,
+                  })
+                : t(language, "toast.scanning"),
+          }}
+          metaRefresh={
+            metaRefreshProgress
+              ? {
+                  label: t(language, "metaRefresh.banner", {
+                    done: metaRefreshProgress.done,
+                    total: metaRefreshProgress.total,
+                  }),
+                  done: metaRefreshProgress.done,
+                  total: metaRefreshProgress.total,
+                }
+              : null
+          }
+          ratingsRefresh={
+            ratingsRefresh.state === "running"
+              ? {
+                  label: t(language, "ratings.banner", {
+                    done: ratingsRefresh.done,
+                    total: ratingsRefresh.total,
+                  }),
+                  done: ratingsRefresh.done,
+                  total: ratingsRefresh.total,
+                }
+              : null
+          }
+          watchProvidersRefresh={
+            watchProvidersProgress
+              ? {
+                  label: t(language, "watchProviders.banner", {
+                    done: watchProvidersProgress.done,
+                    total: watchProvidersProgress.total,
+                  }),
+                  done: watchProvidersProgress.done,
+                  total: watchProvidersProgress.total,
+                }
+              : null
+          }
+          completionFlash={
+            completionSummary && !isIndexing
+              ? {
+                  label: t(language, "toast.indexComplete"),
+                  sublabel:
+                    completionSummary.newItems > 0
+                      ? t(language, "toast.newItemsAdded", {
+                          count: completionSummary.newItems,
+                        })
+                      : t(language, "toast.noNewItems"),
+                }
+              : null
+          }
+          onCompletionFlashClear={dismissCompletion}
+        />
+      )}
 
       {/* BOTTOM TAB BAR — mobile only */}
       {isMobile && (
@@ -3607,175 +3733,11 @@ export default function Library({
         )}
       </div>
 
-      <IndexStatus
-        progress={progress}
-        isIndexing={isIndexing}
-        completionSummary={completionSummary}
-        onDismissCompletion={dismissCompletion}
-        onCancelIndex={forceClearIndexing}
-        activityLogOpen={showLog}
-        language={language}
-        tmdbProgress={tmdbProgress}
-        isMobile={isMobile}
-      />
-      {metaRefreshProgress !== null && !isIndexing && (
-        <div
-          style={{
-            position: "fixed",
-            left: 18,
-            bottom: isMobile
-              ? "calc(64px + env(safe-area-inset-bottom, 0px) + 22px)"
-              : 22,
-            zIndex: 52,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "0.6rem 0.85rem",
-            borderRadius: 999,
-            border: "1px solid var(--color-border)",
-            background: "var(--color-surface)",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
-            fontSize: 12,
-            color: "var(--color-text-muted)",
-            fontWeight: 600,
-          }}
-        >
-          <div
-            style={{
-              width: 80,
-              height: 4,
-              borderRadius: 999,
-              overflow: "hidden",
-              background: "var(--color-surface-2)",
-            }}
-          >
-            <div
-              style={{
-                width: `${Math.min(100, Math.round((metaRefreshProgress.done / metaRefreshProgress.total) * 100))}%`,
-                height: "100%",
-                background: "var(--color-primary)",
-                transition: "width 0.3s ease",
-              }}
-            />
-          </div>
-          <span>
-            {t(language, "metaRefresh.banner", {
-              done: metaRefreshProgress.done,
-              total: metaRefreshProgress.total,
-            })}
-          </span>
-        </div>
-      )}
-      {watchProvidersProgress !== null && !isIndexing && (
-        <div
-          style={{
-            position: "fixed",
-            left: 18,
-            // Stack above the metadata-refresh banner when both are visible.
-            bottom: isMobile
-              ? metaRefreshProgress !== null
-                ? "calc(64px + env(safe-area-inset-bottom, 0px) + 64px)"
-                : "calc(64px + env(safe-area-inset-bottom, 0px) + 22px)"
-              : metaRefreshProgress !== null
-                ? 64
-                : 22,
-            zIndex: 52,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "0.6rem 0.85rem",
-            borderRadius: 999,
-            border: "1px solid var(--color-border)",
-            background: "var(--color-surface)",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
-            fontSize: 12,
-            color: "var(--color-text-muted)",
-            fontWeight: 600,
-          }}
-        >
-          <div
-            style={{
-              width: 80,
-              height: 4,
-              borderRadius: 999,
-              overflow: "hidden",
-              background: "var(--color-surface-2)",
-            }}
-          >
-            <div
-              style={{
-                width: `${Math.min(100, Math.round((watchProvidersProgress.done / watchProvidersProgress.total) * 100))}%`,
-                height: "100%",
-                background: "var(--color-primary)",
-                transition: "width 0.3s ease",
-              }}
-            />
-          </div>
-          <span>
-            {t(language, "watchProviders.banner", {
-              done: watchProvidersProgress.done,
-              total: watchProvidersProgress.total,
-            })}
-          </span>
-        </div>
-      )}
-      {ratingsRefresh.state === "running" && (
-        <div
-          style={{
-            position: "fixed",
-            left: 18,
-            bottom: isMobile
-              ? "calc(64px + env(safe-area-inset-bottom, 0px) + 64px)"
-              : 64,
-            zIndex: 52,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "0.6rem 0.85rem",
-            borderRadius: 999,
-            border: "1px solid var(--color-border)",
-            background: "var(--color-surface)",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
-            fontSize: 12,
-            color: "var(--color-text-muted)",
-            fontWeight: 600,
-          }}
-        >
-          <div
-            style={{
-              width: 80,
-              height: 4,
-              borderRadius: 999,
-              overflow: "hidden",
-              background: "var(--color-surface-2)",
-            }}
-          >
-            <div
-              style={{
-                width: `${
-                  ratingsRefresh.total > 0
-                    ? Math.min(
-                        100,
-                        Math.round(
-                          (ratingsRefresh.done / ratingsRefresh.total) * 100,
-                        ),
-                      )
-                    : 0
-                }%`,
-                height: "100%",
-                background: "var(--color-primary)",
-                transition: "width 0.3s ease",
-              }}
-            />
-          </div>
-          <span>
-            {t(language, "ratings.banner", {
-              done: ratingsRefresh.done,
-              total: ratingsRefresh.total,
-            })}
-          </span>
-        </div>
-      )}
+      {/* Indexing progress, metadata-refresh progress, ratings-refresh progress,
+          watch-providers backfill progress, and the post-indexing completion
+          summary all render inline in the AppStatusBar (desktop) and
+          MobileProgressStrip (mobile) — no floating cards that could cover
+          page content or sidebar actions. */}
       <DownloadFeedbackToast
         language={language}
         onGoToDownloads={() => switchTab("downloads")}

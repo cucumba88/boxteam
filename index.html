@@ -13,6 +13,13 @@
     />
     <meta name="theme-color" content="#7c6ef7" />
     <meta name="color-scheme" content="dark light" />
+    <!-- iOS standalone-app metadata: hides the Safari chrome when launched
+         from the home screen, and tells iOS the status bar should adopt the
+         dark app background instead of the default white. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Oscata" />
     <!-- PWA manifest -->
     <link rel="manifest" href="/api/manifest.webmanifest" />
     <!-- Icons -->
@@ -22,7 +29,26 @@
       sizes="128x128"
       href="/icons/icon-128.png"
     />
-    <link rel="apple-touch-icon" href="/icons/icon-256.png" />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="192x192"
+      href="/icons/icon-192.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="512x512"
+      href="/icons/icon-512.png"
+    />
+    <!-- iOS uses apple-touch-icon for the home-screen tile. 180×180 is the
+         current iPhone size; iOS will round its corners itself, so the PNG
+         must fill the full canvas with no inner safe-area padding (otherwise
+         the glyph looks too small inside the iOS-applied squircle). -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="256x256" href="/icons/icon-256.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
     <!-- Open Graph -->
     <meta property="og:title" content="Oscata" />
     <meta
