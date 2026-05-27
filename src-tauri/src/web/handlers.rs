@@ -677,6 +677,20 @@ pub async fn refresh_all_metadata_handler(
     Ok(Json(serde_json::json!({"ok": true, "message": "Metadata refresh started"})))
 }
 
+pub async fn refresh_watch_providers_handler(
+    AuthUser(_u): AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Value>> {
+    let db = state.db.clone();
+    let window = state.app_handle.get_webview_window("main");
+    tauri::async_runtime::spawn(async move {
+        crate::commands::refresh_watch_providers_internal(db, window)
+            .await
+            .ok();
+    });
+    Ok(Json(serde_json::json!({"ok": true, "message": "Streaming providers refresh started"})))
+}
+
 pub async fn indexing_status_handler(
     AuthUser(_u): AuthUser,
     State(state): State<AppState>,

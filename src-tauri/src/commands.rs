@@ -1540,6 +1540,7 @@ pub async fn rematch_all_internal(
                     "tmdb_overview": movie.overview,
                     "tmdb_overview_en": movie.overview_en,
                     "tmdb_genres": movie.genre_ids,
+                    "tmdb_watch_providers": movie.watch_providers,
                     "tmdb_release_date": movie.release_date,
                     "tmdb_type": actual_type,
                     "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
@@ -1767,6 +1768,7 @@ pub async fn start_indexing_internal(
                                         "tmdb_overview": movie.overview,
                                         "tmdb_overview_en": movie.overview_en,
                                         "tmdb_genres": movie.genre_ids,
+                    "tmdb_watch_providers": movie.watch_providers,
                                         "tmdb_release_date": movie.release_date,
                                         "tmdb_type": actual_type,
                                         "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
@@ -2283,6 +2285,7 @@ pub async fn refresh_all_metadata_internal(
                             "tmdb_overview": movie.overview,
                             "tmdb_overview_en": movie.overview_en,
                             "tmdb_genres": movie.genre_ids,
+                    "tmdb_watch_providers": movie.watch_providers,
                             "tmdb_release_date": movie.release_date,
                             "tmdb_type": actual_type,
                             "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
@@ -2338,6 +2341,7 @@ pub async fn refresh_all_metadata_internal(
                         "tmdb_overview": movie.overview,
                         "tmdb_overview_en": movie.overview_en,
                         "tmdb_genres": movie.genre_ids,
+                    "tmdb_watch_providers": movie.watch_providers,
                         "tmdb_release_date": movie.release_date,
                         "tmdb_type": media_type,
                         "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
@@ -2369,6 +2373,120 @@ pub async fn refresh_all_metadata_internal(
         format!("✓ Metadata refresh complete — {} items processed", total),
     );
     Ok(())
+}
+
+/// On-demand backfill: fetch TMDB watch-provider data for every TMDB-matched
+/// row that doesn't have it yet. Cheap-per-item (one HTTP call) but uses the
+/// shared TMDB throttle, so a 4 000-row library takes a couple of minutes.
+#[tauri::command]
+pub async fn refresh_watch_providers(
+    state: tauri::State<'_, crate::db::Db>,
+    window: WebviewWindow,
+) -> Result<RefreshProvidersSummary, String> {
+    refresh_watch_providers_internal(state.inner().clone(), Some(window)).await
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RefreshProvidersSummary {
+    pub total: usize,
+    pub updated: usize,
+    pub failed: usize,
+}
+
+pub async fn refresh_watch_providers_internal(
+    db: crate::db::Db,
+    window: Option<tauri::WebviewWindow>,
+) -> Result<RefreshProvidersSummary, String> {
+    let config = db.load_config()?;
+    if config.tmdb_api_key.trim().is_empty() {
+        return Err("TMDB API key not configured".to_string());
+    }
+
+    // Group by (tmdb_id, media_type) so a 60-episode show makes 1 API call,
+    // not 60. The bulk update propagates the result to every row sharing the
+    // tmdb_id — fixing the prior inconsistency where some episodes of a show
+    // ended up with provider data and others NULL after a partial-failure run.
+    let pending = db.list_tmdb_ids_needing_watch_providers()?;
+    let total = pending.len();
+    emit_index_log(
+        &window,
+        format!("🔄 Refreshing streaming platforms for {} titles…", total),
+    );
+
+    if let Some(ref w) = window {
+        w.emit(
+            "watch_providers:refresh_progress",
+            serde_json::json!({ "done": 0, "total": total }),
+        )
+        .ok();
+    }
+
+    let mut updated_rows = 0usize;
+    let mut failed = 0usize;
+
+    for (i, (tmdb_id, tmdb_type)) in pending.into_iter().enumerate() {
+        let media_type = if tmdb_type == "tv" { "tv" } else { "movie" };
+        match crate::tmdb::fetch_watch_providers(&config.tmdb_api_key, tmdb_id, media_type).await {
+            Ok(providers) => {
+                match db.update_watch_providers_by_tmdb_id(tmdb_id, &providers) {
+                    Ok(affected_ids) => {
+                        updated_rows += affected_ids.len();
+                        if let Some(ref w) = window {
+                            for id in affected_ids {
+                                w.emit(
+                                    "index:update",
+                                    serde_json::json!({
+                                        "id": id,
+                                        "tmdb_watch_providers": providers,
+                                    }),
+                                )
+                                .ok();
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        failed += 1;
+                        emit_index_log(
+                            &window,
+                            format!(
+                                "⚠ Failed to persist providers for tmdb_id {}: {}",
+                                tmdb_id, err
+                            ),
+                        );
+                    }
+                }
+            }
+            Err(err) => {
+                failed += 1;
+                emit_index_log(
+                    &window,
+                    format!("⚠ Providers fetch failed for tmdb_id {}: {}", tmdb_id, err),
+                );
+            }
+        }
+
+        if let Some(ref w) = window {
+            w.emit(
+                "watch_providers:refresh_progress",
+                serde_json::json!({ "done": i + 1, "total": total }),
+            )
+            .ok();
+        }
+    }
+
+    emit_index_log(
+        &window,
+        format!(
+            "✓ Streaming platform refresh complete — {} rows updated across {} titles, {} failed",
+            updated_rows, total, failed
+        ),
+    );
+
+    Ok(RefreshProvidersSummary {
+        total,
+        updated: updated_rows,
+        failed,
+    })
 }
 
 #[tauri::command]
@@ -2558,6 +2676,7 @@ pub async fn apply_tmdb_match(
             "tmdb_overview": movie.overview,
             "tmdb_overview_en": movie.overview_en,
             "tmdb_genres": movie.genre_ids,
+            "tmdb_watch_providers": movie.watch_providers,
             "tmdb_release_date": movie.release_date,
             "tmdb_type": media_type,
         }),

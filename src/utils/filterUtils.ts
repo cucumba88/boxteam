@@ -5,6 +5,8 @@ export interface Filters {
   hdr: string;
   codec: string;
   genre: string;
+  /** TMDB watch-provider id as string (e.g. "8" for Netflix). */
+  platform: string;
   sort: string;
 }
 

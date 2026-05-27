@@ -34,6 +34,7 @@ export interface MediaItem {
   tmdb_overview?: string;
   tmdb_overview_en?: string;
   tmdb_genres?: number[] | string;
+  tmdb_watch_providers?: number[] | string;
   indexed_at?: string;
   metadata_at?: string;
   imdb_rating?: number;
@@ -201,7 +202,15 @@ export function useIndexing() {
           const index = itemIndexRef.current.get(payload.id);
           if (index == null) return prev;
           const next = prev.slice();
-          next[index] = { ...next[index], ...payload };
+          // Drop null fields so a partial event (e.g. a search-result match
+          // that doesn't carry watch_providers) can't wipe data we already
+          // have in memory. The DB layer already uses COALESCE / CASE to
+          // preserve those columns; this mirrors that semantic on the wire.
+          const patch: Partial<MediaItem> = {};
+          for (const [k, v] of Object.entries(payload)) {
+            if (v !== null) (patch as Record<string, unknown>)[k] = v;
+          }
+          next[index] = { ...next[index], ...patch };
           return next;
         });
       },
@@ -310,7 +319,13 @@ export function useIndexing() {
           const index = itemIndexRef.current.get(p.id as number);
           if (index == null) return prev;
           const next = prev.slice();
-          next[index] = { ...next[index], ...(p as Partial<MediaItem>) };
+          // Same null-drop guard as the Tauri listener above — partial events
+          // must not wipe fields that the sender didn't fetch on this path.
+          const patch: Partial<MediaItem> = {};
+          for (const [k, v] of Object.entries(p as Partial<MediaItem>)) {
+            if (v !== null) (patch as Record<string, unknown>)[k] = v;
+          }
+          next[index] = { ...next[index], ...patch };
           return next;
         });
       } else if (event === "ratings:complete") {

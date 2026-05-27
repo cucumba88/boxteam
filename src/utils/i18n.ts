@@ -55,6 +55,14 @@ const messages = {
     es: "Actualizando metadatos…",
     en: "Refreshing metadata…",
   },
+  "library.refreshWatchProviders": {
+    es: "Actualizar plataformas de streaming",
+    en: "Refresh Streaming Platforms",
+  },
+  "library.refreshingWatchProviders": {
+    es: "Actualizando plataformas…",
+    en: "Refreshing platforms…",
+  },
   "library.matching": { es: "Re-haciendo match…", en: "Re-matching…" },
   "library.rematchAllPlex": {
     es: "Re-hacer match (flujo Plex)",
@@ -151,6 +159,9 @@ const messages = {
   "filter.hdr.dolbyVision": { es: "Dolby Vision", en: "Dolby Vision" },
   "filter.genre": { es: "Género", en: "Genre" },
   "filter.allGenres": { es: "Todos los géneros", en: "All genres" },
+  "filter.platform": { es: "Plataforma", en: "Platform" },
+  "filter.allPlatforms": { es: "Todas las plataformas", en: "All platforms" },
+  "detail.availableOn": { es: "Disponible en", en: "Available on" },
 
   "detail.details": { es: "Detalles", en: "Details" },
   "detail.fileInfo": { es: "Archivo", en: "File Info" },

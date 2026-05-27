@@ -67,6 +67,7 @@ const WEB_ROUTES: Record<
   get_indexing_status: ["GET", "/indexing/status"],
   rematch_all: ["POST", "/indexing/rematch"],
   refresh_all_metadata: ["POST", "/indexing/refresh-metadata"],
+  refresh_watch_providers: ["POST", "/indexing/refresh-watch-providers"],
   clear_item_metadata: (a) => ["DELETE", `/media/${a.id}/metadata`],
   clear_all_metadata: ["POST", "/media/clear-all-metadata"],
   check_media_badges: (a) => ["POST", "/media/badges", { items: a.items }],

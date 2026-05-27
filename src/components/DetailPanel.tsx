@@ -21,6 +21,8 @@ import {
 } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
 import { GENRE_MAP } from "../utils/genres";
+import { PROVIDER_BY_ID, parseProviders } from "../utils/providers";
+import PlatformLogo from "./PlatformLogo";
 import { formatBytes } from "../lib/format";
 import {
   allAvailableRatings,
@@ -138,6 +140,9 @@ export default function DetailPanel({
       .filter(Boolean)
       .map((key) => t(language, key as never));
   })();
+  const watchProviders = parseProviders(item.tmdb_watch_providers).filter((id) =>
+    PROVIDER_BY_ID.has(id),
+  );
   const searchTitle =
     item.tmdb_title_en ?? item.tmdb_title ?? item.title ?? title;
   const searchQuery = [
@@ -377,6 +382,24 @@ export default function DetailPanel({
                   {g}
                 </span>
               ))}
+              {watchProviders.map((id) => {
+                const provider = PROVIDER_BY_ID.get(id);
+                if (!provider) return null;
+                return (
+                  <span
+                    key={`provider-${id}`}
+                    title={`${t(language, "detail.availableOn")} ${provider.name}`}
+                    style={{
+                      ...metaPill,
+                      gap: 5,
+                      color: "var(--color-text)",
+                    }}
+                  >
+                    <PlatformLogo providerId={id} size={13} />
+                    <span>{provider.name}</span>
+                  </span>
+                );
+              })}
               {devBadge?.plexInLibrary && (
                 <span
                   title="In Plex"

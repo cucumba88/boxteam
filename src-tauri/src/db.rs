@@ -175,6 +175,8 @@ pub struct MediaItem {
     pub tmdb_rating: Option<f64>,
     #[serde(serialize_with = "serialize_genres")]
     pub tmdb_genres: Option<String>,
+    #[serde(serialize_with = "serialize_genres")]
+    pub tmdb_watch_providers: Option<String>,
     pub indexed_at: Option<String>,
     pub metadata_at: Option<String>,
     #[serde(skip_serializing)]
@@ -589,6 +591,9 @@ impl Db {
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN tvdb_id INTEGER;").ok();
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN tvdb_rating REAL;").ok();
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN ratings_fetched_at TEXT;").ok();
+        // Streaming-platform availability: JSON array of TMDB watch-provider IDs
+        // (flatrate / subscription) for the configured region. See tmdb::fetch_watch_providers.
+        conn.execute_batch("ALTER TABLE media_items ADD COLUMN tmdb_watch_providers TEXT;").ok();
         // Web GUI auth tables
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS web_users (
@@ -2286,7 +2291,7 @@ impl Db {
                 "UPDATE media_items SET
                     tmdb_id=NULL, imdb_id=NULL, tmdb_type=NULL, tmdb_title=NULL, tmdb_year=NULL,
                     tmdb_title_en=NULL, tmdb_release_date=NULL, tmdb_overview=NULL, tmdb_overview_en=NULL, tmdb_poster=NULL, tmdb_poster_en=NULL,
-                    tmdb_rating=NULL, tmdb_genres=NULL, metadata_at=NULL, manual_match=0
+                    tmdb_rating=NULL, tmdb_genres=NULL, tmdb_watch_providers=NULL, metadata_at=NULL, manual_match=0
                  WHERE id=?1",
                 params![id],
             )
@@ -2318,12 +2323,21 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
         let genres = serde_json::to_string(&movie.genre_ids).ok();
+        // None = not fetched on this path (e.g. search result); preserve existing column.
+        // Some(vec) = explicit value; overwrite (including with []).
+        let providers_json: Option<String> = movie
+            .watch_providers
+            .as_ref()
+            .and_then(|p| serde_json::to_string(p).ok());
+        let providers_known: bool = movie.watch_providers.is_some();
         conn.execute(
             "UPDATE media_items SET
                 tmdb_id=?1, imdb_id=?2, tmdb_type=?3, tmdb_title=?4, tmdb_title_en=?5, tmdb_year=?6,
                 tmdb_release_date=?7, tmdb_overview=?8, tmdb_overview_en=?9, tmdb_poster=?10, tmdb_poster_en=?11,
-                tmdb_rating=?12, tmdb_genres=?13, metadata_at=?14, manual_match=?15
-             WHERE id=?16",
+                tmdb_rating=?12, tmdb_genres=?13,
+                tmdb_watch_providers = CASE WHEN ?14 = 1 THEN ?15 ELSE tmdb_watch_providers END,
+                metadata_at=?16, manual_match=?17
+             WHERE id=?18",
             params![
                 movie.id,
                 movie.imdb_id,
@@ -2338,6 +2352,8 @@ impl Db {
                 movie.poster_path_en,
                 movie.vote_average,
                 genres,
+                if providers_known { 1 } else { 0 },
+                providers_json,
                 now,
                 if manual_match { 1 } else { 0 },
                 id,
@@ -2345,6 +2361,58 @@ impl Db {
         )
         .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// Distinct (tmdb_id, tmdb_type) groups that still need watch-provider
+    /// data — i.e. at least one row with that tmdb_id has NULL providers.
+    /// Grouping in SQL turns a 60-episode show into one TMDB call instead of
+    /// 60. Drives the "Refrescar plataformas" backfill flow.
+    pub fn list_tmdb_ids_needing_watch_providers(
+        &self,
+    ) -> Result<Vec<(i64, String)>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT tmdb_id, COALESCE(tmdb_type, media_type, 'movie')
+                 FROM media_items
+                 WHERE tmdb_id IS NOT NULL AND tmdb_watch_providers IS NULL
+                 GROUP BY tmdb_id, COALESCE(tmdb_type, media_type, 'movie')",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+
+    /// Write the same provider list to every row sharing a tmdb_id. Returns
+    /// the affected row ids so the caller can emit per-row update events
+    /// (the frontend keys its in-memory state by row id).
+    pub fn update_watch_providers_by_tmdb_id(
+        &self,
+        tmdb_id: i64,
+        providers: &[i64],
+    ) -> Result<Vec<i64>, String> {
+        let conn = self.conn.lock().unwrap();
+        let json = serde_json::to_string(providers).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE media_items SET tmdb_watch_providers = ?1 WHERE tmdb_id = ?2",
+            params![json, tmdb_id],
+        )
+        .map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id FROM media_items WHERE tmdb_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let ids = stmt
+            .query_map(params![tmdb_id], |row| row.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(ids)
     }
 
     pub fn update_tmdb_auto(
@@ -2415,7 +2483,7 @@ impl Db {
             .prepare("SELECT id, ftp_path, filename, size_bytes, title, year, season, episode, episode_end, \
                       resolution, codec, audio_codec, languages, hdr, release_type, release_group, \
                       media_type, tmdb_id, imdb_id, tmdb_type, tmdb_title, tmdb_title_en, tmdb_year, tmdb_release_date, \
-                      tmdb_overview, tmdb_overview_en, tmdb_poster, tmdb_poster_en, tmdb_rating, tmdb_genres, indexed_at, metadata_at, manual_match, \
+                      tmdb_overview, tmdb_overview_en, tmdb_poster, tmdb_poster_en, tmdb_rating, tmdb_genres, tmdb_watch_providers, indexed_at, metadata_at, manual_match, \
                       imdb_rating, imdb_votes, tvdb_id, tvdb_rating, ratings_fetched_at \
                       FROM media_items ORDER BY COALESCE(tmdb_title, title, filename)")
             .map_err(|e| e.to_string())?;
@@ -2453,14 +2521,15 @@ impl Db {
                     tmdb_poster_en: row.get(27)?,
                     tmdb_rating: row.get(28)?,
                     tmdb_genres: row.get(29)?,
-                    indexed_at: row.get(30)?,
-                    metadata_at: row.get(31)?,
-                    manual_match: row.get(32)?,
-                    imdb_rating: row.get(33)?,
-                    imdb_votes: row.get(34)?,
-                    tvdb_id: row.get(35)?,
-                    tvdb_rating: row.get(36)?,
-                    ratings_fetched_at: row.get(37)?,
+                    tmdb_watch_providers: row.get(30)?,
+                    indexed_at: row.get(31)?,
+                    metadata_at: row.get(32)?,
+                    manual_match: row.get(33)?,
+                    imdb_rating: row.get(34)?,
+                    imdb_votes: row.get(35)?,
+                    tvdb_id: row.get(36)?,
+                    tvdb_rating: row.get(37)?,
+                    ratings_fetched_at: row.get(38)?,
                 })
             })
             .map_err(|e| e.to_string())?
@@ -2508,7 +2577,7 @@ impl Db {
             "UPDATE media_items SET
                 tmdb_id=NULL, imdb_id=NULL, tmdb_type=NULL, tmdb_title=NULL, tmdb_year=NULL,
                 tmdb_title_en=NULL, tmdb_release_date=NULL, tmdb_overview=NULL, tmdb_overview_en=NULL, tmdb_poster=NULL, tmdb_poster_en=NULL,
-                tmdb_rating=NULL, tmdb_genres=NULL, metadata_at=NULL
+                tmdb_rating=NULL, tmdb_genres=NULL, tmdb_watch_providers=NULL, metadata_at=NULL
              WHERE COALESCE(manual_match, 0) = 0",
             [],
         )
