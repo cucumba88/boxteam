@@ -313,6 +313,13 @@ pub fn run() {
 
             let db = app.state::<db::Db>().inner().clone();
             let queue = app.state::<downloads::SharedQueue>().inner().clone();
+            // Apply the DB-stored max_concurrent_downloads to the runtime semaphore.
+            // Without this, the queue is stuck at the hardcoded default (2) until the
+            // user explicitly opens Settings and clicks Save — which means wizard-set
+            // values and any prior preference are silently ignored across restarts.
+            if let Ok(cfg) = db.load_config() {
+                queue.lock().unwrap().update_concurrent(cfg.max_concurrent_downloads as usize);
+            }
             // Spawn WEBGUI HTTP server if enabled in config
             web::spawn_if_enabled(db.clone(), queue.clone(), app.handle().clone());
             let current_version = app.package_info().version.to_string();

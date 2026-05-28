@@ -102,6 +102,9 @@ export default function StepConfirm({
     try {
       const seeded = await invoke<boolean>("seed_starter_library");
       await invoke("save_config", { config });
+      await invoke("set_max_concurrent", {
+        max: config.max_concurrent_downloads ?? 2,
+      });
       onComplete({ startIndexing: !seeded });
     } catch (error: unknown) {
       setErrorMsg(String(error));
