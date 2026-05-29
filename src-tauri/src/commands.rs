@@ -3159,6 +3159,20 @@ pub async fn trigger_watchlist_auto_downloads(
         scored.sort_by(|a, b| b.0.cmp(&a.0));
         let item = &group[scored[0].1];
 
+        // Stable, root-independent identity for grab-history dedup.
+        let rel = item.ftp_relative_path.clone().unwrap_or_else(|| {
+            crate::db::Db::compute_relative_path(&item.ftp_path, &config.ftp_root)
+        });
+
+        // Skip if this release was already auto-grabbed in a previous run.
+        // This is the primary guard against re-downloading the whole watchlist
+        // after a version upgrade (when recomputed paths or moved files would
+        // otherwise defeat the `local_path.exists()` check below).
+        if db.is_watchlist_grabbed(&rel).unwrap_or(false) {
+            println!("[watchlist] auto-download: '{}' already grabbed previously, skipping", item.filename);
+            continue;
+        }
+
         // Skip if already Queued or Downloading
         {
             let q = queue.lock().unwrap();
@@ -3205,6 +3219,10 @@ pub async fn trigger_watchlist_auto_downloads(
         };
 
         persist_download_state(&db, &queue);
+
+        // Record the grab so this release is never auto-downloaded again, even
+        // if the file is later moved/deleted or its computed path changes.
+        db.record_watchlist_grab(&rel, &item.ftp_path, item.tmdb_id, &item.filename).ok();
 
         if let Some(ref w) = window {
             let q = queue.lock().unwrap();

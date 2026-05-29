@@ -303,6 +303,7 @@ pub struct WatchlistAutoItem {
     pub profile_id: i64,  // from watchlist.profile_id
     pub season: Option<i64>,
     pub episode: Option<i64>,
+    pub ftp_relative_path: Option<String>,
 }
 
 
@@ -742,6 +743,29 @@ impl Db {
              WHERE profile_id = 1;",
         ).ok();
 
+        // Globalize the watchlist onto the shared house account (user_id=0).
+        //
+        // Up to and including v0.8.12 the web handlers stored watchlist rows
+        // under the logged-in web user's id (`u.id`). The v0.8.13 UX revamp
+        // (commit 18ae102) switched every handler to the shared `user_id=0`
+        // "house account", but never migrated the existing per-user rows. Those
+        // orphaned rows became invisible to `get_watchlist(0)` and unremovable
+        // via `remove_watchlist_item(id, 0)` — yet the auto-download scanner
+        // reads the whole table, so they kept getting re-downloaded forever
+        // (the "old already-removed items keep downloading" bug).
+        //
+        // Fold every non-zero row down to user_id=0. `UPDATE OR IGNORE` skips
+        // rows that would collide with an existing user_id=0 row for the same
+        // tmdb_id (the visible row wins); the follow-up DELETE clears those
+        // now-redundant leftovers. Runs once, guarded by schema_migrations.
+        if !Self::migration_applied(conn, "globalize_watchlist_user_id_v1").unwrap_or(false) {
+            conn.execute_batch(
+                "UPDATE OR IGNORE watchlist SET user_id = 0 WHERE user_id != 0;
+                 DELETE FROM watchlist WHERE user_id != 0;",
+            ).ok();
+            Self::mark_migration_applied(conn, "globalize_watchlist_user_id_v1").ok();
+        }
+
         // Personal Telegram subscription tables
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS telegram_subscriptions (
@@ -766,6 +790,77 @@ impl Db {
             [],
         ).ok();
 
+        // Persistent watchlist grab-history. Keyed on the root-independent
+        // `ftp_relative_path` so it survives FTP-root changes, file moves,
+        // metadata/parser changes, config changes, and version upgrades.
+        // Once a release is auto-grabbed it is recorded here and never
+        // auto-downloaded again — this is what prevents the whole watchlist
+        // from being re-downloaded after an upgrade.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS watchlist_grabbed (
+                ftp_relative_path TEXT PRIMARY KEY,
+                ftp_path          TEXT NOT NULL,
+                tmdb_id           INTEGER,
+                filename          TEXT,
+                grabbed_at        TEXT NOT NULL
+             );",
+        ).ok();
+
+        // One-time backfill: seed grab-history from already-completed downloads
+        // so existing installs don't re-grab their whole watchlist the first
+        // time this version indexes. Best-effort — never aborts startup.
+        if let Err(e) = Self::backfill_watchlist_grabbed(conn) {
+            eprintln!("[watchlist] grab-history backfill skipped: {e}");
+        }
+
+        Ok(())
+    }
+
+    /// Seeds `watchlist_grabbed` from the persisted `downloads_state` completed
+    /// entries. Runs once (guarded by a `schema_migrations` marker). Without
+    /// this, the first index after upgrading to the grab-history version may
+    /// still re-grab files that have since been moved off disk.
+    fn backfill_watchlist_grabbed(conn: &Connection) -> Result<(), String> {
+        let migration_id = "backfill_watchlist_grabbed_v1";
+        if Self::migration_applied(conn, migration_id)? {
+            return Ok(());
+        }
+
+        let state_json: Option<String> = conn
+            .query_row(
+                "SELECT value FROM app_config WHERE key = 'downloads_state'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let ftp_root: String = conn
+            .query_row(
+                "SELECT value FROM app_config WHERE key = 'ftp_root'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| DEFAULT_FTP_ROOT.to_string());
+
+        if let Some(json) = state_json {
+            let items: Vec<crate::downloads::DownloadItem> =
+                serde_json::from_str(&json).map_err(|e| e.to_string())?;
+            let now = chrono::Utc::now().to_rfc3339();
+            for item in items.iter().filter(|i| i.status == crate::downloads::DownloadStatus::Done) {
+                let rel = Self::compute_relative_path(&item.ftp_path, &ftp_root);
+                conn.execute(
+                    "INSERT OR IGNORE INTO watchlist_grabbed
+                        (ftp_relative_path, ftp_path, tmdb_id, filename, grabbed_at)
+                     VALUES (?1, ?2, NULL, ?3, ?4)",
+                    params![rel, item.ftp_path, item.filename, now],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+
+        Self::mark_migration_applied(conn, migration_id)?;
         Ok(())
     }
 
@@ -2939,9 +3034,10 @@ impl Db {
                 "SELECT m.ftp_path, m.filename, m.tmdb_id,
                         m.media_type, m.tmdb_genres, COALESCE(m.tmdb_title, m.title),
                         m.resolution, m.release_type, m.hdr, m.codec, m.audio_codec,
-                        m.size_bytes, w.profile_id, m.season, m.episode
+                        m.size_bytes, w.profile_id, m.season, m.episode, m.ftp_relative_path
                  FROM media_items m
-                 INNER JOIN watchlist w ON w.tmdb_id = m.tmdb_id AND w.auto_download = 1",
+                 INNER JOIN watchlist w
+                    ON w.tmdb_id = m.tmdb_id AND w.auto_download = 1 AND w.user_id = 0",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -2962,6 +3058,7 @@ impl Db {
                     profile_id: row.get(12)?,
                     season: row.get(13)?,
                     episode: row.get(14)?,
+                    ftp_relative_path: row.get(15)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -2970,6 +3067,47 @@ impl Db {
             out.push(row.map_err(|e| e.to_string())?);
         }
         Ok(out)
+    }
+
+    /// Records that a watchlist file has been auto-grabbed, keyed on its
+    /// root-independent relative path. `INSERT OR IGNORE` so repeated calls are
+    /// harmless. See [`is_watchlist_grabbed`].
+    pub fn record_watchlist_grab(
+        &self,
+        ftp_relative_path: &str,
+        ftp_path: &str,
+        tmdb_id: i64,
+        filename: &str,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO watchlist_grabbed
+                (ftp_relative_path, ftp_path, tmdb_id, filename, grabbed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                ftp_relative_path,
+                ftp_path,
+                tmdb_id,
+                filename,
+                chrono::Utc::now().to_rfc3339()
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Returns true if the given relative path has already been auto-grabbed.
+    pub fn is_watchlist_grabbed(&self, ftp_relative_path: &str) -> Result<bool, String> {
+        let conn = self.conn.lock().unwrap();
+        let found: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM watchlist_grabbed WHERE ftp_relative_path = ?1",
+                params![ftp_relative_path],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        Ok(found.is_some())
     }
 
     // ── Quality Profiles ─────────────────────────────────────────────────────
@@ -3389,5 +3527,113 @@ mod tests {
         let removed = db.delete_media_missing_from_scan(&paths).expect("delete_missing");
         assert_eq!(removed, 0);
         assert_eq!(db.get_all_media().expect("get_all_media").len(), 5);
+    }
+
+    // ── watchlist grab-history ──────────────────────────────────────────────
+
+    #[test]
+    fn watchlist_grab_history_records_and_dedups() {
+        let db = in_memory_db();
+        let rel = "Movies/Foo (2020)/foo.mkv";
+
+        // Not grabbed initially.
+        assert!(!db.is_watchlist_grabbed(rel).expect("query"));
+
+        // Record a grab → now recognised.
+        db.record_watchlist_grab(rel, "/Compartida/Movies/Foo (2020)/foo.mkv", 42, "foo.mkv")
+            .expect("record");
+        assert!(db.is_watchlist_grabbed(rel).expect("query"));
+
+        // Recording the same release again is a harmless no-op (PRIMARY KEY / OR IGNORE).
+        db.record_watchlist_grab(rel, "/somewhere/else/foo.mkv", 42, "foo.mkv")
+            .expect("record again");
+        assert!(db.is_watchlist_grabbed(rel).expect("query"));
+
+        // A different release is still eligible (not yet grabbed).
+        assert!(!db
+            .is_watchlist_grabbed("Movies/Bar (2021)/bar.mkv")
+            .expect("query"));
+    }
+
+    #[test]
+    fn auto_download_candidates_only_match_global_user_zero() {
+        let db = in_memory_db();
+        {
+            let conn = db.conn.lock().unwrap();
+            // A media item with a known tmdb_id.
+            conn.execute(
+                "INSERT INTO media_items (ftp_path, filename, tmdb_id, media_type)
+                 VALUES ('/Compartida/Movies/foo.mkv', 'foo.mkv', 4242, 'movie')",
+                [],
+            )
+            .expect("insert media");
+            // An ORPHAN watchlist row under a real web user id (pre-v0.8.13 style).
+            conn.execute(
+                "INSERT INTO watchlist (user_id, tmdb_id, tmdb_type, title, scope, auto_download, profile_id)
+                 VALUES (7, 4242, 'movie', 'Foo', 'all', 1, 1)",
+                [],
+            )
+            .expect("insert orphan watchlist");
+        }
+
+        // Orphan (user_id=7) row must NOT drive auto-download.
+        let candidates = db.get_watchlist_auto_download_candidates().expect("candidates");
+        assert!(
+            candidates.is_empty(),
+            "orphan non-zero user_id watchlist rows must not produce candidates"
+        );
+
+        // The same row on the global house account (user_id=0) DOES match.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("UPDATE watchlist SET user_id = 0 WHERE tmdb_id = 4242", [])
+                .expect("globalize");
+        }
+        let candidates = db.get_watchlist_auto_download_candidates().expect("candidates");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].tmdb_id, 4242);
+    }
+
+    /// End-to-end of the three behaviours requested:
+    /// 1. a watchlisted item is visible on the shared global list (`user_id=0`),
+    /// 2. removing it stops it from ever producing download candidates,
+    /// 3. an item with auto-download disabled never produces candidates.
+    #[test]
+    fn watchlist_global_visibility_removal_and_auto_download_flag() {
+        let db = in_memory_db();
+
+        // A matching indexed file exists for tmdb_id 555.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO media_items (ftp_path, filename, tmdb_id, media_type)
+                 VALUES ('/Compartida/Movies/baz.mkv', 'baz.mkv', 555, 'movie')",
+                [],
+            )
+            .expect("insert media");
+        }
+
+        // (3) auto_download = false → visible but NOT a candidate.
+        let id = db
+            .add_watchlist_item(0, 555, "movie", "Baz", None, None, None, None, None, None,
+                Some(2020), None, "all", false, 1)
+            .expect("add");
+        assert_eq!(db.get_watchlist(0).expect("list").len(), 1, "must be visible on global list");
+        assert!(
+            db.get_watchlist_auto_download_candidates().expect("c").is_empty(),
+            "auto_download=false must never produce candidates"
+        );
+
+        // Enable auto-download → now a candidate.
+        db.update_watchlist_item(id, 0, "all", true, 1).expect("enable");
+        assert_eq!(db.get_watchlist_auto_download_candidates().expect("c").len(), 1);
+
+        // (1)+(2) Remove it → gone from the global list AND no candidates.
+        db.remove_watchlist_item(id, 0).expect("remove");
+        assert!(db.get_watchlist(0).expect("list").is_empty(), "removed for everyone");
+        assert!(
+            db.get_watchlist_auto_download_candidates().expect("c").is_empty(),
+            "removed item must no longer download"
+        );
     }
 }
