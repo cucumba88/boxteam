@@ -160,9 +160,11 @@ docker run -d --name oscata --restart unless-stopped \
 
 - **Full Docker guide:** [`docker/README.md`](docker/README.md) — env vars, reverse proxy, persistent volumes.
 - **Synology (DS920+ and similar):** the J4125 CPU is `x86_64/amd64`, so the
-  image runs natively. Use the Container Manager compose file
-  [`docker/docker-compose.synology.yml`](docker/docker-compose.synology.yml) or
-  the SSH installer [`scripts/synology-install.sh`](scripts/synology-install.sh).
+  image runs natively. Full step-by-step guide (four install methods, reverse
+  proxy, permissions, updates, backups, troubleshooting) in
+  [`docker/SYNOLOGY.md`](docker/SYNOLOGY.md). Quick start: the Container Manager
+  compose file [`docker/docker-compose.synology.yml`](docker/docker-compose.synology.yml)
+  or the SSH installer [`scripts/synology-install.sh`](scripts/synology-install.sh).
 - **Unraid:** community template at [`docker/unraid-template.xml`](docker/unraid-template.xml).
 
 ## Validation commands

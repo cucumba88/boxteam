@@ -22,48 +22,17 @@ La interfaz web queda disponible en `http://localhost:47860`.
 
 El DS920+ lleva un Intel Celeron J4125 (x86_64 / amd64), la misma arquitectura
 para la que se publica la imagen oficial, así que arranca de forma **nativa, sin
-emulación ni recompilar nada**. Con 20 GB de RAM vas sobradísimo: en modo
-headless Oscata consume unos pocos cientos de MB.
+emulación ni recompilar nada**.
 
-Requisitos: **Container Manager** (DSM 7.2+) o el paquete **Docker** (DSM 7.0/7.1).
+👉 **Guía completa paso a paso:** [`docker/SYNOLOGY.md`](SYNOLOGY.md) — cubre los
+cuatro métodos de instalación (Container Manager con Proyecto, contenedor manual,
+script SSH y `docker run`), acceso remoto con proxy inverso + WebSocket, permisos,
+actualizaciones, copias de seguridad y resolución de problemas.
 
-### Opción A — Container Manager (recomendado, sin SSH)
-
-1. Crea una carpeta compartida `docker` en *Panel de control → Carpeta compartida*.
-2. Sube [`docker-compose.synology.yml`](docker-compose.synology.yml) a
-   `/volume1/docker/oscata/docker-compose.yml` y ajusta las dos rutas de `volumes`:
-   - `/volume1/docker/oscata/config` → datos de la app (DB, config, caché).
-   - `/volume1/media` → tu carpeta de descargas/medios real.
-3. *Container Manager → Proyecto → Crear*, ruta `/volume1/docker/oscata`, y usa
-   ese compose. Arráncalo.
-4. Abre `http://IP_DEL_NAS:47860`.
-
-### Opción B — SSH (script de instalación)
-
-1. *Panel de control → Terminal y SNMP → Habilitar servicio SSH*.
-2. Copia [`scripts/synology-install.sh`](../scripts/synology-install.sh) al NAS y:
-
-   ```bash
-   ssh tu_usuario@IP_DEL_NAS
-   sudo CONFIG_DIR=/volume1/docker/oscata/config \
-        DOWNLOADS_DIR=/volume1/media \
-        bash synology-install.sh
-   ```
-
-   El script hace `pull`, crea las carpetas y arranca el contenedor con
-   `--restart unless-stopped`. Repite el mismo comando para actualizar a una
-   versión nueva (recrea el contenedor reutilizando `/config`).
-
-### Notas Synology
-
-- **Permisos:** el contenedor escribe como `root`, así que los ficheros bajo
-  `/downloads` quedan con propietario `root`. En Synology suele ser correcto; si
-  accedes a esa carpeta por SMB con otro usuario y necesitas escritura, ajusta
-  los permisos de la carpeta compartida en DSM.
-- **Puerto:** 47860 no choca con DSM (que usa 5000/5001). Cámbialo en el mapeo
-  `-p` o en el compose si lo necesitas.
-- **Fijar versión:** en producción sustituye `:latest` por una etiqueta concreta
-  (p. ej. `:0.15.9`) para controlar las actualizaciones.
+Atajo rápido (Container Manager, sin SSH): sube
+[`docker-compose.synology.yml`](docker-compose.synology.yml) a
+`/volume1/docker/oscata/`, ajusta las dos rutas de `volumes` y créalo como
+*Proyecto* en Container Manager. Abre `http://IP_DEL_NAS:47860`.
 
 ## Construir la imagen localmente
 
