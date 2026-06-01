@@ -1,0 +1,27 @@
+# Oscata en Synology (DSM 7.2+ Container Manager → Proyecto)
+#
+# Cómo usarlo:
+#   1. Crea una carpeta compartida "docker" en DSM (Panel de control → Carpeta compartida).
+#   2. Sube este fichero a /volume1/docker/oscata/docker-compose.yml
+#   3. Container Manager → Proyecto → Crear → ruta /volume1/docker/oscata → usa este compose.
+#
+# Ajusta las dos rutas de volumes a las de tu NAS antes de arrancar:
+#   - /volume1/docker/oscata/config  → datos de la app (DB SQLite, config, caché)
+#   - /volume1/media                 → tu carpeta de descargas/medios real
+#
+# El DS920+ (Intel Celeron J4125) es x86_64/amd64, la misma arquitectura que
+# publica la imagen oficial, así que arranca de forma nativa sin emulación.
+
+services:
+  oscata:
+    image: ghcr.io/cucumba88/oscata:latest
+    container_name: oscata
+    restart: unless-stopped
+    ports:
+      - "47860:47860"
+    environment:
+      OSCATA_WEBGUI_PORT: "47860"
+      OSCATA_WEBGUI_EXPOSED_PORT: "47860"  # cámbialo si publicas con proxy inverso
+    volumes:
+      - /volume1/docker/oscata/config:/config
+      - /volume1/media:/downloads

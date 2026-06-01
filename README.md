@@ -142,6 +142,29 @@ This means local library state survives normal app restarts and rebuilds.
 
 You can also export the database from Settings and later import it into a fresh install.
 
+## Self-hosting with Docker (NAS / Synology / Unraid)
+
+Besides the desktop app, Oscata ships a headless Docker image that exposes the
+web UI on port `47860`. The official image (`ghcr.io/cucumba88/oscata:latest`)
+is built for `linux/amd64`.
+
+Quick start:
+
+```bash
+docker run -d --name oscata --restart unless-stopped \
+  -p 47860:47860 \
+  -v oscata-config:/config \
+  -v oscata-downloads:/downloads \
+  ghcr.io/cucumba88/oscata:latest
+```
+
+- **Full Docker guide:** [`docker/README.md`](docker/README.md) — env vars, reverse proxy, persistent volumes.
+- **Synology (DS920+ and similar):** the J4125 CPU is `x86_64/amd64`, so the
+  image runs natively. Use the Container Manager compose file
+  [`docker/docker-compose.synology.yml`](docker/docker-compose.synology.yml) or
+  the SSH installer [`scripts/synology-install.sh`](scripts/synology-install.sh).
+- **Unraid:** community template at [`docker/unraid-template.xml`](docker/unraid-template.xml).
+
 ## Validation commands
 
 Useful validation commands while developing:
