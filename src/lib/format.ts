@@ -5,6 +5,15 @@ export function formatBytes(b: number): string {
   return `${b} B`;
 }
 
+/** Directory portion of an FTP path — everything up to (but not including) the
+ *  final segment. Backslashes are normalised to forward slashes first.
+ *  e.g. "/media/Pelis/Peli.2020.1080p/peli.mkv" → "/media/Pelis/Peli.2020.1080p" */
+export function folderPath(ftpPath: string): string {
+  const normalized = ftpPath.replace(/\\/g, "/").replace(/\/+$/, "");
+  const idx = normalized.lastIndexOf("/");
+  return idx > 0 ? normalized.slice(0, idx) : normalized;
+}
+
 export function formatDuration(secs: number): string {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);

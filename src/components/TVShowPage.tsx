@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Download,
   ExternalLink,
+  Folder,
   Pencil,
   Tv2,
 } from "lucide-react";
@@ -22,7 +23,7 @@ import {
 } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
 import { GENRE_MAP } from "../utils/genres";
-import { formatBytes } from "../lib/format";
+import { folderPath, formatBytes } from "../lib/format";
 import WatchlistButton from "../features/watchlist/WatchlistButton";
 import type { AddWatchlistParams } from "../features/watchlist/types";
 import {
@@ -121,9 +122,10 @@ function resolvedEpisode(item: MediaItem): {
   return { episode: b.episode, episodeEnd: b.episodeEnd };
 }
 
-/** Penultimate ftp_path segment — the folder a file lives in. Used as the
- *  identity for a "release group" since release teams pack each batch into
- *  its own folder (e.g. `Season 01 WEB-DL 1080p`). */
+/** Penultimate ftp_path segment — the leaf folder name a file lives in
+ *  (e.g. `Season 01 WEB-DL 1080p`). Used only as a human-readable label
+ *  fallback; release-group identity is the full directory path (see
+ *  `groupEpisodesByRelease`) so mirrored copies don't collapse together. */
 function getReleaseFolder(ftpPath: string): string {
   return ftpPath.split("/").slice(-2, -1)[0] ?? "";
 }
@@ -142,6 +144,7 @@ function buildReleaseLabel(sample: MediaItem, folder: string): string {
 
 interface ReleaseGroup {
   folder: string;
+  folderPath: string;
   label: string;
   resolution: string | null;
   release_type: string | null;
@@ -170,19 +173,26 @@ function qualityRank(g: ReleaseGroup): number {
 }
 
 function groupEpisodesByRelease(episodes: MediaItem[]): ReleaseGroup[] {
+  // Group by the FULL directory path, not just the leaf folder name. The same
+  // release is often mirrored across several parent directories (e.g. a copy
+  // under "Series HD 1080p" and another under "Series Documentales"), all
+  // sharing the same leaf name. Keying on the leaf alone collapses those
+  // distinct physical copies into one bloated group; keying on the full path
+  // keeps each location as its own group so the user can tell them apart.
   const byFolder = new Map<string, MediaItem[]>();
   for (const ep of episodes) {
-    const f = getReleaseFolder(ep.ftp_path);
+    const f = folderPath(ep.ftp_path);
     if (!byFolder.has(f)) byFolder.set(f, []);
     byFolder.get(f)!.push(ep);
   }
-  const groups: ReleaseGroup[] = [...byFolder.entries()].map(([folder, eps]) => {
+  const groups: ReleaseGroup[] = [...byFolder.entries()].map(([dirPath, eps]) => {
     eps.sort(
       (a, b) =>
         (resolvedEpisode(a).episode ?? 0) -
         (resolvedEpisode(b).episode ?? 0),
     );
     const sample = eps[0];
+    const leaf = getReleaseFolder(sample.ftp_path);
     const langs = Array.from(
       new Set(
         eps.flatMap((e) =>
@@ -192,8 +202,9 @@ function groupEpisodesByRelease(episodes: MediaItem[]): ReleaseGroup[] {
     );
     const totalBytes = eps.reduce((sum, e) => sum + (e.size_bytes ?? 0), 0);
     return {
-      folder,
-      label: buildReleaseLabel(sample, folder),
+      folder: leaf,
+      folderPath: dirPath,
+      label: buildReleaseLabel(sample, leaf),
       resolution: sample.resolution ?? null,
       release_type: sample.release_type ?? null,
       codec: sample.codec ?? null,
@@ -899,7 +910,7 @@ export default function TVShowPage({
                   )}
                   {section.groups.map((group, idx) => (
                     <ReleaseGroupBlock
-                      key={`${section.seasonKey}:${group.folder}`}
+                      key={`${section.seasonKey}:${group.folderPath}`}
                       group={group}
                       language={language}
                       seasonLabel={
@@ -1107,6 +1118,35 @@ function ReleaseGroupBlock({
                 {language === "es" ? "descargados" : "downloaded"}
               </span>
             )}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              minWidth: 0,
+              fontSize: 11,
+              fontFamily: "monospace",
+              color: "var(--color-text-muted)",
+            }}
+            title={group.folderPath || group.folder}
+          >
+            <Folder
+              size={12}
+              strokeWidth={2.1}
+              aria-hidden="true"
+              style={{ flexShrink: 0 }}
+            />
+            <span
+              style={{
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {group.folderPath || group.folder}
+            </span>
           </div>
         </div>
 

@@ -166,6 +166,7 @@ const messages = {
   "detail.details": { es: "Detalles", en: "Details" },
   "detail.fileInfo": { es: "Archivo", en: "File Info" },
   "detail.filename": { es: "Nombre de archivo", en: "Filename" },
+  "detail.folder": { es: "Carpeta", en: "Folder" },
   "detail.download": { es: "Descargar", en: "Download" },
   "detail.alreadyDownloaded": { es: "Ya descargado", en: "Already downloaded" },
   "detail.alreadyDownloadedHint": {
