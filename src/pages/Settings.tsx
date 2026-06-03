@@ -732,10 +732,10 @@ export default function Settings({
 }) {
   const { theme, setTheme } = useTheme();
   const { user } = useAuth();
-  const [ftpWriteOk, setFtpWriteOk] = useState(false);
-  // True when the Tauri user has FTP write access, or when the web user has admin/editor role
+  // Desktop is the trusted local owner; on web, admins/editors can edit settings.
+  // (FTP write permission is unrelated — it only gates the upload tab in Library.)
   const canWrite =
-    ftpWriteOk ||
+    isTauri() ||
     Boolean(user && (user.role === "admin" || user.role === "editor"));
   const [form, setForm] = useState<Config | null>(null);
   const [ftpStatus, setFtpStatus] = useState<ConnectionState>("idle");
@@ -862,9 +862,6 @@ export default function Settings({
       invoke<boolean>("is_portable_mode")
         .then(setIsPortable)
         .catch(() => {});
-      invoke<boolean>("check_ftp_write_permission")
-        .then((ok) => setFtpWriteOk(ok))
-        .catch(() => setFtpWriteOk(false));
     });
   }, []);
 
