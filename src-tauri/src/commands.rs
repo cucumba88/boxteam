@@ -1957,6 +1957,82 @@ pub fn compute_local_path(
     Ok(local_path)
 }
 
+/// Collect the destination roots that must never be removed when pruning empty
+/// folders after a delete: the download base (and its default per-type
+/// subfolders), the configured per-type destinations, and every genre-routing
+/// destination. Mirrors the folder layout produced by [`compute_local_path`].
+fn media_dest_roots(config: &crate::db::AppConfig) -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if !config.download_folder.is_empty() {
+        let base = PathBuf::from(&config.download_folder);
+        roots.push(base.join("Movies"));
+        roots.push(base.join("TV Shows"));
+        roots.push(base.join("Documentaries"));
+        roots.push(base);
+    }
+    for dest in [
+        &config.movie_destination,
+        &config.tv_destination,
+        &config.documentary_destination,
+    ] {
+        if !dest.is_empty() {
+            roots.push(PathBuf::from(dest));
+        }
+    }
+    #[derive(serde::Deserialize)]
+    struct GenreDest {
+        destination: String,
+    }
+    if let Ok(rules) = serde_json::from_str::<Vec<GenreDest>>(&config.genre_destinations) {
+        for rule in rules {
+            if !rule.destination.is_empty() {
+                roots.push(PathBuf::from(rule.destination));
+            }
+        }
+    }
+    roots
+}
+
+/// Remove the empty parent folders left behind after deleting a media file,
+/// walking upward from the file's folder. Stops at the first directory that is
+/// non-empty, equals one of `roots`, or lies outside every root — so a
+/// configured destination (e.g. `…/Movies`) or a folder shared with other
+/// titles (e.g. an `A/` alpha bucket still holding another movie) is never
+/// removed.
+fn prune_empty_media_dirs(file_path: &std::path::Path, roots: &[std::path::PathBuf]) {
+    let mut dir = match file_path.parent() {
+        Some(p) => p.to_path_buf(),
+        None => return,
+    };
+    loop {
+        // Never delete a destination root itself.
+        if roots.iter().any(|root| &dir == root) {
+            break;
+        }
+        // Only prune directories that live inside a known destination root.
+        if !roots.iter().any(|root| dir.starts_with(root)) {
+            break;
+        }
+        // Stop at the first non-empty (or unreadable) directory.
+        match std::fs::read_dir(&dir) {
+            Ok(mut entries) => {
+                if entries.next().is_some() {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+        if std::fs::remove_dir(&dir).is_err() {
+            break;
+        }
+        match dir.parent() {
+            Some(p) => dir = p.to_path_buf(),
+            None => break,
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn queue_download(
     db_state: tauri::State<'_, crate::db::Db>,
@@ -2077,7 +2153,14 @@ pub async fn delete_download(
     };
     // Delete the file from disk. Ignore errors (file may not exist yet).
     if let Some(path) = local_path {
+        let path = std::path::PathBuf::from(&path);
         std::fs::remove_file(&path).ok();
+        // Clean up the now-empty per-title (and alpha) folders so a deleted
+        // movie doesn't leave an orphan empty directory behind. Never touches
+        // the configured destination roots.
+        if let Ok(config) = db.load_config() {
+            prune_empty_media_dirs(&path, &media_dest_roots(&config));
+        }
     }
     Ok(())
 }
@@ -5141,6 +5224,97 @@ mod indexing_tests {
             task_done > loop_done,
             "task should complete AFTER loop records completion"
         );
+    }
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Unique temp directory for one test (no external tempfile crate).
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "oscata-prune-{}-{}",
+            std::process::id(),
+            tag
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn prunes_empty_title_and_alpha_but_keeps_root() {
+        let root = scratch("keep-root").join("Movies");
+        let movie = root.join("A").join("Avatar (2009)");
+        std::fs::create_dir_all(&movie).unwrap();
+        let file = movie.join("avatar.mkv");
+        std::fs::write(&file, b"x").unwrap();
+
+        std::fs::remove_file(&file).unwrap();
+        prune_empty_media_dirs(&file, &[root.clone()]);
+
+        assert!(!movie.exists(), "empty title folder should be removed");
+        assert!(!root.join("A").exists(), "empty alpha folder should be removed");
+        assert!(root.exists(), "destination root must be preserved");
+
+        let _ = std::fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    #[test]
+    fn stops_at_alpha_folder_shared_with_another_title() {
+        let root = scratch("shared-alpha").join("Movies");
+        let avatar = root.join("A").join("Avatar (2009)");
+        let alien = root.join("A").join("Alien (1979)");
+        std::fs::create_dir_all(&avatar).unwrap();
+        std::fs::create_dir_all(&alien).unwrap();
+        std::fs::write(alien.join("alien.mkv"), b"x").unwrap();
+        let file = avatar.join("avatar.mkv");
+        std::fs::write(&file, b"x").unwrap();
+
+        std::fs::remove_file(&file).unwrap();
+        prune_empty_media_dirs(&file, &[root.clone()]);
+
+        assert!(!avatar.exists(), "deleted title folder should be removed");
+        assert!(root.join("A").exists(), "alpha folder still holding another title must stay");
+        assert!(alien.exists(), "other title must be untouched");
+
+        let _ = std::fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    #[test]
+    fn does_nothing_when_outside_any_root() {
+        let base = scratch("outside");
+        let stray = base.join("somewhere").join("Title");
+        std::fs::create_dir_all(&stray).unwrap();
+        let file = stray.join("f.mkv");
+        std::fs::write(&file, b"x").unwrap();
+        std::fs::remove_file(&file).unwrap();
+
+        // Root points elsewhere → nothing should be pruned.
+        prune_empty_media_dirs(&file, &[base.join("Movies")]);
+        assert!(stray.exists(), "folders outside the roots must be left alone");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn prunes_tv_season_then_show_folder() {
+        let root = scratch("tv").join("TV Shows");
+        let season = root.join("Breaking Bad").join("Season 01");
+        std::fs::create_dir_all(&season).unwrap();
+        let file = season.join("ep01.mkv");
+        std::fs::write(&file, b"x").unwrap();
+
+        std::fs::remove_file(&file).unwrap();
+        prune_empty_media_dirs(&file, &[root.clone()]);
+
+        assert!(!season.exists(), "empty season folder should be removed");
+        assert!(!root.join("Breaking Bad").exists(), "empty show folder should be removed");
+        assert!(root.exists(), "destination root must be preserved");
+
+        let _ = std::fs::remove_dir_all(root.parent().unwrap());
     }
 }
 
