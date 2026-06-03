@@ -53,8 +53,12 @@ export function parseFolderTypes(
   }
 
   try {
+    // The saved config is authoritative once it exists — do NOT merge
+    // DEFAULT_FOLDER_TYPES on top, or folders the user intentionally left
+    // unmapped would be resurrected and re-persisted on the next save.
+    // Defaults are only used as the fresh-install fallback above.
     const parsed = JSON.parse(trimmed) as Record<string, FolderTypeValue>;
-    return { ...DEFAULT_FOLDER_TYPES, ...sanitizeFolderTypes(parsed) };
+    return sanitizeFolderTypes(parsed);
   } catch {
     return { ...DEFAULT_FOLDER_TYPES };
   }

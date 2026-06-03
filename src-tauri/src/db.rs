@@ -312,21 +312,19 @@ impl Db {
         DEFAULT_FOLDER_TYPES.to_string()
     }
 
-    fn merged_folder_types(raw: &str) -> String {
-        let defaults = serde_json::from_str::<std::collections::HashMap<String, String>>(
-            DEFAULT_FOLDER_TYPES,
-        )
-        .unwrap_or_default();
+    /// Strip only the legacy keys that are no longer valid folder names; the
+    /// stored config is otherwise authoritative. We deliberately do NOT merge
+    /// `DEFAULT_FOLDER_TYPES` in here — once the user has saved a config, their
+    /// choices win, including folders they intentionally left unmapped. Defaults
+    /// are only used to seed a fresh install (see `normalized_folder_types`).
+    fn sanitized_folder_types(raw: &str) -> String {
         let parsed = serde_json::from_str::<std::collections::HashMap<String, String>>(raw)
             .unwrap_or_default();
-        let parsed = parsed
+        let sanitized = parsed
             .into_iter()
-            .filter(|(key, _)| !REMOVED_FOLDER_TYPE_KEYS.contains(&key.as_str()));
-        let merged = defaults
-            .into_iter()
-            .chain(parsed)
+            .filter(|(key, _)| !REMOVED_FOLDER_TYPE_KEYS.contains(&key.as_str()))
             .collect::<std::collections::HashMap<_, _>>();
-        serde_json::to_string(&merged).unwrap_or_else(|_| Self::default_folder_types())
+        serde_json::to_string(&sanitized).unwrap_or_else(|_| Self::default_folder_types())
     }
 
     fn normalized_folder_types(value: Option<String>) -> String {
@@ -336,47 +334,10 @@ impl Db {
                 if trimmed.is_empty() || trimmed == "{}" || trimmed == LEGACY_FOLDER_TYPES {
                     Self::default_folder_types()
                 } else {
-                    Self::merged_folder_types(&raw)
+                    Self::sanitized_folder_types(&raw)
                 }
             }
             None => Self::default_folder_types(),
-        }
-    }
-
-    fn migrate_old_folder_type_mapping(conn: &Connection) {
-        let raw: Option<String> = conn
-            .query_row(
-                "SELECT value FROM app_config WHERE key = 'folder_types' LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .ok()
-            .flatten();
-
-        let Some(raw) = raw else {
-            return;
-        };
-
-        let mut parsed = serde_json::from_str::<std::collections::HashMap<String, String>>(&raw)
-            .unwrap_or_default();
-        let key = "Peliculas y Series mas antiguas";
-        let needs_update = parsed
-            .get(key)
-            .map(|value| !value.eq_ignore_ascii_case("mixed"))
-            .unwrap_or(false);
-
-        if !needs_update {
-            return;
-        }
-
-        parsed.insert(key.to_string(), "mixed".to_string());
-        if let Ok(serialized) = serde_json::to_string(&parsed) {
-            conn.execute(
-                "INSERT OR REPLACE INTO app_config (key, value) VALUES ('folder_types', ?1)",
-                params![serialized],
-            )
-            .ok();
         }
     }
 
@@ -653,9 +614,11 @@ impl Db {
              );",
         ).ok();
 
-        // Folder type migration: this directory contains mixed content and should
-        // no longer be treated as movie-only in older persisted configs.
-        Self::migrate_old_folder_type_mapping(conn);
+        // NOTE: folder-type mappings (app_config.folder_types) are user-owned and
+        // are NOT touched by migrations. A prior one-shot here force-rewrote
+        // "Peliculas y Series mas antiguas" -> "mixed" on every boot, silently
+        // reverting the user's override. Defaults are seeded only for a fresh /
+        // empty config in `normalized_folder_types`; saved config is authoritative.
 
         // Data repair for old installs: episodic entries that were saved as movie
         // should be categorized as TV so they render in the correct tab.
@@ -3477,6 +3440,58 @@ mod tests {
             release_type: None,
             release_group: None,
         }
+    }
+
+    // ── folder_types: saved config is authoritative ────────────────────────
+
+    fn folder_map(raw: &str) -> std::collections::HashMap<String, String> {
+        serde_json::from_str(raw).expect("valid folder_types json")
+    }
+
+    #[test]
+    fn folder_types_does_not_resurrect_a_removed_default_key() {
+        // User deleted the mapping for a folder that exists in DEFAULT_FOLDER_TYPES
+        // (set it to "ignore"). It must stay gone after normalization.
+        let saved = r#"{"Series HD 1080p":"tv"}"#;
+        let normalized = Db::normalized_folder_types(Some(saved.to_string()));
+        let map = folder_map(&normalized);
+        assert_eq!(map.get("Series HD 1080p").map(String::as_str), Some("tv"));
+        assert!(
+            !map.contains_key("Peliculas BDRemux 1080p"),
+            "default key must not be re-injected over the user's saved config"
+        );
+    }
+
+    #[test]
+    fn folder_types_preserves_a_user_override_of_a_default() {
+        // The old migration force-rewrote this key to "mixed" on every boot.
+        let saved = r#"{"Peliculas y Series mas antiguas":"movie"}"#;
+        let normalized = Db::normalized_folder_types(Some(saved.to_string()));
+        let map = folder_map(&normalized);
+        assert_eq!(
+            map.get("Peliculas y Series mas antiguas").map(String::as_str),
+            Some("movie"),
+            "user override must survive normalization"
+        );
+    }
+
+    #[test]
+    fn folder_types_seeds_defaults_for_fresh_or_legacy_config() {
+        let defaults = folder_map(DEFAULT_FOLDER_TYPES);
+        for raw in [None, Some(String::new()), Some("{}".to_string())] {
+            assert_eq!(folder_map(&Db::normalized_folder_types(raw)), defaults);
+        }
+        // The known legacy default also seeds the current defaults.
+        let legacy = Db::normalized_folder_types(Some(LEGACY_FOLDER_TYPES.to_string()));
+        assert_eq!(folder_map(&legacy), defaults);
+    }
+
+    #[test]
+    fn folder_types_strips_removed_legacy_keys() {
+        let saved = r#"{"Series HD 1080p X265":"tv","Series HD 1080p":"tv"}"#;
+        let map = folder_map(&Db::normalized_folder_types(Some(saved.to_string())));
+        assert!(!map.contains_key("Series HD 1080p X265"));
+        assert_eq!(map.get("Series HD 1080p").map(String::as_str), Some("tv"));
     }
 
     // ── begin/commit_batch ─────────────────────────────────────────────────
