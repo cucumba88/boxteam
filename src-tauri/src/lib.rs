@@ -350,6 +350,18 @@ pub fn run() {
                     Err(e) => eprintln!("reparse_tech_tags failed: {e}"),
                 }
 
+                // One-shot repair: rows that hit the old "leading 4-digit number
+                // parsed as the year" bug got an empty title and a garbage TMDB
+                // match (sometimes manual-locked). Re-parse + drop the bad match
+                // so they re-match cleanly. Runs once per install.
+                match db.clear_leading_year_mismatches() {
+                    Ok(n) if n > 0 => {
+                        println!("Cleared {n} mis-parsed leading-year TMDB match(es)")
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!("clear_leading_year_mismatches failed: {e}"),
+                }
+
                 if let Ok(Some(backup_path)) = db.prepare_for_app_version(&current_version) {
                     println!(
                         "App updated to v{}; preserved existing library cache backup at {}",

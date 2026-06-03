@@ -1221,6 +1221,82 @@ impl Db {
         Ok(updated)
     }
 
+    /// One-shot data repair for the "leading 4-digit number parsed as the year"
+    /// bug (see `parser.rs`). Rows indexed before that fix stored an empty title
+    /// (e.g. "1975 El fin de una era (2025)" → year 1975, title "") and were then
+    /// matched to an unrelated TMDB id — sometimes locked in with manual_match=1,
+    /// which both the auto re-matcher and the seed override deliberately leave
+    /// untouched, so they never self-heal.
+    ///
+    /// Re-parse every empty-title row with the corrected parser; where a real
+    /// title now appears, write it and drop the garbage-based TMDB match
+    /// (clearing manual_match) so the next metadata refresh re-matches it
+    /// cleanly. Only touches rows whose stored title was blank AND whose
+    /// re-parse now yields a title, so rows with good data are never disturbed.
+    /// Guarded to run at most once per install. Returns the number of rows fixed.
+    pub fn clear_leading_year_mismatches(&self) -> Result<usize, String> {
+        let migration_id = "data:clear-leading-year-mismatches:v1";
+        {
+            let conn = self.conn.lock().unwrap();
+            if Self::migration_applied(&conn, migration_id)? {
+                return Ok(0);
+            }
+        }
+
+        // Candidate rows: a blank stored title is the parser-failure signature.
+        let rows: Vec<(i64, String, String)> = {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, ftp_path, filename FROM media_items
+                     WHERE title IS NULL OR TRIM(title) = ''",
+                )
+                .map_err(|e| e.to_string())?;
+            let mut out = Vec::new();
+            let mut rowset = stmt.query([]).map_err(|e| e.to_string())?;
+            while let Some(row) = rowset.next().map_err(|e| e.to_string())? {
+                out.push((
+                    row.get(0).map_err(|e| e.to_string())?,
+                    row.get(1).map_err(|e| e.to_string())?,
+                    row.get(2).map_err(|e| e.to_string())?,
+                ));
+            }
+            out
+        };
+
+        let mut fixed = 0usize;
+        for (id, ftp_path, filename) in rows {
+            let parsed = crate::parser::parse_media_path(&ftp_path, &filename);
+            if parsed.title.trim().is_empty() {
+                // The corrected parser still can't recover a title — not the
+                // leading-year bug; leave the row exactly as it is.
+                continue;
+            }
+            let conn = self.conn.lock().unwrap();
+            let n = conn
+                .execute(
+                    "UPDATE media_items SET
+                        title = ?2,
+                        year = ?3,
+                        tmdb_id = NULL, imdb_id = NULL, tmdb_type = NULL,
+                        tmdb_title = NULL, tmdb_title_en = NULL, tmdb_year = NULL,
+                        tmdb_release_date = NULL, tmdb_overview = NULL, tmdb_overview_en = NULL,
+                        tmdb_poster = NULL, tmdb_poster_en = NULL, tmdb_rating = NULL,
+                        tmdb_genres = NULL, metadata_at = NULL, manual_match = 0
+                     WHERE id = ?1",
+                    params![id, parsed.title, parsed.year],
+                )
+                .map_err(|e| e.to_string())?;
+            fixed += n;
+        }
+
+        {
+            let conn = self.conn.lock().unwrap();
+            Self::mark_migration_applied(&conn, migration_id)?;
+        }
+        Ok(fixed)
+    }
+
     pub fn prepare_for_app_version(&self, current_version: &str) -> Result<Option<String>, String> {
         let previous_version = self.load_app_value("last_app_version")?;
         match previous_version.as_deref() {
@@ -3744,5 +3820,62 @@ mod tests {
         assert_eq!(db.get_all_media().expect("get_all_media").len(), 1);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── leading-year mismatch repair migration ─────────────────────────────
+
+    #[test]
+    fn clear_leading_year_mismatches_fixes_bad_row_and_spares_good_ones() {
+        let db = in_memory_db();
+        {
+            let conn = db.conn.lock().unwrap();
+            // Bug signature: blank title, year mis-read as 1975, locked to an
+            // unrelated series tmdb_id via manual_match.
+            conn.execute(
+                "INSERT INTO media_items (id, ftp_path, filename, title, year, tmdb_id, tmdb_type, tmdb_title, media_type, manual_match)
+                 VALUES (1, '/Compartida/Documentales/Largometrajes/1975 El fin de una era (2025) WEB DL 1080p.mkv',
+                         '1975 El fin de una era (2025) WEB DL 1080p.mkv', '', 1975, 304597, 'tv', 'Por cuatro perras', 'documentary', 1)",
+                [],
+            ).expect("insert bad row");
+            // A correctly-matched row that must be left untouched.
+            conn.execute(
+                "INSERT INTO media_items (id, ftp_path, filename, title, year, tmdb_id, tmdb_title, media_type, manual_match)
+                 VALUES (2, '/Compartida/Series HD 1080p/Por cuatro perras (2026) S01E01.mkv',
+                         'Por cuatro perras (2026) S01E01.mkv', 'Por cuatro perras', 2026, 304597, 'Por cuatro perras', 'tv', 0)",
+                [],
+            ).expect("insert good row");
+        }
+
+        let fixed = db.clear_leading_year_mismatches().expect("migration");
+        assert_eq!(fixed, 1, "only the blank-title row should be repaired");
+
+        let conn = db.conn.lock().unwrap();
+        // Bad row: title recovered, year corrected, match dropped + unlocked.
+        let (title, year, tmdb, manual): (String, Option<i64>, Option<i64>, i64) = conn
+            .query_row(
+                "SELECT title, year, tmdb_id, manual_match FROM media_items WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "1975 El fin de una era");
+        assert_eq!(year, Some(2025));
+        assert_eq!(tmdb, None, "garbage TMDB match must be cleared");
+        assert_eq!(manual, 0, "manual lock must be released so it re-matches");
+
+        // Good row: untouched.
+        let (g_title, g_tmdb): (String, Option<i64>) = conn
+            .query_row(
+                "SELECT title, tmdb_id FROM media_items WHERE id = 2",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(g_title, "Por cuatro perras");
+        assert_eq!(g_tmdb, Some(304597), "correctly-matched row must be preserved");
+        drop(conn);
+
+        // One-shot: a second run is a no-op.
+        assert_eq!(db.clear_leading_year_mismatches().expect("migration 2"), 0);
     }
 }
