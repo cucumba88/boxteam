@@ -3,6 +3,7 @@ import {
   Check,
   Clock,
   Download,
+  Folder,
   Pencil,
   RefreshCw,
   X,
@@ -23,7 +24,7 @@ import { t } from "../utils/i18n";
 import { GENRE_MAP } from "../utils/genres";
 import { PROVIDER_BY_ID, parseProviders } from "../utils/providers";
 import PlatformLogo from "./PlatformLogo";
-import { formatBytes } from "../lib/format";
+import { folderPath, formatBytes } from "../lib/format";
 import {
   allAvailableRatings,
   formatRating,
@@ -610,6 +611,35 @@ export default function DetailPanel({
                         </span>
                       )}
                     </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        marginTop: 4,
+                        fontSize: 11,
+                        fontFamily: "monospace",
+                        color: "var(--color-text-muted)",
+                      }}
+                      title={folderPath(version.ftp_path)}
+                    >
+                      <Folder
+                        size={12}
+                        strokeWidth={2.1}
+                        aria-hidden="true"
+                        style={{ flexShrink: 0 }}
+                      />
+                      <span
+                        style={{
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {folderPath(version.ftp_path)}
+                      </span>
+                    </div>
                   </div>
                   <div
                     style={{ display: "flex", alignItems: "center", gap: 8 }}
@@ -727,6 +757,36 @@ export default function DetailPanel({
               }}
             >
               {item.filename}
+            </div>
+            <div
+              style={{
+                color: "var(--color-text-muted)",
+                fontSize: "0.7rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                margin: "10px 0 4px",
+              }}
+            >
+              {t(language, "detail.folder")}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                color: "var(--color-text-muted)",
+                fontSize: 12,
+                wordBreak: "break-all",
+                fontFamily: "monospace",
+              }}
+            >
+              <Folder
+                size={13}
+                strokeWidth={2.1}
+                aria-hidden="true"
+                style={{ flexShrink: 0 }}
+              />
+              {folderPath(item.ftp_path)}
             </div>
           </div>
         )}

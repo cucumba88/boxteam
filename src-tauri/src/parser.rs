@@ -14,6 +14,14 @@ static YEAR_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(19|20)\d{2}\b").expect("valid year regex")
 });
 
+/// A 4-digit year immediately after an opening parenthesis — the conventional
+/// "Title (Year)" release marker. Capture group 1 is the year. Matches both
+/// "(2025)" and "(2025." (the closing paren is often eaten when dots become
+/// spaces), so it only requires the opening paren.
+static PAREN_YEAR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\(((?:19|20)\d{2})").expect("valid paren-year regex")
+});
+
 /// Tags that mark the end of the human-readable title portion of a filename.
 static TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -263,7 +271,29 @@ fn parse_with_context(ftp_path: Option<&str>, filename: &str) -> ParsedMedia {
     let clean = without_ext.replace(['.', '_'], " ");
     let clean = WHITESPACE_RE.replace_all(&clean, " ").to_string();
 
-    let year: Option<u16> = YEAR_RE.find(&clean).and_then(|m| m.as_str().parse().ok());
+    // Pick the release year and the position where the title ends. Priority:
+    //  1. A parenthesised year "(2025)" — the conventional release marker, which
+    //     lets a title legitimately contain a 4-digit number ("1975 El fin de
+    //     una era (2025)", "Blade Runner 2049 (2017)").
+    //  2. Otherwise the first bare 4-digit year, but NEVER one at position 0 — a
+    //     filename never opens with its release year, so a leading number is part
+    //     of the title, not the year.
+    // Both the `year` value and the title boundary derive from this single hit so
+    // they can't disagree (which previously emptied the title).
+    let year_hit: Option<(usize, u16)> = PAREN_YEAR_RE
+        .captures(&clean)
+        .and_then(|caps| {
+            let whole = caps.get(0)?;
+            let year = caps.get(1)?.as_str().parse().ok()?;
+            Some((whole.start(), year))
+        })
+        .or_else(|| {
+            YEAR_RE
+                .find_iter(&clean)
+                .find(|m| m.start() != 0)
+                .and_then(|m| m.as_str().parse().ok().map(|y| (m.start(), y)))
+        });
+    let year: Option<u16> = year_hit.map(|(_, y)| y);
 
     let (filename_season, mut episode, mut episode_end, se_start) =
         if let Some(caps) = SE_RE.captures(&clean) {
@@ -324,7 +354,7 @@ fn parse_with_context(ftp_path: Option<&str>, filename: &str) -> ParsedMedia {
 
     // Title ends at: year, S##E## marker, or first tech tag — whichever comes first
     let title_end = {
-        let year_pos = YEAR_RE.find(&clean).map(|m| m.start()).unwrap_or(clean.len());
+        let year_pos = year_hit.map(|(pos, _)| pos).unwrap_or(clean.len());
         let tag_pos = TAG_RE.find(&clean).map(|m| m.start()).unwrap_or(clean.len());
         year_pos.min(se_start).min(tag_pos)
     };
@@ -588,6 +618,33 @@ mod tests {
     fn parses_streaming_source() {
         let p = parse_media_path("", "Como.cabras.2026.WEB.DL.2160p.HDR10.DV.mkv");
         assert_eq!(p.title, "Como cabras");
+        assert_eq!(p.year, Some(2026));
+    }
+
+    #[test]
+    fn leading_four_digit_number_is_part_of_title_not_year() {
+        // Regression: "1975 ..." opens with a 4-digit number that is part of the
+        // title; the real year is the parenthesised "(2025)". Previously the
+        // parser took "1975" as the year and left the title empty, which then
+        // mis-matched against an unrelated TMDB id.
+        let p = parse_media_path("", "1975 El fin de una era (2025) WEB DL 1080p.mkv");
+        assert_eq!(p.title, "1975 El fin de una era");
+        assert_eq!(p.year, Some(2025));
+    }
+
+    #[test]
+    fn embedded_four_digit_number_in_title_prefers_parenthesised_year() {
+        // The number lives mid-title; the parenthesised year wins over it.
+        let p = parse_media_path("", "Blade Runner 2049 (2017) 2160p BluRay x265.mkv");
+        assert_eq!(p.title, "Blade Runner 2049");
+        assert_eq!(p.year, Some(2017));
+    }
+
+    #[test]
+    fn parenthesised_year_without_closing_paren_still_parses() {
+        // Dots-to-spaces often eats the closing paren: "(2026.WEB-DL...".
+        let p = parse_media_path("", "Je m'appelle Agneta (2026.WEB-DL.2160P.HEVC.mkv");
+        assert_eq!(p.title, "Je m'appelle Agneta");
         assert_eq!(p.year, Some(2026));
     }
 

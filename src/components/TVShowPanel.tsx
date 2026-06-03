@@ -23,6 +23,7 @@ import {
 } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
 import { GENRE_MAP } from "../utils/genres";
+import { folderPath } from "../lib/format";
 import { useIsMobile } from "../hooks/useIsMobile";
 import {
   allAvailableRatings,
@@ -133,6 +134,7 @@ function resolvedEpisodeData(item: MediaItem): {
 
 interface ReleaseGroup {
   folderName: string;
+  folderPath: string;
   resolution: string | null;
   release_type: string | null;
 }
@@ -568,7 +570,7 @@ function GroupHeader({
           fontSize: 11,
           fontWeight: 600,
         }}
-        title={group.folderName}
+        title={group.folderPath || group.folderName}
       >
         <Folder
           size={13}
@@ -586,7 +588,7 @@ function GroupHeader({
             maxWidth: 380,
           }}
         >
-          {group.folderName || t(language, "tv.unknownFolder")}
+          {group.folderPath || group.folderName || t(language, "tv.unknownFolder")}
         </span>
       </span>
       <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
@@ -671,6 +673,7 @@ function SeasonGroup({
         acc[key] = {
           group: {
             folderName: key,
+            folderPath: folderPath(ep.ftp_path),
             resolution: ep.resolution ?? null,
             release_type: ep.release_type ?? null,
           },

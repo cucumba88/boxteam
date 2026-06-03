@@ -34,7 +34,7 @@ import { t } from "../utils/i18n";
 import { GENRE_MAP } from "../utils/genres";
 import { PROVIDER_BY_ID, parseProviders } from "../utils/providers";
 import PlatformLogo from "./PlatformLogo";
-import { formatBytes } from "../lib/format";
+import { folderPath, formatBytes } from "../lib/format";
 import WatchlistButton from "../features/watchlist/WatchlistButton";
 import type { AddWatchlistParams } from "../features/watchlist/types";
 
@@ -1271,6 +1271,35 @@ function VersionRow({
           {version.size_bytes != null && version.size_bytes > 0 && (
             <span style={{ flexShrink: 0 }}>{formatBytes(version.size_bytes)}</span>
           )}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11,
+            color: "var(--color-text-muted)",
+            minWidth: 0,
+          }}
+          title={folderPath(version.ftp_path)}
+        >
+          <Folder
+            size={12}
+            strokeWidth={2.1}
+            aria-hidden="true"
+            style={{ flexShrink: 0 }}
+          />
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontFamily: "monospace",
+              minWidth: 0,
+            }}
+          >
+            {folderPath(version.ftp_path)}
+          </span>
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>

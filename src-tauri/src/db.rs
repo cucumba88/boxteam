@@ -1360,8 +1360,24 @@ impl Db {
                 return Ok((0, 0));
             }
 
-            let inserted = conn
-                .execute(
+            // Only seed FILE rows into a fresh/empty library. On an install that
+            // already has a crawled library, the FTP crawl is the source of truth
+            // for which files exist; re-inserting seed rows here resurrects entries
+            // for files the user has since deleted or moved on the FTP (the seed is
+            // a point-in-time snapshot that goes stale), and the 15-min prune only
+            // hides them until the next version bump re-injects them. The metadata
+            // merge below still runs for existing rows, so enrichment is unaffected.
+            let local_is_empty: bool = conn
+                .query_row(
+                    "SELECT NOT EXISTS (SELECT 1 FROM media_items)",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|e| e.to_string())?
+                == 1;
+
+            let inserted = if local_is_empty {
+                conn.execute(
                     "INSERT INTO media_items (
                         ftp_path, filename, size_bytes, title, year, season, episode, episode_end,
                         resolution, codec, audio_codec, languages, hdr, release_type, release_group,
@@ -1384,7 +1400,10 @@ impl Db {
                     )",
                     [],
                 )
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?
+            } else {
+                0
+            };
 
             let merged = conn
                 .execute(
@@ -1576,9 +1595,22 @@ impl Db {
                 return Ok((0, 0));
             }
 
-            // Insert items from seed that are not yet in the local library.
-            let inserted = conn
-                .execute(
+            // Insert items from seed that are not yet in the local library — but
+            // ONLY on a fresh/empty install. On an existing library the FTP crawl
+            // owns which files exist; re-inserting seed rows resurrects entries for
+            // files the user has deleted/moved on the FTP. See the matching guard
+            // and rationale in `refresh_library_from_seed`.
+            let local_is_empty: bool = conn
+                .query_row(
+                    "SELECT NOT EXISTS (SELECT 1 FROM media_items)",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|e| e.to_string())?
+                == 1;
+
+            let inserted = if local_is_empty {
+                conn.execute(
                     "INSERT INTO media_items (
                         ftp_path, filename, size_bytes, title, year, season, episode, episode_end,
                         resolution, codec, audio_codec, languages, hdr, release_type, release_group,
@@ -1606,7 +1638,10 @@ impl Db {
                     )",
                     [],
                 )
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?
+            } else {
+                0
+            };
 
             // Unconditionally override TMDB-sourced metadata for existing items.
             // Preserves user data: ftp_path, filename, size_bytes, indexed_at, manual_match,
@@ -3635,5 +3670,79 @@ mod tests {
             db.get_watchlist_auto_download_candidates().expect("c").is_empty(),
             "removed item must no longer download"
         );
+    }
+
+    // ── seed library injection ─────────────────────────────────────────────
+
+    /// Build a throwaway seed DB on disk containing a single media row at
+    /// `ghost_path`, returning (dir, seed_path). Caller removes the dir.
+    fn make_seed_with_row(tag: &str, ghost_path: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("oscata-seed-{}-{}", tag, std::process::id()));
+        std::fs::create_dir_all(&dir).expect("seed dir");
+        let seed_path = dir.join("library.seed.db");
+        let seed_conn = Connection::open(&seed_path).expect("seed db");
+        Db::apply_migrations(&seed_conn).expect("seed migrations");
+        seed_conn
+            .execute(
+                "INSERT INTO media_items (ftp_path, filename, media_type, tmdb_id)
+                 VALUES (?1, ?2, 'documentary', 18011)",
+                params![ghost_path, "Ghost S01E01.mkv"],
+            )
+            .expect("seed insert");
+        (dir, seed_path)
+    }
+
+    /// Regression: a stale seed must NOT resurrect file rows for folders the
+    /// user has deleted on the FTP once the local library is already populated.
+    #[test]
+    fn seed_does_not_resurrect_files_into_existing_library() {
+        let ftp_root = "/Compartida";
+        let (dir, seed_path) =
+            make_seed_with_row("existing", "/Compartida/Deleted Folder/Ghost S01E01.mkv");
+
+        // Existing, non-empty local library (a different, real file).
+        let db = in_memory_db();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO media_items (ftp_path, filename, media_type, tmdb_id)
+                 VALUES ('/Compartida/Series HD 1080p/Real S01E01.mkv', 'Real S01E01.mkv', 'tv', 18011)",
+                [],
+            )
+            .expect("seed local row");
+        }
+
+        let (inserted, _merged) = db
+            .refresh_library_from_seed(&seed_path, "9.9.9-existing", ftp_root)
+            .expect("seed refresh");
+
+        assert_eq!(inserted, 0, "must not inject seed file rows into a non-empty library");
+        let items = db.get_all_media().expect("get_all_media");
+        assert_eq!(items.len(), 1, "ghost row from a deleted folder must not be resurrected");
+        assert!(
+            items.iter().all(|i| !i.ftp_path.contains("Deleted Folder")),
+            "deleted-folder path must not appear"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A genuinely fresh install (empty library) still gets populated from the
+    /// seed so new users see an instant, metadata-rich library.
+    #[test]
+    fn seed_populates_fresh_empty_library() {
+        let ftp_root = "/Compartida";
+        let (dir, seed_path) =
+            make_seed_with_row("fresh", "/Compartida/Documentales/Ghost S01E01.mkv");
+
+        let db = in_memory_db(); // empty
+        let (inserted, _merged) = db
+            .refresh_library_from_seed(&seed_path, "9.9.9-fresh", ftp_root)
+            .expect("seed refresh");
+
+        assert_eq!(inserted, 1, "fresh empty library should be populated from the seed");
+        assert_eq!(db.get_all_media().expect("get_all_media").len(), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
