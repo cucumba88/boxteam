@@ -1053,10 +1053,13 @@ mod tests {
     #[test]
     fn year_off_by_two_gives_no_boost() {
         let movie = make_movie("Film", None, Some("2012-01-01"), Some(0.0));
-        let score_close = score_result(&movie, "Film", Some(2010)); // diff=2 → no boost
-        let score_far = score_result(&movie, "Film", Some(2000));   // diff=12 → no boost
-        // Both should have no year bonus
-        assert_eq!(score_close, score_far);
+        let exact = score_result(&movie, "Film", Some(2012));
+        let score_close = score_result(&movie, "Film", Some(2010)); // diff=2 → small penalty
+        let score_far = score_result(&movie, "Film", Some(2000));   // diff=12 → large penalty
+        // No year bonus for a 2-year gap, and a far-off era must rank lower
+        // still (score_result penalises large gaps harder on purpose).
+        assert!(score_close < exact);
+        assert!(score_far < score_close);
     }
 
     #[test]

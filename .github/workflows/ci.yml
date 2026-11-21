@@ -1,0 +1,72 @@
+name: CI
+
+# Checks for pull requests: type-check, build the frontend, Rust check + tests
+# and a dependency audit. Runs on the Unraid self-hosted runner.
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    # Never run code from a fork on the self-hosted runner.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Override with the repo variable LINUX_RUNNER_LABELS (JSON array).
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["self-hosted", "linux", "x64", "unraid"]') }}
+    permissions:
+      contents: read
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux build dependencies
+        run: |
+          SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+          export DEBIAN_FRONTEND=noninteractive
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            build-essential \
+            pkg-config
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Frontend build (seed check + tsc + vite)
+        run: npm run build
+
+      - name: Cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Cargo test
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: npm audit
+        run: npm audit --audit-level=high
+
+      - name: Cargo audit
+        run: |
+          cargo install cargo-audit --locked --quiet
+          cd src-tauri && cargo audit

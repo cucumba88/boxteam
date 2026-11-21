@@ -13,7 +13,9 @@ env:
 
 jobs:
   build-docker:
-    runs-on: ubuntu-latest
+    # Unraid self-hosted runner. Override the labels with the repo variable
+    # LINUX_RUNNER_LABELS (JSON array), e.g. '["ubuntu-latest"]' to go back to GitHub.
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["self-hosted", "linux", "x64", "unraid"]') }}
     permissions:
       contents: read
       packages: write # needed to push to ghcr.io

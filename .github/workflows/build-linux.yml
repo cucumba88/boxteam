@@ -9,7 +9,9 @@ on:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-22.04
+    # Unraid self-hosted runner. Override the labels with the repo variable
+    # LINUX_RUNNER_LABELS (JSON array), e.g. '["ubuntu-22.04"]' to go back to GitHub.
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["self-hosted", "linux", "x64", "unraid"]') }}
     permissions:
       contents: write
 
@@ -33,8 +35,11 @@ jobs:
 
       - name: Install Linux build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          # Self-hosted runner containers often run as root without sudo.
+          SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+          export DEBIAN_FRONTEND=noninteractive
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
@@ -50,6 +55,8 @@ jobs:
       - name: Build Tauri (deb, rpm, AppImage)
         run: npm run tauri build -- --bundles deb,rpm,appimage
         env:
+          # linuxdeploy is itself an AppImage; inside a container there is no FUSE.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
           TAURI_SIGNING_PRIVATE_KEY: ""
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
 
