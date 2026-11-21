@@ -15,7 +15,15 @@ on:
     paths:
       - .github/workflows/build-windows.yml
       - scripts/build-portable-windows.sh
+  # Manual run. With release_tag, builds that tag's source using this
+  # (newer) workflow and attaches the .exe/.zip to that tag's release, e.g.
+  # to fill in a release whose Windows build failed.
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag de una release existente a la que adjuntar los .exe (p. ej. v0.16.0)"
+        required: false
+        default: ""
 
 env:
   TARGET: x86_64-pc-windows-msvc
@@ -32,6 +40,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -55,12 +65,25 @@ jobs:
           SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
           export DEBIAN_FRONTEND=noninteractive
           $SUDO apt-get update
-          $SUDO apt-get install -y --no-install-recommends nsis lld llvm clang zip
-          # Debian/Ubuntu only ship versioned clang-cl (clang-cl-18…); cargo-xwin wants `clang-cl`.
-          if ! command -v clang-cl >/dev/null; then
-            CL=$(ls /usr/bin/clang-cl-* | sort -V | tail -1)
-            $SUDO ln -sf "$CL" /usr/local/bin/clang-cl
+          $SUDO apt-get install -y --no-install-recommends nsis lld llvm clang clang-tools zip
+          # cargo-xwin wants unversioned clang-cl, lld-link, llvm-lib and llvm-rc.
+          # Depending on the release, Debian/Ubuntu ship them only as
+          # /usr/bin/clang-cl-NN or only under /usr/lib/llvm-NN/bin (Ubuntu
+          # 22.04 / clang 14, where clang-cl lives in clang-tools). Put the
+          # newest LLVM bin dir first on PATH.
+          LLVM_BIN=$(ls -d /usr/lib/llvm-*/bin 2>/dev/null | sort -V | tail -1)
+          if [ -n "$LLVM_BIN" ]; then
+            echo "$LLVM_BIN" >> "$GITHUB_PATH"
+            export PATH="$LLVM_BIN:$PATH"
           fi
+          if ! command -v clang-cl >/dev/null; then
+            CL=$(ls /usr/bin/clang-cl-* 2>/dev/null | sort -V | tail -1)
+            [ -n "$CL" ] && $SUDO ln -sf "$CL" /usr/local/bin/clang-cl
+          fi
+          for tool in clang-cl lld-link llvm-lib llvm-rc; do
+            command -v "$tool" >/dev/null || { echo "::error::$tool not found after installing LLVM"; exit 1; }
+          done
+          clang-cl --version | head -1
 
       - name: Install cargo-xwin
         run: command -v cargo-xwin >/dev/null || cargo install cargo-xwin --locked
@@ -96,9 +119,10 @@ jobs:
           retention-days: 30
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
             oscata-windows-portable-*.zip
