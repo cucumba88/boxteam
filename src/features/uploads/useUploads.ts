@@ -150,8 +150,10 @@ export function useUploads() {
   const retryGroup = (groupId: string) =>
     call<number>("retry_group_uploads", { groupId });
   const retryAllFailed = () => call<number>("retry_all_failed_uploads");
-  const deleteUpload = (id: number) =>
-    call("delete_upload", { id }).then(() =>
+  /** `deleteRemote` (default true) also removes a finished upload from the
+   *  FTP server; false only drops it from the list. */
+  const deleteUpload = (id: number, deleteRemote = true) =>
+    call("delete_upload", { id, deleteRemote }).then(() =>
       setUploads((prev) => prev.filter((u) => u.id !== id)),
     );
   const clearCompleted = () =>

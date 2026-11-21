@@ -144,11 +144,16 @@ impl UploadQueue {
         id: u64,
     ) -> Result<(UploadItem, Arc<tokio::sync::Semaphore>, Arc<std::sync::atomic::AtomicBool>), String> {
         let item = self.items.iter_mut().find(|i| i.id == id).ok_or("Upload not found")?;
+        // Keep the byte count of a failed upload: the job resumes from what the
+        // server already has (see `ftp::upload_file`). A cancelled upload had
+        // its remote file removed, so it starts over.
+        if item.status != UploadStatus::Error {
+            item.bytes_done = 0;
+        }
         item.status = UploadStatus::Queued;
         item.error = None;
         item.started_at_ms = None;
         item.completed_at_ms = None;
-        item.bytes_done = 0;
         item.attempt = 0;
         if item.max_attempts == 0 {
             item.max_attempts = default_max_attempts();
@@ -169,6 +174,15 @@ impl UploadQueue {
     pub fn mark_attempt(&mut self, id: u64, attempt: u8) {
         if let Some(item) = self.items.iter_mut().find(|i| i.id == id) {
             item.attempt = attempt;
+        }
+    }
+
+    /// Record bytes sent so far (in memory; persisted with the next state change).
+    pub fn set_progress(&mut self, id: u64, bytes_done: u64) {
+        if let Some(item) = self.items.iter_mut().find(|i| i.id == id) {
+            if item.status == UploadStatus::Uploading {
+                item.bytes_done = bytes_done;
+            }
         }
     }
 

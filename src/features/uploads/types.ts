@@ -22,6 +22,8 @@ export interface LocalMediaInfo {
   audio_tracks: AudioTrack[];
   languages: string[];
   hdr: string | null;
+  /** Dolby Vision profile (5, 7, 8…) when the stream carries DV. */
+  dv_profile?: number | null;
   duration_secs: number | null;
   size_bytes: number;
   format: string | null;
@@ -42,6 +44,8 @@ export interface UploadSuggestion {
   detected_resolution: string | null;
   detected_codec: string | null;
   detected_audio_codec: string | null;
+  /** Channel layout from the filename ("5.1"), when ffprobe is unavailable. */
+  detected_audio_channels?: string | null;
   detected_languages: string[];
   detected_hdr: string | null;
   /** Sanitised FTP base folder for movies from config */
@@ -87,6 +91,7 @@ export interface UploadItem {
   hdr?: string | null;
   languages?: string[];
   codec?: string | null;
+  audio_codec?: string | null;
   /** Group id linking all episodes from the same season batch upload. */
   group_id?: string | null;
   /** 0-based index of the current attempt; >0 means we are retrying. */

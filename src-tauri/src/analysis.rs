@@ -27,6 +27,11 @@ pub struct LocalMediaInfo {
     pub audio_tracks: Vec<AudioTrack>,
     pub languages: Vec<String>,
     pub hdr: Option<String>,
+    /// Dolby Vision profile (5, 7, 8…) from the DOVI configuration record.
+    /// Profile 5 has no HDR10 fallback: it shows wrong colours on screens
+    /// without Dolby Vision, which is worth flagging before an upload.
+    #[serde(default)]
+    pub dv_profile: Option<u8>,
     pub duration_secs: Option<f64>,
     pub size_bytes: u64,
     pub format: Option<String>,
@@ -66,6 +71,22 @@ struct FfprobeStream {
 #[derive(Debug, Deserialize, Default)]
 struct FfprobeSideData {
     side_data_type: Option<String>,
+    /// Present on "DOVI configuration record" entries.
+    dv_profile: Option<u8>,
+    /// 0 = none (profile 5), 1 = HDR10, 2 = SDR, 4 = HLG, 6 = HDR10 (BD).
+    dv_bl_signal_compatibility_id: Option<u8>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct FfprobeFrames {
+    #[serde(default)]
+    frames: Vec<FfprobeFrame>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct FfprobeFrame {
+    #[serde(default)]
+    side_data_list: Vec<FfprobeSideData>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -245,6 +266,7 @@ pub fn ffprobe_analyze(path: &str) -> Result<LocalMediaInfo, String> {
             codec: None,
             video_bitrate_kbps: None,
             hdr: None,
+            dv_profile: None,
             audio_tracks: vec![],
             languages: vec![],
             format: None,
@@ -305,7 +327,15 @@ pub fn ffprobe_analyze(path: &str) -> Result<LocalMediaInfo, String> {
     let resolution = dims_to_resolution(width, height)
         .or_else(|| resolution_from_path(path));
 
-    let hdr = video.and_then(|v| detect_hdr(v));
+    // HDR10+ dynamic metadata lives on every frame, not on the stream, so
+    // `-show_streams` never reports it. For PQ streams, peek at the first few
+    // frames to tell HDR10+ apart from plain HDR10.
+    let frame_hdr10_plus = video
+        .filter(|v| v.color_transfer.as_deref() == Some("smpte2084") && !stream_has_hdr10_plus(v))
+        .map(|_| probe_hdr10_plus_frames(&binary, path))
+        .unwrap_or(false);
+    let hdr = video.and_then(|v| detect_hdr(v, frame_hdr10_plus));
+    let dv_profile = video.and_then(dovi_record).and_then(|sd| sd.dv_profile);
 
     // ── Audio streams ─────────────────────────────────────────────────────────
     let audio_tracks: Vec<AudioTrack> = probe.streams.iter()
@@ -324,10 +354,12 @@ pub fn ffprobe_analyze(path: &str) -> Result<LocalMediaInfo, String> {
                         .map(|p| p.to_uppercase())
                         .unwrap_or_default();
                     if base == "DTS" {
-                        if profile_up.contains("DTS-HD MA") || profile_up.contains("DTS HD MA") {
-                            "DTS-HD MA".to_string()
-                        } else if profile_up.contains("DTS:X") || profile_up.contains("DTS-X") {
+                        // DTS:X first: ffmpeg ≥ 6 reports it as
+                        // "DTS-HD MA + DTS:X", which also contains "DTS-HD MA".
+                        if profile_up.contains("DTS:X") || profile_up.contains("DTS-X") {
                             "DTS:X".to_string()
+                        } else if profile_up.contains("DTS-HD MA") || profile_up.contains("DTS HD MA") {
+                            "DTS-HD MA".to_string()
                         } else if profile_up.contains("DTS-HD HRA") {
                             "DTS-HD HRA".to_string()
                         } else {
@@ -336,7 +368,7 @@ pub fn ffprobe_analyze(path: &str) -> Result<LocalMediaInfo, String> {
                     } else if base == "TrueHD" && profile_up.contains("ATMOS") {
                         "TrueHD Atmos".to_string()
                     } else if base == "EAC3" && (profile_up.contains("ATMOS") || profile_up.contains("JOC")) {
-                        "EAC3 + Atmos".to_string()
+                        "EAC3 Atmos".to_string()
                     } else {
                         base
                     }
@@ -407,6 +439,7 @@ pub fn ffprobe_analyze(path: &str) -> Result<LocalMediaInfo, String> {
         audio_tracks,
         languages,
         hdr,
+        dv_profile,
         duration_secs,
         size_bytes,
         format,
@@ -499,18 +532,9 @@ fn normalize_audio_codec(codec: &str) -> String {
     }
 }
 
-/// Detect the HDR format of a video stream from ffprobe color metadata + side
-/// data. Returns one of: "DV", "HDR10+DV", "HDR+DV", "HDR10+", "HDR10",
-/// "HLG", "HDR", or None when the stream is SDR.
-///
-/// DV detection requires `side_data_list` to be populated by ffprobe (it is
-/// by default — `-show_streams` includes side data). HDR10+ detection
-/// follows the same pattern via the SMPTE 2094-40 side data type.
-fn detect_hdr(stream: &FfprobeStream) -> Option<String> {
-    let transfer = stream.color_transfer.as_deref().unwrap_or("");
-    let primaries = stream.color_primaries.as_deref().unwrap_or("");
-
-    let has_dovi = stream.side_data_list.iter().any(|sd| {
+/// The "DOVI configuration record" side data entry, when present.
+fn dovi_record(stream: &FfprobeStream) -> Option<&FfprobeSideData> {
+    stream.side_data_list.iter().find(|sd| {
         sd.side_data_type
             .as_deref()
             .map(|t| {
@@ -518,19 +542,68 @@ fn detect_hdr(stream: &FfprobeStream) -> Option<String> {
                 up.contains("DOVI") || up.contains("DOLBY VISION")
             })
             .unwrap_or(false)
-    });
+    })
+}
 
-    let has_hdr10_plus = stream.side_data_list.iter().any(|sd| {
-        sd.side_data_type
-            .as_deref()
-            .map(|t| {
-                let up = t.to_ascii_uppercase();
-                up.contains("HDR DYNAMIC METADATA")
-                    || up.contains("SMPTE 2094")
-                    || up.contains("SMPTE2094")
-            })
-            .unwrap_or(false)
-    });
+fn is_hdr10_plus_side_data(sd: &FfprobeSideData) -> bool {
+    sd.side_data_type
+        .as_deref()
+        .map(|t| {
+            let up = t.to_ascii_uppercase();
+            up.contains("HDR DYNAMIC METADATA")
+                || up.contains("SMPTE 2094-40")
+                || up.contains("SMPTE2094-40")
+                || up.contains("HDR10+")
+        })
+        .unwrap_or(false)
+}
+
+fn stream_has_hdr10_plus(stream: &FfprobeStream) -> bool {
+    stream.side_data_list.iter().any(is_hdr10_plus_side_data)
+}
+
+/// Read the side data of the first frames of the first video stream and
+/// report whether any carries HDR10+ (SMPTE 2094-40) dynamic metadata.
+fn probe_hdr10_plus_frames(binary: &str, path: &str) -> bool {
+    let output = std::process::Command::new(binary)
+        .args([
+            "-v", "quiet",
+            "-select_streams", "v:0",
+            "-read_intervals", "%+#3",
+            "-show_entries", "frame=side_data_list",
+            "-print_format", "json",
+            path,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(output) = output else { return false };
+    if !output.status.success() {
+        return false;
+    }
+    serde_json::from_slice::<FfprobeFrames>(&output.stdout)
+        .map(|f| frames_have_hdr10_plus(&f))
+        .unwrap_or(false)
+}
+
+fn frames_have_hdr10_plus(frames: &FfprobeFrames) -> bool {
+    frames
+        .frames
+        .iter()
+        .any(|f| f.side_data_list.iter().any(is_hdr10_plus_side_data))
+}
+
+/// Detect the HDR format of a video stream from ffprobe color metadata + side
+/// data. Returns the same canonical labels as the filename parser: "DV",
+/// "DV+HDR10", "DV+HDR10+", "DV+HLG", "DV+HDR", "HDR10+", "HDR10", "HLG",
+/// "HDR", or None when the stream is SDR. `frame_hdr10_plus` is the result of
+/// [`probe_hdr10_plus_frames`] (HDR10+ metadata is per frame).
+fn detect_hdr(stream: &FfprobeStream, frame_hdr10_plus: bool) -> Option<String> {
+    let transfer = stream.color_transfer.as_deref().unwrap_or("");
+    let primaries = stream.color_primaries.as_deref().unwrap_or("");
+
+    let dovi = dovi_record(stream);
+    let has_hdr10_plus = frame_hdr10_plus || stream_has_hdr10_plus(stream);
 
     let base = if has_hdr10_plus {
         Some("HDR10+")
@@ -538,19 +611,18 @@ fn detect_hdr(stream: &FfprobeStream) -> Option<String> {
         Some("HDR10")
     } else if transfer == "arib-std-b67" {
         Some("HLG")
-    } else if primaries == "bt2020" {
-        Some("HDR")
     } else {
-        None
+        // Dolby Vision tells us its base layer even when the stream colour
+        // tags are missing: 1/6 = HDR10, 4 = HLG, 0 = none (profile 5).
+        match dovi.and_then(|d| d.dv_bl_signal_compatibility_id) {
+            Some(1) | Some(6) => Some("HDR10"),
+            Some(4) => Some("HLG"),
+            Some(0) => None,
+            _ if primaries == "bt2020" && dovi.is_none() => Some("HDR"),
+            _ => None,
+        }
     };
-
-    match (has_dovi, base) {
-        (true, Some("HDR10")) | (true, Some("HDR10+")) => Some("HDR10+DV".to_string()),
-        (true, Some("HDR")) => Some("HDR+DV".to_string()),
-        (true, _) => Some("DV".to_string()),
-        (false, Some(b)) => Some(b.to_string()),
-        (false, None) => None,
-    }
+    crate::parser::hdr_label(dovi.is_some(), base)
 }
 
 #[cfg(test)]
@@ -564,25 +636,25 @@ mod tests {
     #[test]
     fn detects_plain_sdr() {
         let s = parse_stream(r#"{"codec_type":"video","color_transfer":"bt709"}"#);
-        assert_eq!(detect_hdr(&s), None);
+        assert_eq!(detect_hdr(&s, false), None);
     }
 
     #[test]
     fn detects_hdr10_from_pq_transfer() {
         let s = parse_stream(r#"{"codec_type":"video","color_transfer":"smpte2084","color_primaries":"bt2020"}"#);
-        assert_eq!(detect_hdr(&s).as_deref(), Some("HDR10"));
+        assert_eq!(detect_hdr(&s, false).as_deref(), Some("HDR10"));
     }
 
     #[test]
     fn detects_hlg() {
         let s = parse_stream(r#"{"codec_type":"video","color_transfer":"arib-std-b67"}"#);
-        assert_eq!(detect_hdr(&s).as_deref(), Some("HLG"));
+        assert_eq!(detect_hdr(&s, false).as_deref(), Some("HLG"));
     }
 
     #[test]
     fn detects_hdr_from_bt2020_only() {
         let s = parse_stream(r#"{"codec_type":"video","color_primaries":"bt2020"}"#);
-        assert_eq!(detect_hdr(&s).as_deref(), Some("HDR"));
+        assert_eq!(detect_hdr(&s, false).as_deref(), Some("HDR"));
     }
 
     #[test]
@@ -592,7 +664,7 @@ mod tests {
             "codec_type":"video",
             "side_data_list":[{"side_data_type":"DOVI configuration record"}]
         }"#);
-        assert_eq!(detect_hdr(&s).as_deref(), Some("DV"));
+        assert_eq!(detect_hdr(&s, false).as_deref(), Some("DV"));
     }
 
     #[test]
@@ -604,7 +676,7 @@ mod tests {
             "color_primaries":"bt2020",
             "side_data_list":[{"side_data_type":"DOVI configuration record"}]
         }"#);
-        assert_eq!(detect_hdr(&s).as_deref(), Some("HDR10+DV"));
+        assert_eq!(detect_hdr(&s, false).as_deref(), Some("DV+HDR10"));
     }
 
     #[test]
@@ -614,6 +686,42 @@ mod tests {
             "color_transfer":"smpte2084",
             "side_data_list":[{"side_data_type":"HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}]
         }"#);
-        assert_eq!(detect_hdr(&s).as_deref(), Some("HDR10+"));
+        assert_eq!(detect_hdr(&s, false).as_deref(), Some("HDR10+"));
+    }
+
+    #[test]
+    fn detects_profile_8_dv_with_hdr10_plus_frames() {
+        let s = parse_stream(r#"{
+            "codec_type":"video",
+            "color_transfer":"smpte2084",
+            "color_primaries":"bt2020",
+            "side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":8,"dv_bl_signal_compatibility_id":1}]
+        }"#);
+        assert_eq!(detect_hdr(&s, true).as_deref(), Some("DV+HDR10+"));
+        assert_eq!(dovi_record(&s).and_then(|d| d.dv_profile), Some(8));
+    }
+
+    #[test]
+    fn dv_compatibility_id_fills_missing_colour_tags() {
+        // Profile 8.1 with no colour tags → HDR10 base layer.
+        let p81 = parse_stream(r#"{"codec_type":"video","side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":8,"dv_bl_signal_compatibility_id":1}]}"#);
+        assert_eq!(detect_hdr(&p81, false).as_deref(), Some("DV+HDR10"));
+        // Profile 8.4 (iPhone / broadcast) → HLG base layer.
+        let p84 = parse_stream(r#"{"codec_type":"video","side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":8,"dv_bl_signal_compatibility_id":4}]}"#);
+        assert_eq!(detect_hdr(&p84, false).as_deref(), Some("DV+HLG"));
+        // Profile 5 has no fallback even though primaries are BT.2020.
+        let p5 = parse_stream(r#"{"codec_type":"video","color_primaries":"bt2020","side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":5,"dv_bl_signal_compatibility_id":0}]}"#);
+        assert_eq!(detect_hdr(&p5, false).as_deref(), Some("DV"));
+    }
+
+    #[test]
+    fn hdr10_plus_found_in_frame_side_data() {
+        let frames: FfprobeFrames = serde_json::from_str(r#"{"frames":[{"side_data_list":[
+            {"side_data_type":"Mastering display metadata"},
+            {"side_data_type":"HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}
+        ]}]}"#).expect("valid frames json");
+        assert!(frames_have_hdr10_plus(&frames));
+        let plain: FfprobeFrames = serde_json::from_str(r#"{"frames":[{"side_data_list":[{"side_data_type":"Mastering display metadata"}]}]}"#).expect("valid frames json");
+        assert!(!frames_have_hdr10_plus(&plain));
     }
 }

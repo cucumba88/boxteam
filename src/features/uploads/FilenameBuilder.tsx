@@ -15,7 +15,19 @@ import {
   normalizeHdr,
   normalizeResolution,
   formatChannels,
+  mergeHdr,
 } from "./quality";
+import { audioFilenameToken, canonicalAudio } from "../../utils/techTags";
+
+/** Values read from the file/folder name, used when ffprobe is unavailable
+ *  or could not tell (e.g. the release source). */
+export interface FilenameFallback {
+  resolution?: string | null;
+  codec?: string | null;
+  hdr?: string | null;
+  audio?: string | null;
+  channels?: string | null;
+}
 
 interface FilenameBuilderProps {
   info: LocalMediaInfo | null;
@@ -28,6 +40,7 @@ interface FilenameBuilderProps {
   defaultReleaseType?: string; // Detected from filename (e.g. "BDREMUX", "WEB-DL")
   extension: string;
   dest?: string; // FTP destination folder — shows full path preview
+  fallback?: FilenameFallback;
   onChange: (filename: string) => void;
 }
 
@@ -78,25 +91,36 @@ export default function FilenameBuilder({
   defaultReleaseType,
   extension,
   dest,
+  fallback,
   onChange,
 }: FilenameBuilderProps) {
   // Shared fields. Seeded values are normalised so the dropdowns can match
   // them against the canonical lists (e.g. "4K" → "2160p", "DOLBYVISION" → "DV").
   const [resolution, setResolution] = useState(
-    normalizeResolution(info?.resolution) || (info?.resolution ?? ""),
+    normalizeResolution(info?.resolution ?? fallback?.resolution) ||
+      (info?.resolution ?? fallback?.resolution ?? ""),
   );
-  const [codec, setCodec] = useState(info?.codec ?? "");
-  const [hdr, setHdr] = useState(normalizeHdr(info?.hdr) || (info?.hdr ?? ""));
+  const [codec, setCodec] = useState(info?.codec ?? fallback?.codec ?? "");
+  // ffprobe sees HDR10/HDR10+/DV in the stream; the filename may add what an
+  // old ffprobe misses. Merge both so neither signal is dropped.
+  const [hdr, setHdr] = useState(
+    mergeHdr(info?.hdr, fallback?.hdr) || normalizeHdr(info?.hdr) || (info?.hdr ?? ""),
+  );
   // Audio tracks — one entry per physical track in the file
   type AudioTrackEntry = { codec: string; channels: string };
   const [audioTracks, setAudioTracks] = useState<AudioTrackEntry[]>(() => {
     if (info?.audio_tracks && info.audio_tracks.length > 0) {
       return info.audio_tracks.map((t) => ({
-        codec: t.codec ?? "",
+        codec: canonicalAudio(t.codec),
         channels: formatChannels(t.channels ?? null),
       }));
     }
-    return [{ codec: "", channels: "" }];
+    return [
+      {
+        codec: canonicalAudio(fallback?.audio),
+        channels: fallback?.channels ?? "",
+      },
+    ];
   });
 
   const updateAudioTrack = (idx: number, field: keyof AudioTrackEntry, value: string) => {
@@ -166,7 +190,8 @@ export default function FilenameBuilder({
         .filter((t) => t.codec.trim())
         .forEach((t) => {
           const ch = t.channels.trim();
-          parts.push(ch ? `${t.codec.trim()}.${ch}` : t.codec.trim());
+          const token = audioFilenameToken(t.codec, ".");
+          parts.push(ch ? `${token}.${ch}` : token);
         });
       const langList = langs
         .split(/[,\s]+/)
@@ -195,7 +220,8 @@ export default function FilenameBuilder({
       .filter((t) => t.codec.trim())
       .forEach((t) => {
         const ch = t.channels.trim();
-        tags.push(ch ? `${t.codec.trim()} ${ch}` : t.codec.trim());
+        const token = audioFilenameToken(t.codec, " ");
+        tags.push(ch ? `${token} ${ch}` : token);
       });
     if (subs) tags.push("SUBS");
 

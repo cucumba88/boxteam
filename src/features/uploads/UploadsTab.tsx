@@ -18,17 +18,20 @@ import { t } from "../../utils/i18n";
 interface UploadsTabProps {
   uploads: UploadItem[];
   language: AppLanguage;
+  /** Result of the FTP write probe done by the library (null = checking). */
+  writeOk: boolean | null;
   onCancel: (id: number) => void;
   onRetry: (id: number) => void;
   onRetryGroup?: (groupId: string) => Promise<unknown>;
   onRetryAllFailed?: () => Promise<unknown>;
-  onDelete: (id: number) => void;
+  onDelete: (id: number, deleteRemote?: boolean) => void;
   onClearCompleted: () => void;
 }
 
 export default function UploadsTab({
   uploads,
   language,
+  writeOk,
   onCancel,
   onRetry,
   onRetryGroup,
@@ -38,18 +41,13 @@ export default function UploadsTab({
 }: UploadsTabProps) {
   const [showModal, setShowModal] = useState(false);
   const [ffprobeAvailable, setFfprobeAvailable] = useState(false);
-  const [writeOk, setWriteOk] = useState<boolean | null>(null);
-  const [checkingWrite, setCheckingWrite] = useState(true);
+  const checkingWrite = writeOk === null;
 
   useEffect(() => {
     invoke<string | null>("check_ffprobe")
       .then((p) => setFfprobeAvailable(p != null))
       .catch(() => setFfprobeAvailable(false));
 
-    invoke<boolean>("check_ftp_write_permission")
-      .then((ok) => setWriteOk(ok))
-      .catch(() => setWriteOk(false))
-      .finally(() => setCheckingWrite(false));
   }, []);
 
   const active = uploads.filter(

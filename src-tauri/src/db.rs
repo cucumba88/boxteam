@@ -3529,6 +3529,7 @@ mod tests {
             resolution: None,
             codec: None,
             audio_codec: None,
+            audio_channels: None,
             hdr: None,
             languages: vec![],
             release_type: None,

@@ -1,3 +1,4 @@
+import { audioLabel, hdrLabel, isPremiumAudio } from "../utils/techTags";
 import { useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -525,7 +526,15 @@ export default function DetailPage({
               <>
                 <span style={{ opacity: 0.4 }}>·</span>
                 <span style={{ color: "#a78bfa", fontWeight: 700 }}>
-                  {item.hdr === "DV" ? "Dolby Vision" : item.hdr}
+                  {hdrLabel(item.hdr)}
+                </span>
+              </>
+            )}
+            {item.audio_codec && isPremiumAudio(item.audio_codec) && (
+              <>
+                <span style={{ opacity: 0.4 }}>·</span>
+                <span style={{ color: "#a78bfa", fontWeight: 700 }}>
+                  {audioLabel(item.audio_codec)}
                 </span>
               </>
             )}
@@ -922,8 +931,9 @@ export default function DetailPage({
               <Spec label={t(language, "detail.videoCodec")}>
                 {item.codec || "—"}
               </Spec>
-              <Spec label="HDR">
-                {item.hdr ? (item.hdr === "DV" ? "Dolby Vision" : item.hdr) : "—"}
+              <Spec label="HDR">{item.hdr ? hdrLabel(item.hdr) : "—"}</Spec>
+              <Spec label={t(language, "detail.audio")}>
+                {item.audio_codec ? audioLabel(item.audio_codec) : "—"}
               </Spec>
               <Spec label="Source">{item.release_type || "—"}</Spec>
               <Spec label={t(language, "detail.size")}>
@@ -1185,7 +1195,8 @@ function VersionRow({
 
   const qualityPills: string[] = [];
   if (version.resolution) qualityPills.push(version.resolution);
-  if (version.hdr) qualityPills.push(version.hdr === "DV" ? "Dolby Vision" : version.hdr);
+  if (version.hdr) qualityPills.push(hdrLabel(version.hdr));
+  if (version.audio_codec) qualityPills.push(audioLabel(version.audio_codec));
   if (version.release_type) qualityPills.push(version.release_type);
   if (version.codec) qualityPills.push(version.codec);
 

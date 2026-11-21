@@ -1,3 +1,4 @@
+import { canonicalAudio } from "../../utils/techTags";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -263,7 +264,9 @@ export default function UploadPrepareModal({
         const codec = info?.codec ?? sug?.detected_codec ?? null;
         const videoKbps = info?.video_bitrate_kbps ?? null;
         const audioCodec =
-          info?.audio_tracks?.[0]?.codec ?? sug?.detected_audio_codec ?? null;
+          canonicalAudio(
+            info?.audio_tracks?.[0]?.codec ?? sug?.detected_audio_codec,
+          ) || null;
         const audioTracks = info?.audio_tracks ?? [];
         const subtitleLangs = [
           ...new Set(

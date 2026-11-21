@@ -39,6 +39,7 @@ pub fn is_transient_ftp_error(e: &str) -> bool {
         "426", // transfer aborted
         "450", // file unavailable
         "451", // local error
+        "upload incomplete", // size check after 226 failed — resume and retry
     ];
     TRANSIENT_NEEDLES.iter().any(|n| s.contains(n))
 }
@@ -64,6 +65,10 @@ pub fn humanize_ftp_error(raw: &str) -> String {
         ("425", "No se pudo abrir el canal de datos FTP"),
         ("426", "Transferencia cancelada por el servidor"),
         ("530", "Credenciales FTP rechazadas por el servidor"),
+        ("upload incomplete", "La subida terminó incompleta (el tamaño en el servidor no coincide)"),
+        ("452", "El servidor no tiene espacio suficiente"),
+        ("552", "Cuota o espacio del servidor agotado"),
+        ("553", "El servidor no acepta ese nombre de archivo"),
         ("550", "El servidor rechazó la operación (permiso o ruta inválida)"),
         ("cannot open local file", "No se pudo leer el archivo local"),
     ];
@@ -758,12 +763,20 @@ pub async fn download_file(
 ///
 /// `remote_dir` is created recursively if it does not exist.
 /// `on_progress(bytes_done, bytes_total)` is called periodically; returning
-/// `false` cancels the transfer.
+/// `false` cancels the transfer (and removes the partial remote file).
+///
+/// `resume_hint` is how many bytes an earlier attempt of the *same* job sent.
+/// When it is non-zero and the remote file holds a prefix no longer than that
+/// (servers may persist slightly less than was sent), the upload continues
+/// with APPE from the remote size instead of starting over. The hint guards
+/// against appending to an unrelated file that merely shares the name.
+/// After the transfer the remote SIZE is compared with the local size.
 pub async fn upload_file(
     ep: &FtpEndpoint,
     remote_dir: &str,
     filename: &str,
     local_path: &str,
+    resume_hint: u64,
     on_progress: impl Fn(u64, u64) -> bool,
 ) -> Result<(), String> {
     reject_control_chars("Ruta remota", remote_dir)?;
@@ -783,17 +796,37 @@ pub async fn upload_file(
     ftp.cwd(remote_dir).await.map_err(|e| format!("CWD {remote_dir}: {}", clean_ftp_error(e)))?;
 
     // Open local file.
-    let local_file = tokio::fs::File::open(local_path)
+    let mut local_file = tokio::fs::File::open(local_path)
         .await
         .map_err(|e| format!("Cannot open local file: {e}"))?;
 
     let remote_full = format!("{}/{}", remote_dir.trim_end_matches('/'), filename);
 
+    // Resume a previous attempt of this job when the server kept its prefix.
+    let resume_from: u64 = if resume_hint > 0 {
+        match ftp.size(filename).await {
+            Ok(remote) => resume_offset(remote as u64, resume_hint, file_size),
+            Err(_) => 0,
+        }
+    } else {
+        0
+    };
+    if resume_from > 0 {
+        use tokio::io::AsyncSeekExt;
+        local_file
+            .seek(std::io::SeekFrom::Start(resume_from))
+            .await
+            .map_err(|e| format!("Read error: {e}"))?;
+    }
+
     // Open FTP data stream for writing — progress is reported as bytes are
     // actually written to the socket, so 100% only fires when the transfer is done.
-    let mut data_stream = ftp
-        .put_with_stream(filename)
-        .await
+    let open = if resume_from > 0 {
+        ftp.append_with_stream(filename).await
+    } else {
+        ftp.put_with_stream(filename).await
+    };
+    let mut data_stream = open
         .map_err(|e| format!("Cannot start upload for {remote_full}: {}", clean_ftp_error(e)))?;
 
     // Disable Nagle's algorithm so each chunk goes out immediately without
@@ -809,14 +842,21 @@ pub async fn upload_file(
     let mut buf_a = vec![0u8; CHUNK];
     let mut buf_b = vec![0u8; CHUNK];
     let mut reader = local_file;
-    let mut uploaded: u64 = 0;
+    let mut uploaded: u64 = resume_from;
     let mut cancelled = false;
+    if resume_from > 0 && !on_progress(uploaded, file_size) {
+        cancelled = true;
+    }
 
     // Prime the pump — read the first chunk before entering the loop.
-    let mut n = reader
-        .read(&mut buf_a)
-        .await
-        .map_err(|e| format!("Read error: {e}"))?;
+    let mut n = if cancelled {
+        0
+    } else {
+        reader
+            .read(&mut buf_a)
+            .await
+            .map_err(|e| format!("Read error: {e}"))?
+    };
 
     loop {
         if n == 0 {
@@ -843,6 +883,9 @@ pub async fn upload_file(
 
     if cancelled {
         ftp.abort(data_stream).await.ok();
+        // Don't leave a truncated file behind: the indexer would list it as a
+        // real (broken) release. Best effort — the control channel may be gone.
+        ftp.rm(filename).await.ok();
         ftp.quit().await.ok();
         return Err("Cancelled".to_string());
     }
@@ -853,8 +896,31 @@ pub async fn upload_file(
         .await
         .map_err(|e| format!("Upload failed for {remote_full}: {}", clean_ftp_error(e)))?;
 
+    // A 226 doesn't prove every byte landed (quota hits and proxies can cut
+    // the stream short). Compare sizes when the server supports SIZE.
+    if let Ok(remote) = ftp.size(filename).await {
+        if file_size > 0 && remote as u64 != file_size {
+            ftp.quit().await.ok();
+            // No byte counts in the error: the classifiers below look for FTP
+            // reply codes ("530", "421"…) as substrings.
+            eprintln!("[upload] {remote_full}: server has {remote} of {file_size} bytes");
+            return Err("Upload incomplete: remote size does not match".to_string());
+        }
+    }
+
     ftp.quit().await.ok();
     Ok(())
+}
+
+/// Byte offset to resume an upload from, or 0 to start over. Only resumes
+/// when the remote file is a strict, non-empty prefix no longer than what
+/// this job already sent.
+fn resume_offset(remote_size: u64, sent_before: u64, local_size: u64) -> u64 {
+    if remote_size > 0 && remote_size <= sent_before && remote_size < local_size {
+        remote_size
+    } else {
+        0
+    }
 }
 
 /// Recursively ensure that all segments of `path` exist on the FTP server.
@@ -1021,6 +1087,26 @@ mod control_char_tests {
         assert!(humanize_ftp_error("FTPS (AUTH TLS) failed: Secure error: invalid peer certificate: UnknownIssuer").contains("autofirmado"));
         assert!(humanize_ftp_error("FTPS (AUTH TLS) failed: Invalid response: [530] 530 Please login with USER and PASS.").contains("no admite FTPS"));
         assert!(humanize_ftp_error("Login failed: [530] Login incorrect.").contains("Credenciales"));
+    }
+
+    #[test]
+    fn resume_offset_only_for_our_own_prefix() {
+        // Previous attempt sent 600 bytes, server kept 512 → resume at 512.
+        assert_eq!(resume_offset(512, 600, 1000), 512);
+        // Remote is bigger than what we sent → someone else's file: restart.
+        assert_eq!(resume_offset(800, 600, 1000), 0);
+        // Nothing sent before / nothing on the server / already complete.
+        assert_eq!(resume_offset(512, 0, 1000), 0);
+        assert_eq!(resume_offset(0, 600, 1000), 0);
+        assert_eq!(resume_offset(1000, 1000, 1000), 0);
+    }
+
+    #[test]
+    fn classifies_upload_errors() {
+        assert!(is_transient_ftp_error("Upload incomplete: remote size does not match"));
+        assert!(humanize_ftp_error("Upload failed: [452] Insufficient storage space").contains("espacio"));
+        assert!(humanize_ftp_error("[553] Could not create file.").contains("nombre"));
+        assert!(!is_transient_ftp_error("[530] Login incorrect"));
     }
 
     #[test]

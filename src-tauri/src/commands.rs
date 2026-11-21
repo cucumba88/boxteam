@@ -88,6 +88,22 @@ fn persist_download_state(
     db.save_download_state(&snapshot).ok();
 }
 
+/// Whether a stored audio label ("TrueHD Atmos", "DTS:X", legacy "TRUEHD")
+/// satisfies a quality-profile preference ("Atmos", "DTS-X", "TrueHD").
+/// Punctuation and case are ignored, and a preference may name one word of a
+/// combined label — so "Atmos" matches "TrueHD Atmos" and "EAC3 Atmos" — but
+/// "AC3" never matches "EAC3".
+pub(crate) fn audio_codec_matches(actual: &str, preferred: &str) -> bool {
+    let norm = |s: &str| -> String {
+        s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase()
+    };
+    let want = norm(preferred);
+    if want.is_empty() {
+        return false;
+    }
+    norm(actual) == want || actual.split_whitespace().any(|w| norm(w) == want)
+}
+
 fn persist_upload_state(
     db: &crate::db::Db,
     queue: &crate::uploads::SharedUploadQueue,
@@ -3209,7 +3225,7 @@ pub async fn trigger_watchlist_auto_downloads(
             if let Some(pos) = audio.iter().position(|a| {
                 item.audio_codec
                     .as_deref()
-                    .map(|k| k.eq_ignore_ascii_case(a))
+                    .map(|k| audio_codec_matches(k, a))
                     .unwrap_or(false)
             }) {
                 score += (audio.len() - pos) as u32 * 20;
@@ -3632,6 +3648,8 @@ pub struct UploadSuggestion {
     pub detected_codec: Option<String>,
     /// Audio codec detected from the filename (e.g. "DTS", "AC3")
     pub detected_audio_codec: Option<String>,
+    /// Channel layout from the filename ("5.1"), used when ffprobe is missing.
+    pub detected_audio_channels: Option<String>,
     /// Languages detected from the filename (e.g. ["spa", "eng"])
     pub detected_languages: Vec<String>,
     /// HDR type detected from the filename (e.g. "HDR", "DV")
@@ -3755,7 +3773,7 @@ pub async fn suggest_upload_destination(
                     if parsed.episode.is_none() { parsed.episode = ep.episode; }
                     if parsed.resolution.is_none() { parsed.resolution = ep.resolution; }
                     if parsed.codec.is_none() { parsed.codec = ep.codec; }
-                    if parsed.audio_codec.is_none() { parsed.audio_codec = ep.audio_codec; }
+                    if parsed.audio_codec.is_none() { parsed.audio_codec = ep.audio_codec; parsed.audio_channels = ep.audio_channels; }
                     if parsed.release_type.is_none() { parsed.release_type = ep.release_type; }
                     break; // episode files are the richest source of truth
                 }
@@ -3797,7 +3815,7 @@ pub async fn suggest_upload_destination(
                         let ep = crate::parser::parse_media_path("", &sub_name);
                         if parsed.resolution.is_none() { parsed.resolution = ep.resolution; }
                         if parsed.codec.is_none()      { parsed.codec = ep.codec; }
-                        if parsed.audio_codec.is_none(){ parsed.audio_codec = ep.audio_codec; }
+                        if parsed.audio_codec.is_none(){ parsed.audio_codec = ep.audio_codec; parsed.audio_channels = ep.audio_channels; }
                         if parsed.release_type.is_none(){ parsed.release_type = ep.release_type; }
                         if parsed.resolution.is_some() { break 'outer; }
                     }
@@ -4022,6 +4040,7 @@ pub async fn suggest_upload_destination(
         detected_resolution: parsed.resolution,
         detected_codec: parsed.codec,
         detected_audio_codec: parsed.audio_codec,
+        detected_audio_channels: parsed.audio_channels,
         detected_languages: parsed.languages,
         detected_hdr: parsed.hdr,
         movie_dest,
@@ -4199,6 +4218,13 @@ fn spawn_upload_job(
         let mut last_err: Option<String> = None;
         let mut final_result: Result<(), String> = Err("upload did not start".to_string());
         let mut last_attempt: u8 = 0;
+        // Bytes this job has pushed so far (seeded from a failed earlier run
+        // that the user retried). Lets the next attempt resume with APPE
+        // instead of re-sending a 60 GB remux from byte zero.
+        let sent_bytes = Arc::new(std::sync::atomic::AtomicU64::new({
+            let q = upload_queue.lock().unwrap();
+            q.items.iter().find(|i| i.id == id).map(|i| i.bytes_done).unwrap_or(0)
+        }));
 
         for attempt in 0..max_attempts {
             last_attempt = attempt;
@@ -4225,14 +4251,21 @@ fn spawn_upload_job(
             let app_clone = app.clone();
             let upload_id = id;
             let cancel_flag_progress = cancel_flag.clone();
+            let sent_progress = sent_bytes.clone();
+            let queue_progress = upload_queue.clone();
             let result = crate::ftp::upload_file(
                 &crate::ftp::FtpEndpoint::from_config(&config),
                 &ftp_dest_path,
                 &filename,
                 &local_path,
+                sent_bytes.load(Ordering::SeqCst),
                 move |done, total| {
                     if cancel_flag_progress.load(Ordering::SeqCst) {
                         return false;
+                    }
+                    sent_progress.fetch_max(done, Ordering::SeqCst);
+                    if let Ok(mut q) = queue_progress.lock() {
+                        q.set_progress(upload_id, done);
                     }
                     let ts = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -4819,6 +4852,15 @@ pub async fn retry_upload(
 ) -> Result<(), String> {
     let (item, semaphore, cancel_flag) = {
         let mut q = upload_queue.lock().unwrap();
+        // Retrying a queued/running item would start a second job writing to
+        // the same remote file (and orphan the first job's cancel flag).
+        let status = q.items.iter().find(|i| i.id == id).map(|i| i.status.clone());
+        if matches!(
+            status,
+            Some(crate::uploads::UploadStatus::Queued | crate::uploads::UploadStatus::Uploading)
+        ) {
+            return Err("La subida ya está en curso".to_string());
+        }
         q.retry(id)?
     };
 
@@ -4853,18 +4895,29 @@ pub async fn retry_upload(
 #[tauri::command]
 pub async fn delete_upload(
     id: u64,
+    // `false` only removes the entry from the list and keeps the uploaded
+    // file on the server. Defaults to `true` (the historical behaviour).
+    delete_remote: Option<bool>,
     upload_queue: tauri::State<'_, crate::uploads::SharedUploadQueue>,
     db: tauri::State<'_, crate::db::Db>,
 ) -> Result<(), String> {
-    // Grab the item details before removing from queue.
+    // Grab the item details before removing from queue. Stop a running job
+    // first, otherwise it keeps uploading with no entry left to show or
+    // cancel it.
     let item = {
-        let q = upload_queue.lock().unwrap();
+        let mut q = upload_queue.lock().unwrap();
+        q.cancel(id);
         q.items.iter().find(|i| i.id == id).cloned()
     };
 
     // Delete the remote file when the upload completed successfully.
     if let Some(item) = &item {
-        if item.status == crate::uploads::UploadStatus::Done {
+        // A failed upload that already sent bytes left a truncated file on the
+        // server (kept so a retry can resume). Discarding the entry must not
+        // leave it behind for the indexer to list as a broken release.
+        let partial_left = item.status == crate::uploads::UploadStatus::Error && item.bytes_done > 0;
+        let finished = item.status == crate::uploads::UploadStatus::Done;
+        if (delete_remote.unwrap_or(true) && finished) || partial_left {
             if let Ok(config) = db.load_config() {
                 if let Err(e) = crate::ftp::delete_file(
                     &crate::ftp::FtpEndpoint::from_config(&config),
@@ -5489,5 +5542,23 @@ mod classification_tests {
         ] {
             assert!(is_tv(path), "not classified as TV: {path}");
         }
+    }
+}
+
+#[cfg(test)]
+mod audio_preference_tests {
+    use super::audio_codec_matches;
+
+    #[test]
+    fn audio_preferences_match_combined_and_legacy_labels() {
+        assert!(audio_codec_matches("TrueHD Atmos", "Atmos"));
+        assert!(audio_codec_matches("TrueHD Atmos", "TrueHD"));
+        assert!(audio_codec_matches("EAC3 Atmos", "Atmos"));
+        assert!(audio_codec_matches("DTS:X", "DTS-X"));
+        assert!(audio_codec_matches("DTS-HD MA", "DTS-HD MA"));
+        assert!(audio_codec_matches("TRUEHD", "TrueHD"));
+        assert!(!audio_codec_matches("EAC3", "AC3"));
+        assert!(!audio_codec_matches("DTS-HD MA", "DTS"));
+        assert!(!audio_codec_matches("AAC", ""));
     }
 }

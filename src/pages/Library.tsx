@@ -1,3 +1,4 @@
+import { matchesHdrFilter } from "../utils/techTags";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FTP_CONFIG_SAVED_EVENT } from "../components/FtpPermissionsPanel";
 import { createPortal } from "react-dom";
@@ -39,7 +40,6 @@ import FilterBar, { type Filters } from "../components/FilterBar";
 import FilterChipRow from "../components/FilterChipRow";
 import FilterSheet from "../components/FilterSheet";
 import {
-  normalizeHdr,
   normalizeReleaseType,
   normalizeResolution,
   normalizeCodec,
@@ -423,7 +423,14 @@ export default function Library({
     deleteUpload,
     clearCompleted: clearCompletedUploads,
   } = useUploads();
-  const [ftpWriteOk, setFtpWriteOk] = useState<boolean>(false);
+  // null = not checked yet. One probe per app start / FTP settings save; the
+  // Uploads tab reuses this result instead of running its own write test
+  // (MKD + STOR + RETR + DELE) every time it is opened.
+  const [ftpWriteState, setFtpWriteState] = useState<boolean | null>(null);
+  const ftpWriteOk = ftpWriteState === true;
+  // Keep the tab while there are uploads to show: a server that is briefly
+  // unreachable at startup must not hide running or failed uploads.
+  const uploadsTabVisible = ftpWriteOk || uploads.length > 0;
   const downloadMap = useMemo(
     () => new Map(downloads.map((d) => [d.ftp_path, d])),
     [downloads],
@@ -625,8 +632,8 @@ export default function Library({
     if (!isTauri()) return;
     const check = () => {
       invoke<boolean>("check_ftp_write_permission")
-        .then((ok) => setFtpWriteOk(ok))
-        .catch(() => setFtpWriteOk(false));
+        .then((ok) => setFtpWriteState(ok))
+        .catch(() => setFtpWriteState(false));
     };
     check();
     // Re-check when FTP settings are saved, so the Uploads tab appears or
@@ -636,10 +643,10 @@ export default function Library({
   }, []);
 
   useEffect(() => {
-    if (activeTab === "uploads" && !ftpWriteOk) {
+    if (activeTab === "uploads" && ftpWriteState !== null && !uploadsTabVisible) {
       switchTab("all");
     }
-  }, [ftpWriteOk, activeTab]);
+  }, [ftpWriteState, uploadsTabVisible, activeTab]);
 
   // Sync activeTab with browser back/forward in web mode.
   useEffect(() => {
@@ -1032,7 +1039,9 @@ export default function Library({
             (movie.title ?? movie.filename)),
     );
 
-  const visibleTabs = TABS.filter((tab) => tab.id !== "uploads" || ftpWriteOk);
+  const visibleTabs = TABS.filter(
+    (tab) => tab.id !== "uploads" || uploadsTabVisible,
+  );
   const mobileBottomTabs = visibleTabs.filter((tab) =>
     (["all", "movie", "tv", "downloads"] as TabId[]).includes(tab.id),
   );
@@ -1111,7 +1120,7 @@ export default function Library({
             normalizeReleaseType(item.release_type) === filters.releaseType) &&
           (!filters.resolution ||
             normalizeResolution(item.resolution) === filters.resolution) &&
-          (!filters.hdr || normalizeHdr(item.hdr) === filters.hdr) &&
+          matchesHdrFilter(item.hdr, filters.hdr) &&
           (!filters.codec || normalizeCodec(item.codec) === filters.codec) &&
           matchesGenre &&
           matchesPlatform
@@ -2020,7 +2029,7 @@ export default function Library({
         uploads: tabCounts.uploads ?? 0,
       }}
       onJumpToDownloads={() => switchTab("downloads")}
-      onJumpToUploads={ftpWriteOk ? () => switchTab("uploads") : undefined}
+      onJumpToUploads={uploadsTabVisible ? () => switchTab("uploads") : undefined}
       onShowActivity={showDevLog ? () => setShowLog((v) => !v) : undefined}
       activityCount={log.length}
     />
@@ -3597,6 +3606,7 @@ export default function Library({
               <UploadsTab
                 uploads={uploads}
                 language={language}
+                writeOk={ftpWriteState}
                 onCancel={cancelUpload}
                 onRetry={retryUpload}
                 onRetryGroup={retryGroup}

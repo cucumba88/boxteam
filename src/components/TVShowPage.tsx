@@ -1,3 +1,4 @@
+import { audioLabel, hdrLabel, hdrShortLabel, isNotableHdr, isPremiumAudio } from "../utils/techTags";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -137,7 +138,10 @@ function buildReleaseLabel(sample: MediaItem, folder: string): string {
     sample.resolution,
     sample.release_type,
     sample.codec,
-    sample.hdr && sample.hdr !== "HDR" ? sample.hdr : null,
+    sample.hdr && isNotableHdr(sample.hdr) ? hdrShortLabel(sample.hdr) : null,
+    sample.audio_codec && isPremiumAudio(sample.audio_codec)
+      ? audioLabel(sample.audio_codec)
+      : null,
   ].filter(Boolean) as string[];
   return parts.length > 0 ? parts.join(" · ") : folder || "Unknown";
 }
@@ -150,6 +154,7 @@ interface ReleaseGroup {
   release_type: string | null;
   codec: string | null;
   hdr: string | null;
+  audio: string | null;
   langs: string[];
   episodes: MediaItem[];
   totalBytes: number;
@@ -209,6 +214,7 @@ function groupEpisodesByRelease(episodes: MediaItem[]): ReleaseGroup[] {
       release_type: sample.release_type ?? null,
       codec: sample.codec ?? null,
       hdr: sample.hdr ?? null,
+      audio: sample.audio_codec ?? null,
       langs,
       episodes: eps,
       totalBytes,
@@ -1072,10 +1078,13 @@ function ReleaseGroupBlock({
             {group.codec && (
               <QualityChip tone="muted" label={group.codec} />
             )}
-            {group.hdr && group.hdr !== "HDR" && (
+            {group.hdr && isNotableHdr(group.hdr) && (
+              <QualityChip tone="hdr" label={hdrLabel(group.hdr)} />
+            )}
+            {group.audio && (
               <QualityChip
-                tone="hdr"
-                label={group.hdr === "DV" ? "Dolby Vision" : group.hdr}
+                tone={isPremiumAudio(group.audio) ? "hdr" : "muted"}
+                label={audioLabel(group.audio)}
               />
             )}
             {group.langs.length > 0 && (
@@ -1466,7 +1475,7 @@ function EpisodeRow({
           {episode.codec && <span>{episode.codec}</span>}
           {episode.hdr && (
             <span style={{ color: "#a78bfa", fontWeight: 700 }}>
-              {episode.hdr === "DV" ? "Dolby Vision" : episode.hdr}
+              {hdrShortLabel(episode.hdr)}
             </span>
           )}
           {episode.size_bytes != null && episode.size_bytes > 0 && (

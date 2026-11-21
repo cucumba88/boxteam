@@ -1,3 +1,4 @@
+import { hdrLabel } from "../utils/techTags";
 import { useEffect, useMemo, useRef } from "react";
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import type { MediaItem } from "../hooks/useIndexing";
@@ -74,7 +75,7 @@ export default function FilterChipRow({
     if (filters.hdr) {
       chips.push({
         key: `hdr:${filters.hdr}`,
-        label: filters.hdr === "DV" ? "Dolby Vision" : filters.hdr,
+        label: hdrLabel(filters.hdr),
         clear: () => onChange({ ...filters, hdr: "" }),
       });
     }

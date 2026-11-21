@@ -26,6 +26,12 @@ import type {
 } from "./types";
 import { formatBytes, formatDuration, formatLanguages } from "../../lib/format";
 import { formInputCompact, formSelectCompact } from "../../lib/formStyles";
+import {
+  audioFilenameToken,
+  audioLabel,
+  canonicalAudio,
+  hdrLabel,
+} from "../../utils/techTags";
 import { foldForSearch } from "../../utils/textSearch";
 import {
   SOURCE_OPTIONS as SHARED_SOURCE_OPTIONS,
@@ -39,6 +45,7 @@ import {
   normalizeResolution,
   mergeHdr,
   parseQualityFromFilename,
+  formatChannels,
 } from "./quality";
 
 const TMDB_IMG = "https://image.tmdb.org/t/p/w92";
@@ -124,7 +131,8 @@ function buildEpisodeFilename(
     .filter((t) => t.codec.trim())
     .forEach((t) => {
       const ch = t.channels.trim();
-      parts.push(ch ? `${t.codec.trim()}.${ch}` : t.codec.trim());
+      const token = audioFilenameToken(t.codec, ".");
+      parts.push(ch ? `${token}.${ch}` : token);
     });
   // Derive langs from per-track lang field (deduplicated, order preserved)
   const seen = new Set<string>();
@@ -422,21 +430,18 @@ export default function AnalysisRow({
     ).map((l) => normalizeLangCode(l));
     if (info?.audio_tracks && info.audio_tracks.length > 0) {
       return info.audio_tracks.map((t, i) => ({
-        codec: t.codec ?? "",
-        channels:
-          t.channels != null
-            ? t.channels <= 2
-              ? `${t.channels}.0`
-              : t.channels === 6
-                ? "5.1"
-                : t.channels === 8
-                  ? "7.1"
-                  : `${t.channels}.0`
-            : "",
+        codec: canonicalAudio(t.codec),
+        channels: formatChannels(t.channels),
         lang: normalizeLangCode(t.language ?? detectedLangs[i] ?? ""),
       }));
     }
-    return [{ codec: "", channels: "", lang: detectedLangs[0] ?? "" }];
+    return [
+      {
+        codec: canonicalAudio(suggestion?.detected_audio_codec),
+        channels: suggestion?.detected_audio_channels ?? "",
+        lang: detectedLangs[0] ?? "",
+      },
+    ];
   });
   const updateSeasonAudioTrack = (
     idx: number,
@@ -493,17 +498,8 @@ export default function AnalysisRow({
         .map((x) => normalizeLangCode(x));
       setSeasonAudioTracks(
         info.audio_tracks.map((t, i) => ({
-          codec: t.codec ?? "",
-          channels:
-            t.channels != null
-              ? t.channels <= 2
-                ? `${t.channels}.0`
-                : t.channels === 6
-                  ? "5.1"
-                  : t.channels === 8
-                    ? "7.1"
-                    : `${t.channels}.0`
-              : "",
+          codec: canonicalAudio(t.codec),
+          channels: formatChannels(t.channels),
           lang: normalizeLangCode(t.language ?? detectedLangs[i] ?? ""),
         })),
       );
@@ -532,17 +528,8 @@ export default function AnalysisRow({
             .map((l) => normalizeLangCode(l));
           setSeasonAudioTracks(
             epInfo.audio_tracks.map((t, i) => ({
-              codec: t.codec ?? "",
-              channels:
-                t.channels != null
-                  ? t.channels <= 2
-                    ? `${t.channels}.0`
-                    : t.channels === 6
-                      ? "5.1"
-                      : t.channels === 8
-                        ? "7.1"
-                        : `${t.channels}.0`
-                  : "",
+              codec: canonicalAudio(t.codec),
+              channels: formatChannels(t.channels),
               lang: normalizeLangCode(t.language ?? detectedLangs[i] ?? ""),
             })),
           );
@@ -565,6 +552,15 @@ export default function AnalysisRow({
         );
         if (mergedFallback && mergedFallback !== seasonHdr)
           setSeasonHdr(mergedFallback);
+        const fbAudio = fromEp.audio || fromFolder.audio;
+        const fbChannels = fromEp.channels || fromFolder.channels;
+        if (fbAudio) {
+          setSeasonAudioTracks((prev) =>
+            prev.length === 1 && !prev[0].codec
+              ? [{ ...prev[0], codec: fbAudio, channels: prev[0].channels || fbChannels }]
+              : prev,
+          );
+        }
 
         let langs = parseLanguagesFromPath(first);
         if (langs.length === 0) {
@@ -1260,10 +1256,29 @@ export default function AnalysisRow({
               {info.resolution && <Badge label={info.resolution} />}
               {info.codec && <Badge label={info.codec} />}
               {info.hdr && (
-                <Badge label={info.hdr} color="var(--color-warning)" />
+                <Badge
+                  label={
+                    hdrLabel(info.hdr) +
+                    (info.dv_profile ? ` (perfil ${info.dv_profile})` : "")
+                  }
+                  color="var(--color-warning)"
+                />
+              )}
+              {info.dv_profile === 5 && (
+                <Badge
+                  label="Sin capa HDR10: colores incorrectos sin Dolby Vision"
+                  color="var(--color-danger)"
+                />
               )}
               {info.audio_tracks.length > 0 && (
-                <Badge label={info.audio_tracks[0].codec} />
+                <Badge
+                  label={[
+                    audioLabel(info.audio_tracks[0].codec),
+                    formatChannels(info.audio_tracks[0].channels),
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                />
               )}
               {info.languages.length > 0 && (
                 <Badge label={formatLanguages(info.languages)} />
@@ -1962,6 +1977,13 @@ export default function AnalysisRow({
               }
               extension={ext}
               dest={dest || undefined}
+              fallback={{
+                resolution: suggestion?.detected_resolution,
+                codec: suggestion?.detected_codec,
+                hdr: suggestion?.detected_hdr,
+                audio: suggestion?.detected_audio_codec,
+                channels: suggestion?.detected_audio_channels,
+              }}
               onChange={(newName) => onFilenameChange(path, newName)}
             />
           )}

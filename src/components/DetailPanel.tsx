@@ -1,3 +1,4 @@
+import { audioLabel, hdrLabel } from "../utils/techTags";
 import React, { useState } from "react";
 import {
   Check,
@@ -498,8 +499,14 @@ export default function DetailPanel({
                   value: item.resolution,
                 },
                 { label: t(language, "detail.videoCodec"), value: item.codec },
-                { label: t(language, "detail.audio"), value: item.audio_codec },
-                { label: t(language, "filter.hdr"), value: item.hdr },
+                {
+                  label: t(language, "detail.audio"),
+                  value: item.audio_codec ? audioLabel(item.audio_codec) : null,
+                },
+                {
+                  label: t(language, "filter.hdr"),
+                  value: item.hdr ? hdrLabel(item.hdr) : null,
+                },
                 {
                   label: t(language, "detail.size"),
                   value: item.size_bytes

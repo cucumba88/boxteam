@@ -12,6 +12,12 @@ import type { UploadItem } from "./types";
 import type { AppLanguage } from "../../utils/mediaLanguage";
 import { t } from "../../utils/i18n";
 import { formatBytes } from "../../lib/format";
+import {
+  audioLabel,
+  hdrShortLabel,
+  isNotableHdr,
+  isPremiumAudio,
+} from "../../utils/techTags";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -68,7 +74,7 @@ interface UploadCardProps {
   language: AppLanguage;
   onCancel: (id: number) => void;
   onRetry: (id: number) => void;
-  onDelete: (id: number) => void;
+  onDelete: (id: number, deleteRemote?: boolean) => void;
 }
 
 export default function UploadCard({
@@ -84,6 +90,15 @@ export default function UploadCard({
       ? Math.min(100, Math.round((item.bytes_done / item.bytes_total) * 100))
       : 0;
   const remaining = item.bytes_total - item.bytes_done;
+  const qualityTags: { label: string; accent: boolean }[] = [];
+  if (item.resolution) qualityTags.push({ label: item.resolution, accent: false });
+  if (item.hdr && isNotableHdr(item.hdr))
+    qualityTags.push({ label: hdrShortLabel(item.hdr), accent: true });
+  if (item.audio_codec)
+    qualityTags.push({
+      label: audioLabel(item.audio_codec),
+      accent: isPremiumAudio(item.audio_codec),
+    });
   const elapsedMs =
     item.started_at_ms && item.completed_at_ms
       ? item.completed_at_ms - item.started_at_ms
@@ -199,6 +214,36 @@ export default function UploadCard({
           )}
       </div>
 
+      {/* What is being uploaded — the tags that end up in the library. */}
+      {qualityTags.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {qualityTags.map((tag) => (
+            <span
+              key={tag.label}
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                color: tag.accent ? "#a78bfa" : "var(--color-text-muted)",
+                background: tag.accent
+                  ? "rgba(167,139,250,0.12)"
+                  : "var(--color-surface-2)",
+                borderRadius: "var(--radius-full)",
+                padding: "2px 7px",
+              }}
+            >
+              {tag.label}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Queued with bytes from a failed run: say it will resume. */}
+      {item.status === "queued" && item.bytes_done > 0 && item.bytes_total > 0 && (
+        <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+          Continuará desde {formatBytes(item.bytes_done)} ({pct}%)
+        </div>
+      )}
+
       {/* Progress (uploading) */}
       {item.status === "uploading" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -303,6 +348,21 @@ export default function UploadCard({
               {formatDuration(elapsedMs)}
             </span>
           )}
+          {item.status === "error" &&
+            item.bytes_done > 0 &&
+            item.bytes_total > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  color: "var(--color-text-muted)",
+                  background: "var(--color-surface-2)",
+                  borderRadius: "var(--radius-full)",
+                  padding: "2px 7px",
+                }}
+              >
+                Llegó al {pct}% · al reintentar continúa desde ahí
+              </span>
+            )}
           {item.error && (
             <div
               style={{
@@ -339,19 +399,35 @@ export default function UploadCard({
             onClick={() => onRetry(item.id)}
           />
         )}
+        {/* Removing an entry from the list and deleting the uploaded file
+            from the server are different intents: before, a finished upload
+            only offered "Eliminar", which always deleted the remote file. */}
         {(item.status === "done" ||
           item.status === "error" ||
           item.status === "cancelled") && (
           <ActionButton
-            label={t(language, "upload.delete")}
+            label={
+              item.status === "error" && item.bytes_done > 0
+                ? "Descartar (borra el archivo a medias)"
+                : "Quitar de la lista"
+            }
+            tone="neutral"
+            icon={<X size={12} />}
+            onClick={() => onDelete(item.id, false)}
+          />
+        )}
+        {item.status === "done" && (
+          <ActionButton
+            label="Borrar del servidor"
             tone="danger"
             icon={<Trash2 size={12} />}
             onClick={() => {
-              const fromFtp = item.status === "done";
-              const msg = fromFtp
-                ? `¿Eliminar "${item.filename}" de la cola y del servidor FTP?`
-                : `¿Eliminar "${item.filename}" de la cola?`;
-              if (window.confirm(msg)) onDelete(item.id);
+              if (
+                window.confirm(
+                  `¿Borrar "${item.filename}" del servidor FTP? No se puede deshacer.`,
+                )
+              )
+                onDelete(item.id, true);
             }}
           />
         )}

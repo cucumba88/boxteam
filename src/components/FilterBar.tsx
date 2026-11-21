@@ -1,3 +1,4 @@
+import { hdrFilterKeys } from "../utils/techTags";
 import { useEffect, useRef, useState } from "react";
 import type { MediaItem } from "../hooks/useIndexing";
 import { formSelectCompact } from "../lib/formStyles";
@@ -49,6 +50,7 @@ const HDR_OPTIONS = [
   { value: "DV", label: "Dolby Vision", labelKey: "filter.hdr.dolbyVision" },
   { value: "HDR10+", label: "HDR10+" },
   { value: "HDR10", label: "HDR10" },
+  { value: "HLG", label: "HLG" },
   { value: "HDR", label: "HDR" },
 ] as const;
 
@@ -271,7 +273,13 @@ export default function FilterBar({
   const releaseTypeCounts = countBy(items, (item) =>
     normalizeReleaseType(item.release_type),
   );
-  const hdrCounts = countBy(items, (item) => normalizeHdr(item.hdr));
+  // One item can count for several HDR chips ("DV+HDR10" → DV, HDR10, HDR).
+  const hdrCounts = new Map<string, number>();
+  for (const item of items) {
+    for (const key of hdrFilterKeys(item.hdr)) {
+      hdrCounts.set(key, (hdrCounts.get(key) ?? 0) + 1);
+    }
+  }
   const codecCounts = countBy(items, (item) => normalizeCodec(item.codec));
   const releaseTypeOptions = Array.from(
     new Set([

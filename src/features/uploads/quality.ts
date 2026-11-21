@@ -4,6 +4,15 @@
 // supports — and how to normalise raw ffprobe / filename-parser strings into
 // the canonical dropdown values.
 
+import {
+  AUDIO_LABELS,
+  canonicalAudio,
+  canonicalHdr,
+  formatChannels as formatChannelsShared,
+  mergeHdrValues,
+  parseHdr,
+} from "../../utils/techTags";
+
 export const SOURCE_OPTIONS = [
   "",
   "WEB-DL",
@@ -20,21 +29,8 @@ export const RESOLUTIONS = ["", "2160p", "1080p", "720p", "480p"];
 
 export const CODECS = ["", "HEVC", "AVC", "AV1", "VP9", "MPEG2"];
 
-export const AUDIO_CODECS = [
-  "",
-  "TrueHD Atmos",
-  "TrueHD",
-  "DTS-HD MA",
-  "DTS:X",
-  "DTS-HD HRA",
-  "DTS",
-  "EAC3 + Atmos",
-  "EAC3",
-  "AC3",
-  "AAC",
-  "FLAC",
-  "MP3",
-];
+// Canonical audio labels (shared with the Rust parser and ffprobe analysis).
+export const AUDIO_CODECS: string[] = ["", ...AUDIO_LABELS.filter((a) => a !== "Atmos")];
 
 export interface HdrOption {
   value: string;
@@ -51,26 +47,16 @@ export const HDR_OPTIONS: HdrOption[] = [
   { value: "HDR10+", label: "HDR10+" },
   { value: "HLG", label: "HLG" },
   { value: "DV", label: "Dolby Vision" },
-  { value: "HDR+DV", label: "HDR + Dolby Vision" },
-  { value: "HDR10+DV", label: "HDR10 + Dolby Vision" },
+  { value: "DV+HDR", label: "Dolby Vision + HDR" },
+  { value: "DV+HDR10", label: "Dolby Vision + HDR10" },
+  { value: "DV+HDR10+", label: "Dolby Vision + HDR10+" },
+  { value: "DV+HLG", label: "Dolby Vision + HLG" },
 ];
 
-/** Normalise a raw HDR token (from ffprobe or filename parser) into a
- *  canonical HDR_OPTIONS value. Returns "" when nothing matches. */
+/** Normalise a raw HDR token (from ffprobe or filename parser, including the
+ *  legacy "HDR10+DV" spelling) into a canonical HDR_OPTIONS value. */
 export function normalizeHdr(raw: string | null | undefined): string {
-  if (!raw) return "";
-  const u = raw.trim().toUpperCase().replace(/[._\s-]+/g, "");
-  if (u === "DV" || u === "DOLBYVISION") return "DV";
-  if (u === "HDR10DV" || u === "HDR10PLUSDV") return "HDR10+DV";
-  if (u === "HDRDV") return "HDR+DV";
-  if (u === "HDR10PLUS" || u === "HDR10+") return "HDR10+";
-  if (u === "HDR10") return "HDR10";
-  if (u === "HLG") return "HLG";
-  if (u === "HDR") return "HDR";
-  if (u === "SDR") return "SDR";
-  // Allow already-combined tokens with a "+" preserved
-  if (raw === "HDR10+DV" || raw === "HDR+DV") return raw;
-  return "";
+  return canonicalHdr(raw);
 }
 
 /** Combine two HDR sources (e.g. ffprobe + filename parser) into one
@@ -80,41 +66,19 @@ export function mergeHdr(
   a: string | null | undefined,
   b: string | null | undefined,
 ): string {
-  const tokens = new Set<string>();
-  for (const raw of [a, b]) {
-    const n = normalizeHdr(raw);
-    if (!n) continue;
-    if (n.includes("DV")) tokens.add("DV");
-    const base = n.replace("+DV", "").replace(/^DV$/, "");
-    if (base) tokens.add(base);
-  }
-  const hasDV = tokens.has("DV");
-  let base = "";
-  if (tokens.has("HDR10+")) base = "HDR10+";
-  else if (tokens.has("HDR10")) base = "HDR10";
-  else if (tokens.has("HLG")) base = "HLG";
-  else if (tokens.has("HDR")) base = "HDR";
-  else if (tokens.has("SDR")) base = "SDR";
-
-  if (hasDV) {
-    if (base === "HDR10" || base === "HDR10+") return "HDR10+DV";
-    if (base === "HDR") return "HDR+DV";
-    return "DV";
-  }
-  return base;
+  return mergeHdrValues(a, b);
 }
 
 /** The HDR label to embed in the metadata tag list (empty when DV-only). */
 export function hdrFilenameToken(h: string): string {
-  if (!h || h === "DV") return "";
-  if (h === "HDR+DV") return "HDR";
-  if (h === "HDR10+DV") return "HDR10";
-  return h;
+  const { dv, base } = parseHdr(h);
+  if (dv && base === "SDR") return "";
+  return base;
 }
 
 /** Whether the HDR value should add a "[Dolby Vision]" bracket / "DV" token. */
 export function isDV(h: string): boolean {
-  return h === "DV" || h === "HDR+DV" || h === "HDR10+DV";
+  return parseHdr(h).dv;
 }
 
 /** Map any release-type string (BDREMUX, BD REMUX, REMUX, WEBDL, BRRIP…) to
@@ -146,19 +110,15 @@ export function normalizeResolution(raw: string | null | undefined): string {
 }
 
 /** Channel count → display string (6 → "5.1", 8 → "7.1", 2 → "2.0"). */
-export function formatChannels(n: number | null | undefined): string {
-  if (!n) return "";
-  if (n <= 2) return `${n}.0`;
-  if (n === 6) return "5.1";
-  if (n === 8) return "7.1";
-  return `${n}.0`;
-}
+export const formatChannels = formatChannelsShared;
 
 export interface ParsedQuality {
   source: string;
   resolution: string;
   codec: string;
   hdr: string;
+  audio: string;
+  channels: string;
 }
 
 /** Parse source / resolution / codec / HDR from a media filename or folder
@@ -188,11 +148,35 @@ export function parseQualityFromFilename(name: string): ParsedQuality {
   else if (/REMUX/.test(u)) source = "REMUX";
 
   // HDR — scan every match so combined HDR10 + DV files are detected.
-  const hdrRe = /\b(DOLBY[\s._-]?VISION|DV|HDR10\+|HDR10|HLG|HDR|SDR)\b/g;
-  const hdrTokens: string[] = [];
-  for (const m of u.matchAll(hdrRe)) hdrTokens.push(m[1]);
+  // No trailing \b after "HDR10+": a word boundary after "+" only exists
+  // when a letter follows, so "HDR10+.DV" used to read as plain HDR10.
+  const hdrRe =
+    /\b(HDR10\+|HDR10[\s._-]?PLUS\b|(?:DOLBY[\s._-]?VISION|DOVI|DV|HDR10|HLG|HDR|SDR)\b)/g;
   let hdr = "";
-  for (const t of hdrTokens) hdr = mergeHdr(hdr, t);
+  for (const m of u.matchAll(hdrRe)) hdr = mergeHdr(hdr, m[1]);
 
-  return { source, resolution, codec, hdr };
+  // Audio — best track wins (TrueHD Atmos > DTS:X > DTS-HD MA > DD+ Atmos …).
+  const atmos = /\bATMOS\b|\bDDPA\d/.test(u);
+  let audio = "";
+  if (/\bTRUE[\s.-]?HD/.test(u)) audio = atmos ? "TrueHD Atmos" : "TrueHD";
+  else if (/\bDTS[\s.:-]?X\b/.test(u)) audio = "DTS:X";
+  else if (/\bDTS[\s.-]?(HD[\s.-]?)?MA\b/.test(u)) audio = "DTS-HD MA";
+  else if (/\b(E-?AC-?3|DDPA?\d|DDPA?\b|DD\+)/.test(u))
+    audio = atmos ? "EAC3 Atmos" : "EAC3";
+  else if (/\bDTS[\s.-]?HD[\s.-]?HRA?\b/.test(u)) audio = "DTS-HD HRA";
+  else if (/\bDTS[\s.-]?HD\b/.test(u)) audio = "DTS-HD";
+  else if (/\bDTS(\d|\b)/.test(u)) audio = "DTS";
+  else if (/\bFLAC(\d|\b)/.test(u)) audio = "FLAC";
+  else if (/\bL?PCM(\d|\b)/.test(u)) audio = "PCM";
+  else if (/\b(AC-?3|DD)(\d|\b)/.test(u)) audio = "AC3";
+  else if (/\bAAC(\d|\b)/.test(u)) audio = "AAC";
+  else if (atmos) audio = "Atmos";
+  audio = canonicalAudio(audio);
+
+  const ch = u.match(
+    /\b(?:TRUE[\s.-]?HD|DTS(?:[\s.:-]?(?:HD|X))?|DDPA?|DD\+|DD|E-?AC-?3|AC-?3|AAC|FLAC|OPUS|L?PCM|ATMOS)(?:[\s.-]?(?:MA|HRA|ATMOS))*[\s.-]?([1-9])[\s.]([01])\b/,
+  );
+  const channels = ch ? `${ch[1]}.${ch[2]}` : "";
+
+  return { source, resolution, codec, hdr, audio, channels };
 }

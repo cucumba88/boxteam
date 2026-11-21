@@ -26,7 +26,7 @@ static PAREN_YEAR_RE: LazyLock<Regex> = LazyLock::new(|| {
 static TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?ix)\b(2160p|4K|UHD|1080p|1080i|720p|720i|480p|576p|x265|x264|HEVC|AVC|AV1|VP9|
-          DTS[-.]?HD|TrueHD|Atmos|DTS|AC3|EAC3|DD\+?|AAC|FLAC|MP3|Opus|
+          DTS[-.]?HD|TrueHD|Atmos|DTS|AC3|EAC3|DD\+?|AAC|FLAC|MP3|
           HDR10\+?|HDR|DV|Dolby\.?Vision|SDR|
           BluRay|BDRip|BRRip|BDMV|REMUX|BDREMUX|
           WEB-DL|WEBRip|WEBDL|WEB|
@@ -130,14 +130,153 @@ static CODEC_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid codec regex")
 });
 
-static AUDIO_CODEC_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(DTS[-.]?HD|TrueHD|Atmos|DTS|EAC3|AC3|DD\+?|AAC|FLAC)\b")
-        .expect("valid audio codec regex")
+// ── Audio detection ─────────────────────────────────────────────────────────
+// Every audio regex runs on the "clean" stem (dots/underscores → spaces), so
+// "DDP5.1" arrives as "DDP5 1" and "DTS-HD.MA.7.1" as "DTS-HD MA 7 1". None of
+// them may end in a bare `\b` after a non-word char ("DD+", "HDR10+"): `\b`
+// after "+" only holds when a letter/digit follows, which silently dropped
+// "DD+ 5 1" and "HDR10+ DV".
+
+static AUDIO_TRUEHD_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bTrue[\s-]?HD(?:\d|\b)").expect("valid truehd regex")
+});
+static AUDIO_ATMOS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    // "Atmos", plus the "DDPA5.1" / "DDPA" shorthand some groups use for
+    // E-AC-3 JOC (Atmos).
+    Regex::new(r"(?i)\b(?:Atmos|DDPA(?:\d|\b))").expect("valid atmos regex")
+});
+static AUDIO_DTSX_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bDTS[\s:-]?X(?:\d|\b)").expect("valid dts:x regex")
+});
+static AUDIO_DTSHD_MA_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bDTS[\s-]?(?:HD[\s-]?)?MA(?:\d|\b)").expect("valid dts-hd ma regex")
+});
+static AUDIO_DTSHD_HRA_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bDTS[\s-]?HD[\s-]?(?:HRA?|High[\s-]?Res(?:olution)?)(?:\d|\b)")
+        .expect("valid dts-hd hra regex")
+});
+static AUDIO_DTSHD_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bDTS[\s-]?HD(?:\d|\b)").expect("valid dts-hd regex")
+});
+static AUDIO_DTS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bDTS(?:\d|\b)").expect("valid dts regex")
+});
+static AUDIO_EAC3_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)\b(?:E-?AC-?3(?:\d|\b)|DDPA?(?:\d|\b)|DD\+|DD[\s-]?Plus\b|Dolby[\s-]?Digital[\s-]?Plus\b)",
+    )
+    .expect("valid eac3 regex")
+});
+static AUDIO_AC3_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:AC-?3(?:\d|\b)|DD(?:\d|\b)|Dolby[\s-]?Digital\b)").expect("valid ac3 regex")
+});
+static AUDIO_AAC_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:HE-?)?AAC(?:\d|\b|-?LC)").expect("valid aac regex")
+});
+static AUDIO_FLAC_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bFLAC(?:\d|\b)").expect("valid flac regex")
+});
+static AUDIO_PCM_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bL?PCM(?:\d|\b)").expect("valid pcm regex")
+});
+static AUDIO_MP3_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bMP3\b").expect("valid mp3 regex")
+});
+/// "Opus" is also an English word ("Magnum Opus"), so it only counts after the
+/// first technical tag — see `detect_audio`.
+static AUDIO_OPUS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bOpus(?:\d|\b)").expect("valid opus regex")
 });
 
+/// Channel layout written right after an audio codec: "DDP5 1", "DTS-HD MA 7 1",
+/// "TrueHD Atmos 7 1", "AAC2 0", "AC3 5 1". Requiring the codec in front keeps
+/// stray numbers in titles ("Ocean's 8 1080p") from being read as channels.
+static AUDIO_CHANNELS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?ix)\b(?:True[\s-]?HD|DTS(?:[\s:-]?(?:HD|X|ES))?|DDPA?|DD\+|DD|E-?AC-?3|AC-?3|(?:HE-?)?AAC(?:-?LC)?|FLAC|Opus|L?PCM|Atmos)
+           (?:[\s-]?(?:MA|HRA|Atmos))*
+           [\s-]?([1-9])[\s.]([01])\b",
+    )
+    .expect("valid audio channels regex")
+});
+
+/// Detect the main audio format from a cleaned filename/folder name and return
+/// it as one of the canonical labels shared with ffprobe analysis and the
+/// upload form: "TrueHD Atmos", "TrueHD", "DTS:X", "DTS-HD MA", "DTS-HD HRA",
+/// "DTS-HD", "EAC3 Atmos", "EAC3", "DTS", "FLAC", "PCM", "AC3", "AAC",
+/// "Opus", "MP3" or bare "Atmos" (Atmos with no recognisable base codec).
+///
+/// When a name lists several tracks ("TrueHD 7 1 Atmos AC3 5 1") the best one
+/// wins, which is what people mean by "the audio" of a release.
+pub fn detect_audio(text: &str) -> Option<String> {
+    let atmos = AUDIO_ATMOS_RE.is_match(text);
+    if AUDIO_TRUEHD_RE.is_match(text) {
+        return Some(if atmos { "TrueHD Atmos" } else { "TrueHD" }.to_string());
+    }
+    if AUDIO_DTSX_RE.is_match(text) {
+        return Some("DTS:X".to_string());
+    }
+    if AUDIO_DTSHD_MA_RE.is_match(text) {
+        return Some("DTS-HD MA".to_string());
+    }
+    let eac3 = AUDIO_EAC3_RE.is_match(text);
+    if eac3 && atmos {
+        return Some("EAC3 Atmos".to_string());
+    }
+    if AUDIO_DTSHD_HRA_RE.is_match(text) {
+        return Some("DTS-HD HRA".to_string());
+    }
+    if AUDIO_DTSHD_RE.is_match(text) {
+        return Some("DTS-HD".to_string());
+    }
+    if eac3 {
+        return Some("EAC3".to_string());
+    }
+    if AUDIO_DTS_RE.is_match(text) {
+        return Some("DTS".to_string());
+    }
+    if AUDIO_FLAC_RE.is_match(text) {
+        return Some("FLAC".to_string());
+    }
+    if AUDIO_PCM_RE.is_match(text) {
+        return Some("PCM".to_string());
+    }
+    if AUDIO_AC3_RE.is_match(text) {
+        return Some("AC3".to_string());
+    }
+    if AUDIO_AAC_RE.is_match(text) {
+        return Some("AAC".to_string());
+    }
+    let tech_start = TAG_RE.find(text).map(|m| m.start()).unwrap_or(text.len());
+    if AUDIO_OPUS_RE.find_iter(text).any(|m| m.start() >= tech_start && m.start() > 0) {
+        return Some("Opus".to_string());
+    }
+    if AUDIO_MP3_RE.is_match(text) {
+        return Some("MP3".to_string());
+    }
+    if atmos {
+        return Some("Atmos".to_string());
+    }
+    None
+}
+
+/// Channel layout ("7.1", "5.1", "2.0") written next to an audio codec.
+pub fn detect_audio_channels(text: &str) -> Option<String> {
+    AUDIO_CHANNELS_RE
+        .captures(text)
+        .map(|c| format!("{}.{}", &c[1], &c[2]))
+}
+
+// ── HDR detection ───────────────────────────────────────────────────────────
+
+/// HDR / Dolby Vision tokens. "HDR10+" is matched without a trailing `\b`
+/// (see the audio note above); the other alternatives need one so "HDRip"
+/// or "DVDRip" never count.
 static HDR_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(DV|Dolby[\s._]?Vision|HDR10\+|HDR10|HLG|HDR|SDR)\b")
-        .expect("valid HDR regex")
+    Regex::new(
+        r"(?i)\b(?:(HDR10\+|HDR10[\s-]?Plus\b|HDR10P\b)|(DV|DoVi|Dolby[\s._-]?Vision|HDR10|HLG|HDR|SDR)\b)",
+    )
+    .expect("valid HDR regex")
 });
 
 /// Normalise a single matched HDR token (case-insensitive raw match) to one of
@@ -146,8 +285,8 @@ fn canonicalize_hdr_token(raw: &str) -> Option<&'static str> {
     let up = raw.to_uppercase();
     let stripped: String = up.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '+').collect();
     match stripped.as_str() {
-        "DV" | "DOLBYVISION" => Some("DV"),
-        "HDR10+" => Some("HDR10+"),
+        "DV" | "DOVI" | "DOLBYVISION" => Some("DV"),
+        "HDR10+" | "HDR10PLUS" | "HDR10P" => Some("HDR10+"),
         "HDR10" => Some("HDR10"),
         "HLG" => Some("HLG"),
         "HDR" => Some("HDR"),
@@ -156,8 +295,34 @@ fn canonicalize_hdr_token(raw: &str) -> Option<&'static str> {
     }
 }
 
+/// Build the canonical stored HDR label from a Dolby Vision flag and the
+/// strongest base layer. With Dolby Vision the label is "DV+<base>" — e.g.
+/// "DV+HDR10", "DV+HDR10+", "DV+HLG" — so HDR10 and HDR10+ stay distinct.
+/// (Before v0.16 it was "HDR10+DV" for both, which read as "HDR10+ with DV"
+/// even for plain HDR10; the frontend still understands the old spelling.)
+pub fn hdr_label(dv: bool, base: Option<&str>) -> Option<String> {
+    match (dv, base) {
+        (true, Some(b @ ("HDR10+" | "HDR10" | "HLG" | "HDR"))) => Some(format!("DV+{b}")),
+        (true, _) => Some("DV".to_string()),
+        (false, Some(b)) => Some(b.to_string()),
+        (false, None) => None,
+    }
+}
+
+/// Specificity ranking for HDR base layers: HDR10+ > HDR10 > HLG > HDR > SDR.
+pub fn hdr_rank(t: &str) -> i8 {
+    match t {
+        "HDR10+" => 4,
+        "HDR10" => 3,
+        "HLG" => 2,
+        "HDR" => 1,
+        "SDR" => 0,
+        _ => -1,
+    }
+}
+
 /// Scan a string for every HDR token and combine them into one canonical
-/// label, preserving Dolby Vision when seen alongside HDR/HDR10/HDR10+.
+/// label, preserving Dolby Vision when seen alongside HDR/HDR10/HDR10+/HLG.
 fn combine_hdr_from(text: &str) -> Option<String> {
     let mut has_dv = false;
     let mut base: Option<&'static str> = None;
@@ -167,28 +332,13 @@ fn combine_hdr_from(text: &str) -> Option<String> {
                 has_dv = true;
                 continue;
             }
-            // Specificity ranking: HDR10+ > HDR10 > HLG > HDR > SDR.
-            let rank = |t: &str| match t {
-                "HDR10+" => 4,
-                "HDR10" => 3,
-                "HLG" => 2,
-                "HDR" => 1,
-                "SDR" => 0,
-                _ => -1,
-            };
             base = match base {
-                Some(prev) if rank(prev) >= rank(tok) => Some(prev),
+                Some(prev) if hdr_rank(prev) >= hdr_rank(tok) => Some(prev),
                 _ => Some(tok),
             };
         }
     }
-    match (has_dv, base) {
-        (true, Some("HDR10") | Some("HDR10+")) => Some("HDR10+DV".to_string()),
-        (true, Some("HDR")) => Some("HDR+DV".to_string()),
-        (true, _) => Some("DV".to_string()),
-        (false, Some(b)) => Some(b.to_string()),
-        (false, None) => None,
-    }
+    hdr_label(has_dv, base)
 }
 
 /// Season inference patterns for path-based season detection (checked in order).
@@ -295,6 +445,9 @@ pub struct ParsedMedia {
     pub resolution: Option<String>,
     pub codec: Option<String>,
     pub audio_codec: Option<String>,
+    /// Channel layout next to the audio codec ("7.1", "5.1", "2.0"). Not
+    /// stored in the library — only used to pre-fill the upload form.
+    pub audio_channels: Option<String>,
     pub hdr: Option<String>,
     pub languages: Vec<String>,
     pub release_type: Option<String>,  // WEB-DL, BluRay, BDREMUX, etc.
@@ -575,10 +728,9 @@ fn parse_stem(ftp_path: Option<&str>, without_ext: &str) -> ParsedMedia {
             .find(&clean)
             .map(|m| m.as_str().to_uppercase())
             .or_else(|| ancestor_find!(|a| CODEC_RE.find(a).map(|m| m.as_str().to_uppercase()))),
-        audio_codec: AUDIO_CODEC_RE
-            .find(&clean)
-            .map(|m| m.as_str().to_uppercase())
-            .or_else(|| ancestor_find!(|a| AUDIO_CODEC_RE.find(a).map(|m| m.as_str().to_uppercase()))),
+        audio_codec: detect_audio(&clean).or_else(|| ancestor_find!(|a| detect_audio(a))),
+        audio_channels: detect_audio_channels(&clean)
+            .or_else(|| ancestor_find!(|a| detect_audio_channels(a))),
         hdr: combine_hdr_from(&clean)
             .or_else(|| ancestor_find!(|a| combine_hdr_from(a))),
         languages,
@@ -995,8 +1147,8 @@ mod tests {
         assert_eq!(p.year, Some(2010));
         assert_eq!(p.resolution.as_deref(), Some("2160P"));
         // Both DV and HDR10 are present — combine_hdr_from merges them.
-        assert_eq!(p.hdr.as_deref(), Some("HDR10+DV"));
-        assert_eq!(p.audio_codec.as_deref(), Some("DTS-HD"));
+        assert_eq!(p.hdr.as_deref(), Some("DV+HDR10"));
+        assert_eq!(p.audio_codec.as_deref(), Some("DTS-HD MA"));
     }
 
     #[test]
@@ -1014,7 +1166,7 @@ mod tests {
     #[test]
     fn parses_hdr10_plus_dv_combined() {
         let p = parse_media_path("", "Movie.2023.2160p.WEB-DL.HDR10+.DV.x265.mkv");
-        assert_eq!(p.hdr.as_deref(), Some("HDR10+DV"));
+        assert_eq!(p.hdr.as_deref(), Some("DV+HDR10+"));
     }
 
     #[test]
@@ -1056,9 +1208,8 @@ mod tests {
 
     #[test]
     fn static_regex_atmos_audio_codec() {
-        // Verifies AUDIO_CODEC_RE picks up TrueHD Atmos (first match wins).
         let p = parse_media_path("", "Movie.2022.2160p.TrueHD.Atmos.x265.mkv");
-        assert_eq!(p.audio_codec.as_deref(), Some("TRUEHD"));
+        assert_eq!(p.audio_codec.as_deref(), Some("TrueHD Atmos"));
     }
 
     #[test]
@@ -1254,5 +1405,117 @@ mod tests {
         assert_eq!(split_cap_number(205, None, false, Some(2)), (Some(2), Some(5), None));
         // Known season that does NOT match → plain episode number.
         assert_eq!(split_cap_number(205, None, true, Some(1)), (None, Some(205), None));
+    }
+
+    // ── HDR / Dolby Vision / audio corpus ──────────────────────────────────
+    // Real-world scene, P2P and Spanish-tracker names. Columns: filename,
+    // expected hdr, expected audio codec, expected channels.
+
+    fn check_tech(rows: &[(&str, Option<&str>, Option<&str>, Option<&str>)]) {
+        let mut failures = Vec::new();
+        for (file, hdr, audio, ch) in rows {
+            let p = parse_media_path("", file);
+            if p.hdr.as_deref() != *hdr
+                || p.audio_codec.as_deref() != *audio
+                || p.audio_channels.as_deref() != *ch
+            {
+                failures.push(format!(
+                    "{file}\n    got hdr={:?} audio={:?} ch={:?}\n    want hdr={hdr:?} audio={audio:?} ch={ch:?}",
+                    p.hdr, p.audio_codec, p.audio_channels
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
+    }
+
+    #[test]
+    fn corpus_hdr_and_dolby_vision() {
+        check_tech(&[
+            // Dolby Vision + HDR10 base layer (most UHD remuxes / WEB-DLs)
+            ("Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv", Some("DV+HDR"), Some("EAC3 Atmos"), Some("5.1")),
+            ("Oppenheimer.2023.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.7.1.Atmos-FGT.mkv", Some("DV+HDR10"), Some("TrueHD Atmos"), Some("7.1")),
+            ("The.Last.of.Us.S01E01.2160p.MAX.WEB-DL.DDP5.1.DoVi.HDR10.H.265-NTb.mkv", Some("DV+HDR10"), Some("EAC3"), Some("5.1")),
+            ("Severance.S02E01.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR10+.H.265-FLUX.mkv", Some("DV+HDR10+"), Some("EAC3 Atmos"), Some("5.1")),
+            ("Movie.2023.2160p.WEB-DL.HDR10Plus.DV.x265.mkv", Some("DV+HDR10+"), None, None),
+            ("Movie.2023.2160p.HDR10+.mkv", Some("HDR10+"), None, None),
+            ("Movie_2023_2160p_HDR10+_DV_x265.mkv", Some("DV+HDR10+"), None, None),
+            ("Movie.2023.2160p.HDR10.HDR10+.x265.mkv", Some("HDR10+"), None, None),
+            ("Como.cabras.2026.WEB.DL.2160p.HDR10.DV.mkv", Some("DV+HDR10"), None, None),
+            ("Daredevil Born Again (2025) S02 E01 WEB DL 2160p HDR10 DV.mkv", Some("DV+HDR10"), None, None),
+            ("Gladiator II (2024) [4K UHD BDRemux HDR10 Dolby Vision][Castellano TrueHD Atmos 7.1].mkv", Some("DV+HDR10"), Some("TrueHD Atmos"), Some("7.1")),
+            ("Wicked (2024.BDREMUX.2160P.HEVC.HDR10.SPA.ENG.TrueHD Atmos 7.1.SUBS)[Dolby Vision].mkv", Some("DV+HDR10"), Some("TrueHD Atmos"), Some("7.1")),
+            // Dolby Vision only (profile 5 WEB releases)
+            ("Movie.2023.2160p.WEB-DL.DV.mkv", Some("DV"), None, None),
+            ("Movie.2023.2160p.Dolby.Vision.x265.mkv", Some("DV"), None, None),
+            ("Movie.2023.2160p.NF.WEB-DL.DDP5.1.Atmos.DoVi.H.265-GROUP.mkv", Some("DV"), Some("EAC3 Atmos"), Some("5.1")),
+            ("Movie.2023.2160p.DolbyVision.mkv", Some("DV"), None, None),
+            // DV with HLG base (profile 8.4)
+            ("Concert.2023.2160p.DV.HLG.mkv", Some("DV+HLG"), None, None),
+            // Plain HDR / HLG / SDR
+            ("Avatar.2009.2160p.HDR10.x265.mkv", Some("HDR10"), None, None),
+            ("Avengers.Endgame.2019.2160p.UHD.BluRay.REMUX.HDR.HEVC.Atmos-EPSiLON.mkv", Some("HDR"), Some("Atmos"), None),
+            ("Planet.Earth.III.S01E01.2160p.iP.WEB-DL.AAC2.0.HLG.H.265-GROUP.mkv", Some("HLG"), Some("AAC"), Some("2.0")),
+            ("Movie.2023.2160p.SDR.WEB-DL.x265.mkv", Some("SDR"), None, None),
+            // Nothing HDR — and words that only look like it
+            ("Movie.2023.1080p.HDRip.x264.mkv", None, None, None),
+            ("Movie.2005.DVDRip.XviD.AC3.mkv", None, Some("AC3"), None),
+            ("Movie.2023.1080p.BluRay.x264.mkv", None, None, None),
+        ]);
+    }
+
+    #[test]
+    fn corpus_audio_codecs_and_channels() {
+        check_tech(&[
+            // Lossless
+            ("Inception.2010.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1-FGT.mkv", Some("HDR10"), Some("DTS-HD MA"), Some("5.1")),
+            ("Movie.2019.1080p.BluRay.REMUX.AVC.DTS-HD.MA.7.1-EPSiLON.mkv", None, Some("DTS-HD MA"), Some("7.1")),
+            ("Movie.2019.1080p.BluRay.DTS-HD.HRA.7.1.x264.mkv", None, Some("DTS-HD HRA"), Some("7.1")),
+            ("Movie.2020.2160p.UHD.BluRay.x265.DTS-X.7.1-GROUP.mkv", None, Some("DTS:X"), Some("7.1")),
+            ("Movie.2020.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.TrueHD.7.1.Atmos-FGT.mkv", None, Some("TrueHD Atmos"), Some("7.1")),
+            ("Movie (2021) [2160p DTS-X 7.1].mkv", None, Some("DTS:X"), Some("7.1")),
+            ("Movie.2021.2160p.BluRay.DTS.X.7.1.x265.mkv", None, Some("DTS:X"), Some("7.1")),
+            ("Movie.2018.1080p.BluRay.TrueHD.7.1.x264.mkv", None, Some("TrueHD"), Some("7.1")),
+            ("Movie.2018.1080p.BluRay.FLAC.2.0.x264.mkv", None, Some("FLAC"), Some("2.0")),
+            ("Anime.S01E01.1080p.BluRay.FLAC2.0.x264-GROUP.mkv", None, Some("FLAC"), Some("2.0")),
+            ("Movie.1960.1080p.BluRay.REMUX.AVC.LPCM.1.0-GROUP.mkv", None, Some("PCM"), Some("1.0")),
+            // Lossy / streaming
+            ("The.Bear.S03E01.1080p.HULU.WEB-DL.DDP5.1.H.264-NTb.mkv", None, Some("EAC3"), Some("5.1")),
+            ("Show.S01E01.1080p.WEB-DL.DD+5.1.H.264-GROUP.mkv", None, Some("EAC3"), Some("5.1")),
+            ("Show.S01E01.1080p.WEB-DL.DD+.5.1.H.264-GROUP.mkv", None, Some("EAC3"), Some("5.1")),
+            ("Show.S01E01.2160p.WEB-DL.DDPA5.1.H.265-GROUP.mkv", None, Some("EAC3 Atmos"), Some("5.1")),
+            ("Show.S01E01.1080p.WEB-DL.EAC3.5.1.x264.mkv", None, Some("EAC3"), Some("5.1")),
+            ("Show.S01E01.1080p.WEB-DL.E-AC-3.5.1.x264.mkv", None, Some("EAC3"), Some("5.1")),
+            ("Show.S01E01.720p.HDTV.DD5.1.x264.mkv", None, Some("AC3"), Some("5.1")),
+            ("Movie.2010.720p.BluRay.AC3.5.1.x264.mkv", None, Some("AC3"), Some("5.1")),
+            ("Movie.2010.720p.BluRay.DTS.5.1.x264.mkv", None, Some("DTS"), Some("5.1")),
+            ("Movie.2023.1080p.WEBRip.AAC2.0.x264.mkv", None, Some("AAC"), Some("2.0")),
+            ("Movie.2023.1080p.WEB-DL.AAC.5.1.x265.mkv", None, Some("AAC"), Some("5.1")),
+            ("Anime.S01E01.1080p.WEB.Opus.2.0.x265.mkv", None, Some("Opus"), Some("2.0")),
+            ("Movie.2001.DVDRip.MP3.XviD.avi", None, Some("MP3"), None),
+            // Spanish trackers
+            ("La Sociedad de la Nieve (2023) [BDRip 1080p][Castellano AC3 5.1].mkv", None, Some("AC3"), Some("5.1")),
+            ("Oppenheimer (2023) [1080p] [BluRay] [5.1] [YTS.MX].mp4", None, None, None),
+            ("Padre no hay más que uno 4 (2024) [WEB-DL 1080p][Castellano DD+ 5.1].mkv", None, Some("EAC3"), Some("5.1")),
+            // Titles with words that look like codecs
+            ("Magnum.Opus.2019.1080p.WEB-DL.x264.mkv", None, None, None),
+            ("Ocean's.8.2018.1080p.BluRay.x264.mkv", None, None, None),
+        ]);
+    }
+
+    #[test]
+    fn tech_tags_inherited_from_season_folder() {
+        let p = parse_media_path(
+            "/Series/Andor.S02.2160p.DSNP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX/Andor.S02E01.mkv",
+            "Andor.S02E01.mkv",
+        );
+        assert_eq!(p.hdr.as_deref(), Some("DV+HDR"));
+        assert_eq!(p.audio_codec.as_deref(), Some("EAC3 Atmos"));
+        assert_eq!(p.audio_channels.as_deref(), Some("5.1"));
+    }
+
+    #[test]
+    fn titles_unchanged_by_audio_tokens() {
+        assert_eq!(parse_media_path("", "Magnum.Opus.2019.1080p.WEB-DL.x264.mkv").title, "Magnum Opus");
+        assert_eq!(parse_media_path("", "The.Bear.S03E01.1080p.HULU.WEB-DL.DDP5.1.H.264-NTb.mkv").title, "The Bear");
     }
 }

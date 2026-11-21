@@ -1,3 +1,4 @@
+import { hdrLabel, isPremiumHdr, parseHdr } from "../utils/techTags";
 import { memo, useState } from "react";
 import { Check, Clapperboard, Download, Tv2 } from "lucide-react";
 import { MediaItem } from "../hooks/useIndexing";
@@ -365,53 +366,56 @@ function MediaCard({
             </div>
           )}
 
-        {/* Premium HDR badge — only show HDR10+ and Dolby Vision, the formats
-            that actually warrant attention. Plain HDR/HDR10 is the default
-            assumption for modern releases and adds visual noise. */}
-        {item.hdr && (item.hdr === "HDR10+" || item.hdr === "DV") && (
-          <div
-            style={{
-              position: "absolute",
-              bottom: "0.4rem",
-              right: "0.4rem",
-              zIndex: 4,
-            }}
-          >
-            <OverlayBadge
-              tone="violet"
-              title={item.hdr === "DV" ? "Dolby Vision" : item.hdr}
-            >
-              {item.hdr === "DV" ? "DV" : "HDR10+"}
-            </OverlayBadge>
-          </div>
-        )}
-
-        {/* Quality chip bottom-left: combines release type + resolution into
-            a single readable pill ("WEB-DL · 1080p"). Halves badge count on
-            most cards. Language drops down into the info row below. */}
-        {(item.release_type || item.resolution) && (
+        {/* Bottom row: quality chip on the left ("WEB-DL · 1080p", halves
+            badge count on most cards; language drops into the info row) and
+            the premium HDR badge on the right. They share one flex row so a
+            long chip ellipsises instead of sliding under "HDR10+".
+            Only HDR10+ and Dolby Vision get a badge — plain HDR/HDR10 is the
+            default for modern releases. DV releases almost always carry an
+            HDR10 layer too ("DV+HDR10"); those used to get no badge at all
+            because only the bare "DV" value matched. */}
+        {(item.release_type ||
+          item.resolution ||
+          (item.hdr && isPremiumHdr(item.hdr))) && (
           <div
             style={{
               position: "absolute",
               bottom: "0.4rem",
               left: "0.4rem",
+              right: "0.4rem",
               zIndex: 4,
-              maxWidth: "calc(70% - 0.4rem)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 4,
             }}
           >
-            <OverlayBadge
-              tone={item.release_type ? "release" : "neutral"}
-              releaseColor={
-                item.release_type
-                  ? RELEASE_TYPE_COLORS[item.release_type] || "#1e293b"
-                  : undefined
-              }
-              title={[item.release_type, item.resolution]
-                .filter(Boolean)
-                .join(" · ")}
-            >
-              {[item.release_type, item.resolution].filter(Boolean).join(" · ")}
-            </OverlayBadge>
+            <div style={{ minWidth: 0, display: "flex" }}>
+              {(item.release_type || item.resolution) && (
+                <OverlayBadge
+                  tone={item.release_type ? "release" : "neutral"}
+                  releaseColor={
+                    item.release_type
+                      ? RELEASE_TYPE_COLORS[item.release_type] || "#1e293b"
+                      : undefined
+                  }
+                  title={[item.release_type, item.resolution]
+                    .filter(Boolean)
+                    .join(" · ")}
+                >
+                  {[item.release_type, item.resolution]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </OverlayBadge>
+              )}
+            </div>
+            {item.hdr && isPremiumHdr(item.hdr) && (
+              <div style={{ flexShrink: 0, display: "flex" }}>
+                <OverlayBadge tone="violet" title={hdrLabel(item.hdr)}>
+                  {parseHdr(item.hdr).dv ? "DV" : "HDR10+"}
+                </OverlayBadge>
+              </div>
+            )}
           </div>
         )}
 

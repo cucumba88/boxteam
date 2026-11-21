@@ -1,3 +1,4 @@
+import { hdrFilterKeys } from "./techTags";
 export interface Filters {
   search: string;
   releaseType: string;
@@ -40,19 +41,11 @@ export function normalizeReleaseType(raw?: string): string {
   return value;
 }
 
+/** Primary HDR bucket of an item (Dolby Vision first). Filtering and counts
+ *  use `hdrFilterKeys` / `matchesHdrFilter` from ./techTags instead, because
+ *  one item can belong to several buckets ("DV+HDR10"). */
 export function normalizeHdr(raw?: string): string {
-  const value = raw?.trim().toUpperCase() ?? "";
-  if (!value) return "";
-  if (value.includes("HDR10+") || value.includes("HDR10PLUS")) return "HDR10+";
-  if (
-    value.includes("DOVI") ||
-    value.includes("DOLBY VISION") ||
-    /\bDV\b/.test(value)
-  )
-    return "DV";
-  if (value.includes("HDR10")) return "HDR10";
-  if (value.includes("HDR")) return "HDR";
-  return value;
+  return hdrFilterKeys(raw)[0] ?? "";
 }
 
 export function normalizeCodec(raw?: string): string {
