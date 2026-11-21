@@ -84,6 +84,14 @@ jobs:
             command -v "$tool" >/dev/null || { echo "::error::$tool not found after installing LLVM"; exit 1; }
           done
           clang-cl --version | head -1
+          # NSIS < 3.09 (Ubuntu 22.04 ships 3.08) lacks Win\RestartManager.nsh,
+          # which Tauri's installer template includes. Add our backport only
+          # if makensis doesn't already have it.
+          NSIS_INC=/usr/share/nsis/Include
+          if [ ! -f "$NSIS_INC/Win/RestartManager.nsh" ]; then
+            $SUDO install -D -m 644 scripts/nsis-include/Win/RestartManager.nsh "$NSIS_INC/Win/RestartManager.nsh"
+          fi
+          makensis -VERSION
 
       - name: Install cargo-xwin
         run: command -v cargo-xwin >/dev/null || cargo install cargo-xwin --locked
