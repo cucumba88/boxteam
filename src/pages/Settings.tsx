@@ -1,4 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  AppWindow,
+  ArchiveRestore,
+  Bell,
+  Download,
+  FolderCog,
+  FolderTree,
+  Gauge,
+  Globe,
+  HardDrive,
+  Languages,
+  MonitorPlay,
+  Palette,
+  Server,
+  SlidersHorizontal,
+  type LucideIcon,
+} from "lucide-react";
 import AppIcon from "../components/AppIcon";
 import Toggle from "../components/Toggle";
 import { useQualityProfiles } from "../features/watchlist/useQualityProfiles";
@@ -253,23 +270,41 @@ function StatusPill({ state, text }: { state: ConnectionState; text: string }) {
   );
 }
 
+const SECTION_OPEN_EVENT = "oscata:settings-open-section";
+
 function SectionCard({
-  icon,
+  icon: Icon,
   title,
   description,
   children,
   defaultOpen = true,
 }: {
-  icon: "folder" | "search" | "download" | "activity" | "settings";
+  icon: LucideIcon;
   title: string;
   description: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const sectionId = `settings-section-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  // The index chips at the top of Settings dispatch this event so a
+  // collapsed section opens before it's scrolled into view.
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === sectionId) setOpen(true);
+    };
+    window.addEventListener(SECTION_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(SECTION_OPEN_EVENT, onOpen);
+  }, [sectionId]);
   return (
-    <section style={sectionCardStyle}>
+    <section
+      id={sectionId}
+      data-settings-section={title}
+      style={{ ...sectionCardStyle, scrollMarginTop: 12 }}
+    >
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         style={{
           display: "flex",
@@ -298,7 +333,7 @@ function SectionCard({
             flexShrink: 0,
           }}
         >
-          <AppIcon name={icon} size={18} strokeWidth={2.1} />
+          <Icon size={18} strokeWidth={2.1} aria-hidden="true" />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
@@ -362,15 +397,16 @@ function PreferencesSection({ language }: { language: AppLanguage }) {
 
   return (
     <SectionCard
-      icon="settings"
+      icon={SlidersHorizontal}
       title={t(language, "settings.preferencesTitle")}
       description={t(language, "settings.preferencesDescription")}
       defaultOpen={false}
     >
       <div style={{ display: "grid", gap: 18 }}>
         <div style={fieldStyle}>
-          <label style={labelStyle}>{t(language, "settings.defaultTab")}</label>
+          <label style={labelStyle} htmlFor="settings-field-1">{t(language, "settings.defaultTab")}</label>
           <select
+            id="settings-field-1"
             style={selectStyle}
             value={prefs.defaultTab}
             onChange={(e) =>
@@ -562,7 +598,7 @@ function QualityProfilesSection({ language }: { language: AppLanguage }) {
 
   return (
     <SectionCard
-      icon="activity"
+      icon={Gauge}
       title={t(language, "qualityProfile.title")}
       description={t(language, "qualityProfile.description")}
       defaultOpen={false}
@@ -771,6 +807,48 @@ export default function Settings({
     isTauri() ||
     Boolean(user && (user.role === "admin" || user.role === "editor"));
   const [form, setForm] = useState<Config | null>(null);
+  // Snapshot of the last loaded/saved config. The save bar only appears
+  // while `form` differs from it.
+  const [savedForm, setSavedForm] = useState<Config | null>(null);
+  const changedFields = useMemo(() => {
+    if (!form || !savedForm) return 0;
+    const keys = new Set([...Object.keys(form), ...Object.keys(savedForm)]);
+    let count = 0;
+    for (const key of keys) {
+      const a = (form as unknown as Record<string, unknown>)[key];
+      const b = (savedForm as unknown as Record<string, unknown>)[key];
+      if (JSON.stringify(a ?? null) !== JSON.stringify(b ?? null)) count += 1;
+    }
+    return count;
+  }, [form, savedForm]);
+  const isDirty = changedFields > 0;
+
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [sectionIndex, setSectionIndex] = useState<
+    { id: string; title: string }[]
+  >([]);
+  // Re-read the rendered sections after every render; only update state when
+  // the list actually changed so this can't loop.
+  useEffect(() => {
+    const nodes = panelRef.current?.querySelectorAll<HTMLElement>(
+      "[data-settings-section]",
+    );
+    const next = Array.from(nodes ?? []).map((node) => ({
+      id: node.id,
+      title: node.dataset.settingsSection ?? "",
+    }));
+    setSectionIndex((prev) =>
+      JSON.stringify(prev) === JSON.stringify(next) ? prev : next,
+    );
+  });
+  const jumpToSection = (id: string) => {
+    window.dispatchEvent(new CustomEvent(SECTION_OPEN_EVENT, { detail: id }));
+    requestAnimationFrame(() => {
+      document
+        .getElementById(id)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
   const [ftpStatus, setFtpStatus] = useState<ConnectionState>("idle");
   const [ftpError, setFtpError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -855,7 +933,7 @@ export default function Settings({
     getConfig<Config>()
       .then((cfg) => {
         const base = cfg.download_folder ?? "";
-        setForm({
+        const normalized: Config = {
           ...cfg,
           movie_destination:
             cfg.movie_destination || (base ? `${base}/Movies` : ""),
@@ -867,7 +945,9 @@ export default function Settings({
           alphabetical_subfolders: cfg.alphabetical_subfolders ?? true,
           genre_destinations: cfg.genre_destinations ?? "[]",
           close_to_tray: cfg.close_to_tray ?? true,
-        });
+        };
+        setForm(normalized);
+        setSavedForm(normalized);
       })
       .catch(console.error);
   }, []);
@@ -1223,6 +1303,7 @@ export default function Settings({
       if (form.rating_source_order) {
         setRatingOrder(form.rating_source_order);
       }
+      setSavedForm(form);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } finally {
@@ -1544,9 +1625,60 @@ export default function Settings({
         )}
       </div>
 
+      {/* Section index — one chip per visible section. Clicking opens the
+          section (if collapsed) and scrolls to it. Built from the DOM because
+          which sections render depends on platform and role. */}
+      {sectionIndex.length > 1 && (
+        <nav
+          aria-label={t(language, "settings.jumpTo")}
+          className="settings-index"
+          style={{
+            display: "flex",
+            gap: 6,
+            // Wrap on desktop so every section is visible at once; scroll
+            // sideways on mobile to keep the header short.
+            flexWrap: isMobile ? "nowrap" : "wrap",
+            overflowX: isMobile ? "auto" : "visible",
+            padding: isMobile ? "8px 12px" : "8px 24px",
+            borderBottom:
+              "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
+            background: "var(--color-bg)",
+            flexShrink: 0,
+            scrollbarWidth: "none",
+          }}
+        >
+          {sectionIndex.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              onClick={() => jumpToSection(entry.id)}
+              style={{
+                flexShrink: 0,
+                height: 28,
+                padding: "0 12px",
+                borderRadius: 999,
+                border:
+                  "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
+                background:
+                  "color-mix(in srgb, var(--color-surface) 85%, transparent)",
+                color: "var(--color-text-muted)",
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {entry.title}
+            </button>
+          ))}
+        </nav>
+      )}
+
       {/* Scroll area is full width so the bottom footer can span edge-to-edge.
           Content is centred via an inner max-width wrapper. */}
       <div
+        ref={panelRef}
         className="settings-panel"
         style={{
           flex: 1,
@@ -1567,7 +1699,7 @@ export default function Settings({
         >
           <div style={{ display: "grid", gap: 16 }}>
             <SectionCard
-              icon="settings"
+              icon={Palette}
               title={t(language, "settings.appearanceTitle")}
               description={t(language, "settings.appearanceDescription")}
               defaultOpen={false}
@@ -1631,7 +1763,7 @@ export default function Settings({
             <QualityProfilesSection language={language} />
 
             <SectionCard
-              icon="folder"
+              icon={Server}
               title={t(language, "settings.ftpTitle")}
               description={t(language, "settings.ftpDescription")}
             >
@@ -1646,20 +1778,22 @@ export default function Settings({
                 }}
               >
                 <div style={fieldStyle}>
-                  <label style={labelStyle}>
+                  <label style={labelStyle} htmlFor="settings-field-2">
                     {t(language, "settings.host")}
                   </label>
                   <input
+                    id="settings-field-2"
                     style={inputStyle}
                     value={form.ftp_host}
                     onChange={set("ftp_host")}
                   />
                 </div>
                 <div style={fieldStyle}>
-                  <label style={labelStyle}>
+                  <label style={labelStyle} htmlFor="settings-field-3">
                     {t(language, "settings.port")}
                   </label>
                   <input
+                    id="settings-field-3"
                     style={inputStyle}
                     type="number"
                     value={form.ftp_port}
@@ -1677,20 +1811,22 @@ export default function Settings({
                 }}
               >
                 <div style={fieldStyle}>
-                  <label style={labelStyle}>
+                  <label style={labelStyle} htmlFor="settings-field-4">
                     {t(language, "settings.username")}
                   </label>
                   <input
+                    id="settings-field-4"
                     style={inputStyle}
                     value={form.ftp_user}
                     onChange={set("ftp_user")}
                   />
                 </div>
                 <div style={fieldStyle}>
-                  <label style={labelStyle}>
+                  <label style={labelStyle} htmlFor="settings-field-5">
                     {t(language, "settings.password")}
                   </label>
                   <input
+                    id="settings-field-5"
                     style={inputStyle}
                     type="password"
                     value={form.ftp_pass}
@@ -1700,10 +1836,11 @@ export default function Settings({
               </div>
 
               <div style={{ ...fieldStyle, marginBottom: 14 }}>
-                <label style={labelStyle}>
+                <label style={labelStyle} htmlFor="settings-field-6">
                   {t(language, "settings.rootPath")}
                 </label>
                 <input
+                  id="settings-field-6"
                   style={inputStyle}
                   value={form.ftp_root}
                   onChange={set("ftp_root")}
@@ -1849,7 +1986,7 @@ export default function Settings({
               }}
             >
               <SectionCard
-                icon="download"
+                icon={Download}
                 title={t(language, "settings.downloadsTitle")}
                 description={t(language, "settings.downloadsDescription")}
                 defaultOpen={false}
@@ -1885,10 +2022,11 @@ export default function Settings({
                   </div>
 
                   <div style={fieldStyle}>
-                    <label style={labelStyle}>
+                    <label style={labelStyle} htmlFor="settings-field-7">
                       {t(language, "settings.maxConcurrent")}
                     </label>
                     <input
+                      id="settings-field-7"
                       type="number"
                       min={1}
                       max={5}
@@ -1915,7 +2053,7 @@ export default function Settings({
                 </div>
               </SectionCard>
               <SectionCard
-                icon="search"
+                icon={Languages}
                 title={t(language, "settings.metaTitle")}
                 description={t(language, "settings.metaDescription")}
                 defaultOpen={false}
@@ -2201,10 +2339,11 @@ export default function Settings({
                     )}
                   </div>
                   <div style={fieldStyle}>
-                    <label style={labelStyle}>
+                    <label style={labelStyle} htmlFor="settings-field-8">
                       {t(language, "settings.defaultLanguage")}
                     </label>
                     <select
+                      id="settings-field-8"
                       style={selectStyle}
                       value={form.default_language ?? "es"}
                       onChange={set("default_language")}
@@ -2227,7 +2366,7 @@ export default function Settings({
             {/* ─── Folder Routing ─────────────────────────────────────────── */}
             {canWrite && (
               <SectionCard
-                icon="download"
+                icon={FolderTree}
                 title={t(language, "settings.folderRoutingTitle")}
                 description={t(language, "settings.folderRoutingDescription")}
                 defaultOpen={false}
@@ -2314,6 +2453,7 @@ export default function Settings({
                   <button
                     role="switch"
                     aria-checked={form.alphabetical_subfolders}
+                    aria-label={t(language, "settings.alphabeticalSubfolders")}
                     onClick={() =>
                       setForm((c) =>
                         c
@@ -2434,10 +2574,11 @@ export default function Settings({
                               }}
                             >
                               <div style={fieldStyle}>
-                                <label style={labelStyle}>
+                                <label style={labelStyle} htmlFor="settings-field-9">
                                   {t(language, "settings.ruleName")}
                                 </label>
                                 <input
+                                  id="settings-field-9"
                                   style={inputStyle}
                                   value={rule.label}
                                   placeholder="e.g. Animation"
@@ -2449,10 +2590,11 @@ export default function Settings({
                                 />
                               </div>
                               <div style={fieldStyle}>
-                                <label style={labelStyle}>
+                                <label style={labelStyle} htmlFor="settings-field-10">
                                   {t(language, "settings.applyTo")}
                                 </label>
                                 <select
+                                  id="settings-field-10"
                                   style={selectStyle}
                                   value={rule.media_types[0] ?? "all"}
                                   onChange={(e) =>
@@ -2558,10 +2700,11 @@ export default function Settings({
                               }}
                             >
                               <div style={{ ...fieldStyle, flex: 1 }}>
-                                <label style={labelStyle}>
+                                <label style={labelStyle} htmlFor="settings-field-11">
                                   {t(language, "settings.destination")}
                                 </label>
                                 <input
+                                  id="settings-field-11"
                                   style={inputStyle}
                                   value={rule.destination}
                                   placeholder="e.g. /mnt/media/Animation"
@@ -2608,7 +2751,7 @@ export default function Settings({
             {/* ─── end Folder Routing ───────────────────────────────────── */}
 
             <SectionCard
-              icon="folder"
+              icon={FolderCog}
               title={t(language, "settings.folderTypesTitle")}
               description={t(language, "settings.folderTypesDescription")}
               defaultOpen={false}
@@ -2728,7 +2871,7 @@ export default function Settings({
             </SectionCard>
 
             <SectionCard
-              icon="activity"
+              icon={MonitorPlay}
               title={t(language, "settings.mediaServersTitle")}
               description={t(language, "settings.mediaServersDescription")}
               defaultOpen={false}
@@ -2787,10 +2930,11 @@ export default function Settings({
 
                   <div style={{ display: "grid", gap: 12 }}>
                     <div style={fieldStyle}>
-                      <label style={labelStyle}>
+                      <label style={labelStyle} htmlFor="settings-field-12">
                         {t(language, "settings.serverUrl")}
                       </label>
                       <input
+                        id="settings-field-12"
                         style={inputStyle}
                         value={form.emby_url}
                         onChange={set("emby_url")}
@@ -2798,10 +2942,11 @@ export default function Settings({
                       />
                     </div>
                     <div style={fieldStyle}>
-                      <label style={labelStyle}>
+                      <label style={labelStyle} htmlFor="settings-field-13">
                         {t(language, "settings.apiKey")}
                       </label>
                       <input
+                        id="settings-field-13"
                         style={inputStyle}
                         value={form.emby_api_key}
                         onChange={set("emby_api_key")}
@@ -2886,10 +3031,11 @@ export default function Settings({
 
                   <div style={{ display: "grid", gap: 12 }}>
                     <div style={fieldStyle}>
-                      <label style={labelStyle}>
+                      <label style={labelStyle} htmlFor="settings-field-14">
                         {t(language, "settings.serverUrl")}
                       </label>
                       <input
+                        id="settings-field-14"
                         style={inputStyle}
                         value={form.plex_url}
                         onChange={set("plex_url")}
@@ -2897,10 +3043,11 @@ export default function Settings({
                       />
                     </div>
                     <div style={fieldStyle}>
-                      <label style={labelStyle}>
+                      <label style={labelStyle} htmlFor="settings-field-15">
                         {t(language, "settings.plexToken")}
                       </label>
                       <input
+                        id="settings-field-15"
                         style={inputStyle}
                         value={form.plex_token}
                         onChange={set("plex_token")}
@@ -2944,7 +3091,7 @@ export default function Settings({
             </SectionCard>
             {isTauri() && (
               <SectionCard
-                icon="settings"
+                icon={AppWindow}
                 title={t(language, "settings.desktopTitle")}
                 description={t(language, "settings.desktopDescription")}
                 defaultOpen={false}
@@ -2975,6 +3122,7 @@ export default function Settings({
                   <button
                     role="switch"
                     aria-checked={form?.close_to_tray ?? true}
+                    aria-label={t(language, "settings.closeToTrayLabel")}
                     onClick={() =>
                       setForm((c) =>
                         c ? { ...c, close_to_tray: !c.close_to_tray } : c,
@@ -3014,7 +3162,7 @@ export default function Settings({
 
             {webGuiConfig && (
               <SectionCard
-                icon="settings"
+                icon={Globe}
                 title={t(language, "settings.webInterfaceTitle")}
                 description={t(language, "settings.webInterfaceDescription")}
                 defaultOpen={false}
@@ -3041,7 +3189,7 @@ export default function Settings({
                       >
                         {t(language, "settings.webInterfaceEnable")}
                       </span>
-                      <Toggle
+                      <Toggle label={t(language, "settings.webInterfaceEnable")}
                         checked={webGuiConfig.enabled}
                         onChange={(v) =>
                           setWebGuiConfig((c) => (c ? { ...c, enabled: v } : c))
@@ -3085,10 +3233,11 @@ export default function Settings({
                         }}
                       >
                         <div style={fieldStyle}>
-                          <label style={labelStyle}>
+                          <label style={labelStyle} htmlFor="settings-field-16">
                             {t(language, "settings.webInterfaceBindHost")}
                           </label>
                           <input
+                            id="settings-field-16"
                             style={{
                               ...inputStyle,
                               ...(!isTauri() && {
@@ -3107,10 +3256,11 @@ export default function Settings({
                           />
                         </div>
                         <div style={fieldStyle}>
-                          <label style={labelStyle}>
+                          <label style={labelStyle} htmlFor="settings-field-17">
                             {t(language, "settings.port")}
                           </label>
                           <input
+                            id="settings-field-17"
                             style={{
                               ...inputStyle,
                               ...(!isTauri() && {
@@ -3146,10 +3296,11 @@ export default function Settings({
                         }}
                       >
                         <div style={fieldStyle}>
-                          <label style={labelStyle}>
+                          <label style={labelStyle} htmlFor="settings-field-18">
                             {t(language, "settings.webInterfaceAppUrl")}
                           </label>
                           <input
+                            id="settings-field-18"
                             style={inputStyle}
                             value={webGuiConfig.app_url}
                             placeholder="http://192.168.1.x:47860"
@@ -3161,10 +3312,11 @@ export default function Settings({
                           />
                         </div>
                         <div style={fieldStyle}>
-                          <label style={labelStyle}>
+                          <label style={labelStyle} htmlFor="settings-field-19">
                             {t(language, "settings.webInterfaceExposedPort")}
                           </label>
                           <input
+                            id="settings-field-19"
                             style={inputStyle}
                             type="number"
                             min={0}
@@ -3208,7 +3360,7 @@ export default function Settings({
                         >
                           {t(language, "settings.webInterfaceOtp")}
                         </span>
-                        <Toggle
+                        <Toggle label={t(language, "settings.webInterfaceOtp")}
                           checked={webGuiConfig.otp_enabled}
                           onChange={(v) =>
                             setWebGuiConfig((c) =>
@@ -3251,10 +3403,11 @@ export default function Settings({
                             }}
                           >
                             <div style={fieldStyle}>
-                              <label style={labelStyle}>
+                              <label style={labelStyle} htmlFor="settings-field-20">
                                 {t(language, "settings.webInterfaceSmtpHost")}
                               </label>
                               <input
+                                id="settings-field-20"
                                 style={inputStyle}
                                 value={webGuiConfig.smtp_host}
                                 placeholder="smtp.gmail.com"
@@ -3266,10 +3419,11 @@ export default function Settings({
                               />
                             </div>
                             <div style={fieldStyle}>
-                              <label style={labelStyle}>
+                              <label style={labelStyle} htmlFor="settings-field-21">
                                 {t(language, "settings.port")}
                               </label>
                               <input
+                                id="settings-field-21"
                                 style={inputStyle}
                                 type="number"
                                 value={webGuiConfig.smtp_port}
@@ -3288,8 +3442,9 @@ export default function Settings({
                               />
                             </div>
                             <div style={fieldStyle}>
-                              <label style={labelStyle}>TLS</label>
+                              <label style={labelStyle} htmlFor="settings-field-22">TLS</label>
                               <select
+                                id="settings-field-22"
                                 style={selectStyle}
                                 value={webGuiConfig.smtp_tls_mode}
                                 onChange={(e) =>
@@ -3311,10 +3466,11 @@ export default function Settings({
                             }}
                           >
                             <div style={fieldStyle}>
-                              <label style={labelStyle}>
+                              <label style={labelStyle} htmlFor="settings-field-23">
                                 {t(language, "settings.username")}
                               </label>
                               <input
+                                id="settings-field-23"
                                 style={inputStyle}
                                 value={webGuiConfig.smtp_user}
                                 onChange={(e) =>
@@ -3325,10 +3481,11 @@ export default function Settings({
                               />
                             </div>
                             <div style={fieldStyle}>
-                              <label style={labelStyle}>
+                              <label style={labelStyle} htmlFor="settings-field-24">
                                 {t(language, "settings.password")}
                               </label>
                               <input
+                                id="settings-field-24"
                                 style={inputStyle}
                                 type="password"
                                 value={webGuiConfig.smtp_pass}
@@ -3341,10 +3498,11 @@ export default function Settings({
                             </div>
                           </div>
                           <div style={fieldStyle}>
-                            <label style={labelStyle}>
+                            <label style={labelStyle} htmlFor="settings-field-25">
                               {t(language, "settings.webInterfaceFromAddress")}
                             </label>
                             <input
+                              id="settings-field-25"
                               style={inputStyle}
                               type="email"
                               value={webGuiConfig.smtp_from}
@@ -3430,7 +3588,7 @@ export default function Settings({
                           {t(language, "settings.pwaDescription")}
                         </div>
                       </div>
-                      <Toggle
+                      <Toggle label={t(language, "settings.pwaTitle")}
                         checked={webGuiConfig.pwa_enabled}
                         onChange={(v) =>
                           setWebGuiConfig((c) =>
@@ -3448,10 +3606,11 @@ export default function Settings({
                         }}
                       >
                         <div style={fieldStyle}>
-                          <label style={labelStyle}>
+                          <label style={labelStyle} htmlFor="settings-field-26">
                             {t(language, "settings.pwaName")}
                           </label>
                           <input
+                            id="settings-field-26"
                             style={inputStyle}
                             value={webGuiConfig.pwa_name}
                             onChange={(e) =>
@@ -3463,10 +3622,11 @@ export default function Settings({
                           />
                         </div>
                         <div style={fieldStyle}>
-                          <label style={labelStyle}>
+                          <label style={labelStyle} htmlFor="settings-field-27">
                             {t(language, "settings.pwaShortName")}
                           </label>
                           <input
+                            id="settings-field-27"
                             style={inputStyle}
                             value={webGuiConfig.pwa_short_name}
                             onChange={(e) =>
@@ -3531,7 +3691,7 @@ export default function Settings({
 
             {isTauri() && (
               <SectionCard
-                icon="folder"
+                icon={HardDrive}
                 title={t(language, "settings.storage")}
                 description={t(language, "settings.dbLocationDesc")}
                 defaultOpen={false}
@@ -3650,7 +3810,7 @@ export default function Settings({
 
             {isTauri() && (
               <SectionCard
-                icon="activity"
+                icon={Bell}
                 title="Notificaciones"
                 description={
                   canWrite
@@ -3718,10 +3878,11 @@ export default function Settings({
                     {canWrite && (
                       <>
                         <div style={fieldStyle}>
-                          <label style={labelStyle}>
+                          <label style={labelStyle} htmlFor="settings-field-28">
                             Token del bot de Telegram
                           </label>
                           <input
+                            id="settings-field-28"
                             style={inputStyle}
                             type="password"
                             value={form.telegram_bot_token ?? ""}
@@ -3731,10 +3892,11 @@ export default function Settings({
                           />
                         </div>
                         <div style={fieldStyle}>
-                          <label style={labelStyle}>
+                          <label style={labelStyle} htmlFor="settings-field-29">
                             Chat ID del canal o grupo
                           </label>
                           <input
+                            id="settings-field-29"
                             style={inputStyle}
                             value={form.telegram_chat_id ?? ""}
                             onChange={set("telegram_chat_id")}
@@ -3804,10 +3966,11 @@ export default function Settings({
                           envíale cualquier mensaje para activarlo.
                         </span>
                         <div style={fieldStyle}>
-                          <label style={labelStyle}>
+                          <label style={labelStyle} htmlFor="settings-field-30">
                             Token de tu bot de Telegram
                           </label>
                           <input
+                            id="settings-field-30"
                             style={inputStyle}
                             type="password"
                             value={personalBotToken}
@@ -3902,7 +4065,7 @@ export default function Settings({
                             >
                               Notificar nuevo contenido en la biblioteca
                             </span>
-                            <Toggle
+                            <Toggle label="Notificar nuevo contenido en la biblioteca"
                               checked={personalSub.notify_new_content}
                               onChange={(v) =>
                                 handleUpdateSubPref("notify_new_content", v)
@@ -3925,7 +4088,7 @@ export default function Settings({
                             >
                               Notificar cuando terminen mis descargas
                             </span>
-                            <Toggle
+                            <Toggle label="Notificar cuando terminen mis descargas"
                               checked={personalSub.notify_downloads}
                               onChange={(v) =>
                                 handleUpdateSubPref("notify_downloads", v)
@@ -3955,7 +4118,7 @@ export default function Settings({
 
             {!isTauri() && (
               <SectionCard
-                icon="activity"
+                icon={Bell}
                 title="Notificaciones"
                 description={
                   canWrite
@@ -4038,10 +4201,11 @@ export default function Settings({
                           envíale cualquier mensaje para activarlo.
                         </span>
                         <div style={fieldStyle}>
-                          <label style={labelStyle}>
+                          <label style={labelStyle} htmlFor="settings-field-31">
                             Token de tu bot de Telegram
                           </label>
                           <input
+                            id="settings-field-31"
                             style={inputStyle}
                             type="password"
                             value={personalBotToken}
@@ -4136,7 +4300,7 @@ export default function Settings({
                             >
                               Notificar nuevo contenido en la biblioteca
                             </span>
-                            <Toggle
+                            <Toggle label="Notificar nuevo contenido en la biblioteca"
                               checked={personalSub.notify_new_content}
                               onChange={(v) =>
                                 handleUpdateSubPref("notify_new_content", v)
@@ -4159,7 +4323,7 @@ export default function Settings({
                             >
                               Notificar cuando terminen mis descargas
                             </span>
-                            <Toggle
+                            <Toggle label="Notificar cuando terminen mis descargas"
                               checked={personalSub.notify_downloads}
                               onChange={(v) =>
                                 handleUpdateSubPref("notify_downloads", v)
@@ -4188,7 +4352,7 @@ export default function Settings({
             )}
 
             <SectionCard
-              icon="folder"
+              icon={ArchiveRestore}
               title={t(language, "settings.backupsTitle")}
               description={t(language, "settings.backupsDescription")}
               defaultOpen={false}
@@ -4246,33 +4410,57 @@ export default function Settings({
         </div>
       </div>
 
-      {/* Footer — full-width sibling of the scroll area so the divider line
-          runs edge-to-edge of the content area, matching the sticky back bar
-          above. The buttons stay aligned to the right (or stretched on
-          mobile). */}
-      <div
-        style={{
-          padding: isMobile ? "0.875rem 1rem" : "1rem 1.5rem",
-          borderTop:
-            "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
-          background:
-            "color-mix(in srgb, var(--color-surface-2) 46%, transparent)",
-          display: "flex",
-          flexDirection: isMobile ? "column" : "row",
-          alignItems: isMobile ? "stretch" : "center",
-          justifyContent: "space-between",
-          gap: isMobile ? 10 : 12,
-          flexShrink: 0,
-        }}
-      >
-          <div style={subtextStyle}>
-            {isMobile ? (
-              <span style={{ color: "var(--color-text-muted)" }}>
-                v{appVersion}
-              </span>
-            ) : (
-              t(language, "settings.footerHelp")
-            )}
+      {/* Save bar — only shown while there are unsaved changes (or right
+          after saving, to confirm). Full-width sibling of the scroll area so
+          the divider runs edge-to-edge. */}
+      {(isDirty || saving || saved) && (
+        <div
+          role="region"
+          aria-label={t(language, "common.save")}
+          style={{
+            padding: isMobile ? "0.75rem 1rem" : "0.875rem 1.5rem",
+            borderTop:
+              "1px solid color-mix(in srgb, var(--color-primary) 35%, var(--color-border))",
+            background:
+              "color-mix(in srgb, var(--color-primary) 7%, var(--color-surface))",
+            display: "flex",
+            flexDirection: isMobile ? "column" : "row",
+            alignItems: isMobile ? "stretch" : "center",
+            justifyContent: "space-between",
+            gap: isMobile ? 10 : 12,
+            flexShrink: 0,
+          }}
+        >
+          <div
+            aria-live="polite"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--color-text)",
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 999,
+                background: isDirty
+                  ? "var(--color-warning)"
+                  : "var(--color-success)",
+                flexShrink: 0,
+              }}
+            />
+            {isDirty
+              ? changedFields === 1
+                ? t(language, "settings.unsavedChangesOne")
+                : t(language, "settings.unsavedChanges", {
+                    count: changedFields,
+                  })
+              : t(language, "common.saved")}
           </div>
 
           <div
@@ -4284,17 +4472,23 @@ export default function Settings({
               width: isMobile ? "100%" : undefined,
             }}
           >
-            {!isMobile && (
-              <button onClick={onClose} style={ghostBtn}>
-                {t(language, "common.cancel")}
+            {isDirty && (
+              <button
+                type="button"
+                onClick={() => setForm(savedForm)}
+                disabled={saving}
+                style={{
+                  ...ghostBtn,
+                  flex: isMobile ? "0 0 auto" : undefined,
+                }}
+              >
+                {t(language, "settings.discardChanges")}
               </button>
             )}
-            {/* One primary action (violet) and a quieter secondary one, both
-                centred and single-line; on mobile "Guardar" sizes to its
-                label and the main action takes the remaining width. */}
             <button
+              type="button"
               onClick={saveConfig}
-              disabled={saving}
+              disabled={saving || !isDirty}
               style={{
                 ...footerSecondaryBtn,
                 flex: isMobile ? "0 0 auto" : undefined,
@@ -4308,8 +4502,9 @@ export default function Settings({
                   : t(language, "common.save")}
             </button>
             <button
+              type="button"
               onClick={saveAndReindex}
-              disabled={saving}
+              disabled={saving || !isDirty}
               style={{
                 ...footerPrimaryBtn,
                 flex: isMobile ? "1 1 auto" : undefined,
@@ -4320,6 +4515,7 @@ export default function Settings({
             </button>
           </div>
         </div>
+      )}
     </div>
   );
 }

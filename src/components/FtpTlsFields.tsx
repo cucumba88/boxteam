@@ -47,7 +47,7 @@ export default function FtpTlsFields({ language, value, onChange }: FtpTlsFields
             {t(language, value.ftp_tls ? "ftp.tlsHintOn" : "ftp.tlsHintOff")}
           </span>
         </div>
-        <Toggle
+        <Toggle label={t(language, "ftp.tls")}
           checked={value.ftp_tls}
           onChange={(checked) =>
             onChange({
@@ -65,7 +65,7 @@ export default function FtpTlsFields({ language, value, onChange }: FtpTlsFields
             <span style={titleStyle}>{t(language, "ftp.tlsInsecure")}</span>
             <span style={hintStyle}>{t(language, "ftp.tlsInsecureHint")}</span>
           </div>
-          <Toggle
+          <Toggle label={t(language, "ftp.tlsInsecure")}
             checked={value.ftp_tls_accept_invalid_certs}
             onChange={(checked) =>
               onChange({ ...value, ftp_tls_accept_invalid_certs: checked })

@@ -1,61 +1,37 @@
 import { useState } from "react";
 import {
-  Activity,
   Check,
   Clock,
   Download,
   Folder,
+  Loader2,
   RefreshCw,
   Trash2,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import type { DownloadItem } from "../hooks/useDownloads";
 import type { AppLanguage } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
-import { useIsMobile } from "../hooks/useIsMobile";
 import { isTauri } from "../lib/transport";
-
-function formatBytes(b: number): string {
-  if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(2)} GB`;
-  if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(1)} MB`;
-  if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${b} B`;
-}
-
-function formatSpeed(bps?: number): string {
-  if (bps == null || bps <= 0) return "";
-  if (bps >= 1024 ** 2) return `${(bps / 1024 ** 2).toFixed(1)} MB/s`;
-  if (bps >= 1024) return `${(bps / 1024).toFixed(0)} KB/s`;
-  return `${bps.toFixed(0)} B/s`;
-}
-
-function formatEta(
-  language: AppLanguage,
-  bps: number | undefined,
-  done: number,
-  total: number,
-): string {
-  if (!bps || bps <= 0 || total <= 0) return "";
-  const remaining = total - done;
-  const secs = remaining / bps;
-  if (secs < 60)
-    return t(language, "downloads.secondsLeft", { count: Math.round(secs) });
-  if (secs < 3600)
-    return t(language, "downloads.minutesLeft", {
-      minutes: Math.floor(secs / 60),
-      seconds: Math.round(secs % 60),
-    });
-  return t(language, "downloads.hoursLeft", { hours: Math.floor(secs / 3600) });
-}
-
-function formatDuration(startMs?: number, endMs?: number): string {
-  if (!startMs) return "";
-  const end = endMs ?? Date.now();
-  const secs = Math.round((end - startMs) / 1000);
-  if (secs < 60) return `${secs}s`;
-  return `${Math.floor(secs / 60)}m ${secs % 60}s`;
-}
+import { formatBytes } from "../lib/format";
+import Button from "./ui/Button";
+import {
+  TransferBody,
+  TransferCard,
+  TransferEmpty,
+  TransferEmptySection,
+  TransferError,
+  TransferFilterChips,
+  TransferMeta,
+  TransferNote,
+  TransferProgress,
+  TransferSection,
+  TransferStats,
+  TransferToolbar,
+  formatElapsed,
+  formatSpeed,
+  type TransferStatus,
+} from "../features/transfers/TransferUI";
 
 function shortPath(p: string): string {
   const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
@@ -63,250 +39,13 @@ function shortPath(p: string): string {
   return "…/" + parts.slice(-2).join("/");
 }
 
-const STATUS_COLORS: Record<DownloadItem["status"], string> = {
-  queued: "var(--color-text-muted)",
-  downloading: "var(--color-primary)",
-  done: "var(--color-success)",
-  error: "var(--color-danger)",
-  cancelled: "var(--color-text-muted)",
+const TO_TRANSFER_STATUS: Record<DownloadItem["status"], TransferStatus> = {
+  queued: "queued",
+  downloading: "active",
+  done: "done",
+  error: "error",
+  cancelled: "cancelled",
 };
-
-const STATUS_ICONS: Record<DownloadItem["status"], LucideIcon> = {
-  queued: Clock,
-  downloading: RefreshCw,
-  done: Check,
-  error: X,
-  cancelled: X,
-};
-
-function StatusBadge({
-  language,
-  status,
-}: {
-  language: AppLanguage;
-  status: DownloadItem["status"];
-}) {
-  const color = STATUS_COLORS[status];
-
-  const StatusIcon = STATUS_ICONS[status];
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "0.34rem 0.65rem",
-        borderRadius: "var(--radius-full)",
-        border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`,
-        background: `color-mix(in srgb, ${color} 14%, transparent)`,
-        color,
-        fontSize: 11,
-        fontWeight: 800,
-        letterSpacing: "0.04em",
-        textTransform: "uppercase",
-      }}
-    >
-      <StatusIcon
-        size={13}
-        strokeWidth={2.2}
-        aria-hidden="true"
-        style={{ display: "block" }}
-      />
-      {t(language, `downloads.${status}` as never)}
-    </span>
-  );
-}
-
-function ActionButton({
-  icon: Icon,
-  label,
-  onClick,
-  tone = "neutral",
-}: {
-  icon: LucideIcon;
-  label: string;
-  onClick: () => void;
-  tone?: "neutral" | "primary" | "success" | "danger";
-}) {
-  const isMobile = useIsMobile();
-  const color =
-    tone === "primary"
-      ? "var(--color-primary)"
-      : tone === "success"
-        ? "var(--color-success)"
-        : tone === "danger"
-          ? "var(--color-danger)"
-          : "var(--color-text-muted)";
-
-  return (
-    <button
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        // 42 px on mobile for HIG tap-target; icon-only avoids wrapping.
-        height: isMobile ? 42 : 36,
-        width: isMobile ? 42 : undefined,
-        padding: isMobile ? 0 : "0 12px",
-        borderRadius: "var(--radius-full)",
-        border: `1px solid color-mix(in srgb, ${color} 28%, var(--color-border) 72%)`,
-        background: `color-mix(in srgb, ${color} 10%, var(--color-surface) 90%)`,
-        color,
-        cursor: "pointer",
-        fontSize: 12,
-        fontWeight: 700,
-        whiteSpace: "nowrap",
-        flexShrink: 0,
-      }}
-    >
-      <Icon
-        size={isMobile ? 16 : 14}
-        strokeWidth={2.25}
-        aria-hidden="true"
-        style={{ display: "block" }}
-      />
-      {!isMobile && label}
-    </button>
-  );
-}
-
-function StatCard({
-  icon: Icon,
-  value,
-  label,
-  tone = "neutral",
-}: {
-  icon: LucideIcon;
-  value: string;
-  label: string;
-  tone?: "neutral" | "primary" | "success" | "danger";
-}) {
-  const color =
-    tone === "primary"
-      ? "var(--color-primary)"
-      : tone === "success"
-        ? "var(--color-success)"
-        : tone === "danger"
-          ? "var(--color-danger)"
-          : "var(--color-text)";
-
-  return (
-    <div
-      style={{
-        borderRadius: "var(--radius-lg)",
-        border:
-          "1px solid color-mix(in srgb, var(--color-border) 78%, transparent)",
-        background:
-          "linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 95%, transparent), color-mix(in srgb, var(--color-surface-2) 90%, transparent))",
-        padding: "0.95rem 1rem",
-        boxShadow:
-          "0 14px 30px color-mix(in srgb, black 14%, transparent), inset 0 1px 0 color-mix(in srgb, white 4%, transparent)",
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-      }}
-    >
-      <div
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 12,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: `color-mix(in srgb, ${color} 14%, transparent)`,
-          color,
-          flexShrink: 0,
-        }}
-      >
-        <Icon
-          size={18}
-          strokeWidth={2.1}
-          aria-hidden="true"
-          style={{ display: "block" }}
-        />
-      </div>
-      <div>
-        <div
-          style={{
-            fontSize: 19,
-            fontWeight: 800,
-            color: "var(--color-text)",
-            lineHeight: 1.1,
-          }}
-        >
-          {value}
-        </div>
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--color-text-muted)",
-            marginTop: 2,
-          }}
-        >
-          {label}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SectionTitle({
-  icon: Icon,
-  title,
-  subtitle,
-}: {
-  icon: LucideIcon;
-  title: string;
-  subtitle: string;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        marginBottom: 12,
-      }}
-    >
-      <div
-        style={{
-          width: 34,
-          height: 34,
-          borderRadius: 12,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background:
-            "color-mix(in srgb, var(--color-primary) 14%, transparent)",
-          color: "var(--color-primary)",
-          flexShrink: 0,
-        }}
-      >
-        <Icon
-          size={16}
-          strokeWidth={2.1}
-          aria-hidden="true"
-          style={{ display: "block" }}
-        />
-      </div>
-      <div>
-        <div
-          style={{ fontSize: 15, fontWeight: 700, color: "var(--color-text)" }}
-        >
-          {title}
-        </div>
-        <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-          {subtitle}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function DownloadRow({
   item,
@@ -323,342 +62,83 @@ function DownloadRow({
   onOpenFolder: () => void;
   onDelete: () => void;
 }) {
-  const pct =
-    item.bytes_total > 0
-      ? Math.round((item.bytes_done / item.bytes_total) * 100)
-      : 0;
   const isActive = item.status === "queued" || item.status === "downloading";
   const canRetry = item.status === "error" || item.status === "cancelled";
   const isDone = item.status === "done";
   const canOpenFolder = isDone && isTauri();
-
-  const StatusIcon = STATUS_ICONS[item.status];
+  const finished = isDone || canRetry;
+  const elapsed =
+    item.started_at_ms && (item.completed_at_ms || isDone)
+      ? (item.completed_at_ms ?? Date.now()) - item.started_at_ms
+      : 0;
 
   return (
-    <article
-      style={{
-        borderRadius: "calc(var(--radius-lg) + 2px)",
-        border:
-          "1px solid color-mix(in srgb, var(--color-border) 78%, transparent)",
-        background:
-          "linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 95%, transparent), color-mix(in srgb, var(--color-surface-2) 90%, transparent))",
-        boxShadow:
-          "0 16px 34px color-mix(in srgb, black 16%, transparent), inset 0 1px 0 color-mix(in srgb, white 4%, transparent)",
-        padding: "1rem",
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-      }}
+    <TransferCard
+      status={TO_TRANSFER_STATUS[item.status]}
+      statusLabel={t(language, `downloads.${item.status}` as never)}
+      title={item.media_title ?? item.filename}
+      subtitle={item.media_title ? item.filename : undefined}
+      actions={
+        <>
+          {isActive && (
+            <Button size="sm" variant="danger" icon={X} onClick={onCancel}>
+              {t(language, "downloads.cancel")}
+            </Button>
+          )}
+          {canRetry && (
+            <Button size="sm" variant="secondary" icon={RefreshCw} onClick={onRetry}>
+              {t(language, "downloads.retry")}
+            </Button>
+          )}
+          {canOpenFolder && (
+            <Button size="sm" variant="secondary" icon={Folder} onClick={onOpenFolder}>
+              {t(language, "downloads.openFolder")}
+            </Button>
+          )}
+          {finished && (
+            <Button size="sm" variant="ghost" icon={Trash2} onClick={onDelete}>
+              {t(language, "downloads.delete")}
+            </Button>
+          )}
+        </>
+      }
     >
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-        <div
-          style={{
-            width: 42,
-            height: 42,
-            borderRadius: 14,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: `color-mix(in srgb, ${STATUS_COLORS[item.status]} 14%, transparent)`,
-            color: STATUS_COLORS[item.status],
-            flexShrink: 0,
-          }}
-        >
-          <StatusIcon
-            size={18}
-            strokeWidth={2.15}
-            aria-hidden="true"
-            style={{ display: "block" }}
-          />
-        </div>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              justifyContent: "space-between",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div
-                style={{
-                  fontSize: 15,
-                  fontWeight: 700,
-                  color: "var(--color-text)",
-                  lineHeight: 1.35,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {item.media_title ?? item.filename}
-              </div>
-              {item.media_title && item.media_title !== item.filename && (
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "var(--color-text-muted)",
-                    marginTop: 3,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {item.filename}
-                </div>
-              )}
-            </div>
-            <StatusBadge language={language} status={item.status} />
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              marginTop: 10,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            {isActive && (
-              <ActionButton
-                icon={X}
-                label={t(language, "downloads.cancel")}
-                onClick={onCancel}
-                tone="danger"
-              />
-            )}
-            {canRetry && (
-              <ActionButton
-                icon={RefreshCw}
-                label={t(language, "downloads.retry")}
-                onClick={onRetry}
-                tone="primary"
-              />
-            )}
-            {canOpenFolder && (
-              <ActionButton
-                icon={Folder}
-                label={t(language, "downloads.openFolder")}
-                onClick={onOpenFolder}
-                tone="success"
-              />
-            )}
-            {(canRetry || isDone) && (
-              <ActionButton
-                icon={Trash2}
-                label={t(language, "downloads.delete")}
-                onClick={onDelete}
-                tone="danger"
-              />
-            )}
-          </div>
-        </div>
-      </div>
-
       {item.status === "downloading" && (
-        <div
-          style={{
-            borderRadius: "var(--radius)",
-            border:
-              "1px solid color-mix(in srgb, var(--color-primary) 18%, transparent)",
-            background:
-              "color-mix(in srgb, var(--color-primary) 8%, transparent)",
-            padding: "0.85rem 0.9rem",
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <span
-              style={{
-                fontSize: 12,
-                color: "var(--color-text-muted)",
-                fontVariantNumeric: "tabular-nums",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {formatBytes(item.bytes_done)} / {formatBytes(item.bytes_total)} (
-              {pct}%)
-            </span>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                flexWrap: "wrap",
-                justifyContent: "flex-end",
-              }}
-            >
-              {item.speed_bps != null && item.speed_bps > 0 && (
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: "var(--color-primary)",
-                    fontVariantNumeric: "tabular-nums",
-                    fontWeight: 700,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  ↓ {formatSpeed(item.speed_bps)}
-                </span>
-              )}
-              {item.speed_bps && item.bytes_total > 0 && (
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: "var(--color-text-muted)",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {formatEta(
-                    language,
-                    item.speed_bps,
-                    item.bytes_done,
-                    item.bytes_total,
-                  )}
-                </span>
-              )}
-              <span
-                style={{
-                  fontSize: 11,
-                  color: "var(--color-text-muted)",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {formatDuration(item.started_at_ms)}
-              </span>
-            </div>
-          </div>
-          <div
-            style={{
-              height: 8,
-              borderRadius: 999,
-              overflow: "hidden",
-              background:
-                "color-mix(in srgb, var(--color-surface) 92%, transparent)",
-              border:
-                "1px solid color-mix(in srgb, var(--color-border) 72%, transparent)",
-            }}
-          >
-            <div
-              style={{
-                height: "100%",
-                width: `${pct}%`,
-                borderRadius: 999,
-                transition: "width 0.35s ease",
-                background:
-                  "linear-gradient(90deg, var(--color-primary), color-mix(in srgb, var(--color-primary-hover) 84%, white 16%))",
-              }}
-            />
-          </div>
-        </div>
+        <TransferProgress
+          language={language}
+          done={item.bytes_done}
+          total={item.bytes_total}
+          speedBps={item.speed_bps}
+          direction="down"
+        />
       )}
-
       {item.status === "queued" && (
-        <div
-          style={{
-            borderRadius: "var(--radius)",
-            border:
-              "1px solid color-mix(in srgb, var(--color-border) 76%, transparent)",
-            background:
-              "color-mix(in srgb, var(--color-surface-2) 70%, transparent)",
-            padding: "0.8rem 0.9rem",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            color: "var(--color-text-muted)",
-            fontSize: 12,
-          }}
-        >
-          <Clock
-            size={14}
-            strokeWidth={2.2}
-            aria-hidden="true"
-            style={{ display: "block" }}
-          />
-          {t(language, "downloads.waiting")}
-        </div>
+        <TransferNote icon={Clock} text={t(language, "downloads.waiting")} />
       )}
-
-      {(isDone || item.status === "error" || item.status === "cancelled") && (
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-          }}
-        >
-          <span
-            style={{
-              fontSize: 11,
-              color: "var(--color-text-muted)",
-              fontFamily: "monospace",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              minWidth: 0,
-              flex: 1,
-            }}
-            title={item.local_path}
-          >
-            {shortPath(item.local_path)}
-          </span>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexShrink: 0,
-              flexWrap: "wrap",
-              justifyContent: "flex-end",
-            }}
-          >
-            {item.bytes_total > 0 && (
-              <span style={metaPill}>{formatBytes(item.bytes_total)}</span>
-            )}
-            {item.started_at_ms && (item.completed_at_ms || isDone) && (
-              <span style={metaPill}>
-                {formatDuration(item.started_at_ms, item.completed_at_ms)}
-              </span>
-            )}
-          </div>
-        </div>
+      {finished && (
+        <TransferMeta
+          items={[
+            item.bytes_total > 0 && {
+              key: "size",
+              label: formatBytes(item.bytes_total),
+            },
+            elapsed > 1000 && { key: "time", label: formatElapsed(elapsed) },
+            !!item.local_path && {
+              key: "path",
+              label: shortPath(item.local_path),
+              title: item.local_path,
+            },
+          ]}
+        />
       )}
-
       {item.status === "error" && item.error && (
-        <div
-          style={{
-            borderRadius: "var(--radius)",
-            border:
-              "1px solid color-mix(in srgb, var(--color-danger) 22%, transparent)",
-            background:
-              "color-mix(in srgb, var(--color-danger) 8%, transparent)",
-            padding: "0.8rem 0.9rem",
-            color: "var(--color-danger)",
-            fontSize: 12,
-          }}
-        >
-          {item.error}
-        </div>
+        <TransferError message={item.error} />
       )}
-    </article>
+    </TransferCard>
   );
 }
+
+type Filter = "all" | "active" | "queued" | "done" | "failed";
 
 export default function DownloadsTab({
   language,
@@ -677,6 +157,9 @@ export default function DownloadsTab({
   openDownloadFolder: (localPath: string) => Promise<unknown>;
   deleteDownload: (id: number) => Promise<unknown>;
 }) {
+  const [filter, setFilter] = useState<Filter>("all");
+  const es = language === "es";
+
   const activeDownloads = [...downloads]
     .filter((item) => item.status === "queued" || item.status === "downloading")
     .sort((a, b) => {
@@ -695,22 +178,13 @@ export default function DownloadsTab({
         (a.completed_at_ms ?? a.added_at_ms ?? 0),
     );
 
-  const downloading = activeDownloads.filter(
-    (item) => item.status === "downloading",
-  ).length;
-  const queued = activeDownloads.filter(
-    (item) => item.status === "queued",
-  ).length;
-  const done = historyDownloads.filter((item) => item.status === "done").length;
-  const errors = historyDownloads.filter(
-    (item) => item.status === "error",
-  ).length;
+  const downloading = activeDownloads.filter((i) => i.status === "downloading").length;
+  const queued = activeDownloads.filter((i) => i.status === "queued").length;
+  const done = historyDownloads.filter((i) => i.status === "done").length;
+  const errors = historyDownloads.filter((i) => i.status === "error").length;
   const totalSpeed = activeDownloads
-    .filter((item) => item.status === "downloading" && item.speed_bps != null)
-    .reduce((sum, item) => sum + (item.speed_bps ?? 0), 0);
-
-  type Filter = "all" | "active" | "queued" | "done" | "failed";
-  const [filter, setFilter] = useState<Filter>("all");
+    .filter((i) => i.status === "downloading")
+    .reduce((sum, i) => sum + (i.speed_bps ?? 0), 0);
 
   const filteredActive =
     filter === "all" || filter === "active"
@@ -727,6 +201,18 @@ export default function DownloadsTab({
           ? historyDownloads.filter((d) => d.status === "error")
           : [];
 
+  const renderRow = (item: DownloadItem) => (
+    <DownloadRow
+      key={item.id}
+      item={item}
+      language={language}
+      onCancel={() => void cancelDownload(item.id)}
+      onRetry={() => void retryDownload(item.id)}
+      onOpenFolder={() => void openDownloadFolder(item.local_path)}
+      onDelete={() => void deleteDownload(item.id)}
+    />
+  );
+
   return (
     <div
       style={{
@@ -737,357 +223,90 @@ export default function DownloadsTab({
         flexDirection: "column",
       }}
     >
-      {/* Toolbar — same chip-row pattern as Watchlist / Movies. Library's
-          outer toolbar already renders "Descargas N titles", so no duplicate
-          header here. */}
-      <div
-        style={{
-          padding: "10px 1.5rem",
-          width: "100%",
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-          flexShrink: 0,
-          borderBottom:
-            "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            flexWrap: "wrap",
-            width: "100%",
-          }}
-        >
-          {/* Filter chips */}
-          <FilterChip
-            label={language === "es" ? "Todo" : "All"}
-            count={downloads.length}
-            active={filter === "all"}
-            onClick={() => setFilter("all")}
+      <TransferToolbar
+        left={
+          <TransferFilterChips
+            active={filter}
+            onChange={setFilter}
+            chips={[
+              { id: "all", label: es ? "Todo" : "All", count: downloads.length },
+              { id: "active", label: es ? "Activas" : "Active", count: downloading + queued },
+              { id: "queued", label: es ? "En cola" : "Queued", count: queued },
+              { id: "done", label: es ? "Completadas" : "Done", count: done },
+              { id: "failed", label: es ? "Con error" : "Failed", count: errors },
+            ]}
           />
-          <FilterChip
-            label={language === "es" ? "Activos" : "Active"}
-            count={downloading + queued}
-            active={filter === "active"}
-            onClick={() => setFilter("active")}
-          />
-          <FilterChip
-            label={language === "es" ? "En cola" : "Queued"}
-            count={queued}
-            active={filter === "queued"}
-            onClick={() => setFilter("queued")}
-          />
-          <FilterChip
-            label={language === "es" ? "Completados" : "Done"}
-            count={done}
-            active={filter === "done"}
-            onClick={() => setFilter("done")}
-          />
-          <FilterChip
-            label={language === "es" ? "Errores" : "Failed"}
-            count={errors}
-            active={filter === "failed"}
-            onClick={() => setFilter("failed")}
-          />
-
-          <div style={{ flex: 1 }} />
-
-          {totalSpeed > 0 && (
+        }
+        right={
+          totalSpeed > 0 ? (
             <span
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                padding: "5px 10px",
-                borderRadius: 999,
-                background:
-                  "color-mix(in srgb, var(--color-primary) 14%, transparent)",
-                color: "var(--color-primary)",
                 fontSize: 12,
                 fontWeight: 700,
+                color: "var(--color-primary)",
                 whiteSpace: "nowrap",
               }}
             >
               ↓ {formatSpeed(totalSpeed)}
             </span>
-          )}
-          {historyDownloads.length > 0 && (
-            <ActionButton
-              icon={X}
-              label={t(language, "downloads.clearCompleted")}
-              onClick={() => {
-                void clearCompleted();
-              }}
-            />
-          )}
-        </div>
-      </div>
+          ) : undefined
+        }
+      />
 
-      {/* Content body */}
-      <div
-        style={{
-          padding: "16px 1.5rem calc(80px + env(safe-area-inset-bottom, 0px))",
-          maxWidth: 1100,
-          margin: "0 auto",
-          width: "100%",
-          display: "flex",
-          flexDirection: "column",
-          gap: 18,
-        }}
-      >
+      <TransferBody>
+        <TransferStats
+          stats={[
+            { icon: Loader2, label: es ? "Descargando" : "Downloading", value: downloading, tone: "primary" },
+            { icon: Clock, label: es ? "En cola" : "Queued", value: queued, tone: "neutral" },
+            { icon: Check, label: es ? "Completadas" : "Done", value: done, tone: "success" },
+            { icon: X, label: es ? "Con error" : "Failed", value: errors, tone: "danger" },
+          ]}
+        />
 
-      {/* Stat cards */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-          gap: 10,
-        }}
-      >
-        <StatCard
-          icon={RefreshCw}
-          value={String(downloading)}
-          label={t(language, "downloads.downloadingCount", {
-            count: downloading,
-          })}
-          tone="primary"
-        />
-        <StatCard
-          icon={Clock}
-          value={String(queued)}
-          label={t(language, "downloads.queuedCount", { count: queued })}
-        />
-        <StatCard
-          icon={Check}
-          value={String(done)}
-          label={t(language, "downloads.doneCount", { count: done })}
-          tone="success"
-        />
-        <StatCard
-          icon={X}
-          value={String(errors)}
-          label={t(language, "downloads.failedCount", { count: errors })}
-          tone="danger"
-        />
-      </div>
-
-      {downloads.length === 0 ? (
-        <section
-          style={{
-            borderRadius: "calc(var(--radius-lg) + 4px)",
-            border:
-              "1px solid color-mix(in srgb, var(--color-border) 76%, transparent)",
-            background:
-              "linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 94%, transparent), color-mix(in srgb, var(--color-surface-2) 90%, transparent))",
-            boxShadow:
-              "0 16px 34px color-mix(in srgb, black 14%, transparent), inset 0 1px 0 color-mix(in srgb, white 4%, transparent)",
-            padding: "2.5rem 1.5rem",
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              width: 54,
-              height: 54,
-              borderRadius: 18,
-              margin: "0 auto 14px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background:
-                "color-mix(in srgb, var(--color-primary) 14%, transparent)",
-              color: "var(--color-primary)",
-            }}
-          >
-            <Download
-              size={22}
-              strokeWidth={2.1}
-              aria-hidden="true"
-              style={{ display: "block" }}
-            />
-          </div>
-          <div
-            style={{
-              fontSize: 16,
-              fontWeight: 700,
-              color: "var(--color-text)",
-              marginBottom: 6,
-            }}
-          >
-            {t(language, "downloads.emptyTitle")}
-          </div>
-          <div
-            style={{
-              fontSize: 13,
-              color: "var(--color-text-muted)",
-              lineHeight: 1.6,
-              maxWidth: 460,
-              margin: "0 auto",
-            }}
-          >
-            {t(language, "downloads.emptyBody")}
-          </div>
-        </section>
-      ) : (
-        <>
-          <section>
-            <SectionTitle
-              icon={Activity}
+        {downloads.length === 0 ? (
+          <TransferEmpty
+            icon={Download}
+            title={t(language, "downloads.emptyTitle")}
+            body={t(language, "downloads.emptyBody")}
+          />
+        ) : (
+          <>
+            <TransferSection
               title={t(language, "downloads.activeSection")}
-              subtitle={t(language, "downloads.activeSectionBody")}
-            />
-            {filteredActive.length > 0 ? (
-              <div
-                style={{ display: "flex", flexDirection: "column", gap: 10 }}
-              >
-                {filteredActive.map((item) => (
-                  <DownloadRow
-                    key={item.id}
-                    item={item}
-                    language={language}
-                    onCancel={() => {
-                      void cancelDownload(item.id);
-                    }}
-                    onRetry={() => {
-                      void retryDownload(item.id);
-                    }}
-                    onOpenFolder={() => {
-                      void openDownloadFolder(item.local_path);
-                    }}
-                    onDelete={() => {
-                      void deleteDownload(item.id);
-                    }}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div style={emptySectionStyle}>
-                <Clock
-                  size={18}
-                  strokeWidth={2.1}
-                  aria-hidden="true"
-                  style={{ display: "block" }}
-                />
-                <span>{t(language, "downloads.noActive")}</span>
-              </div>
-            )}
-          </section>
+              count={filteredActive.length}
+            >
+              {filteredActive.length > 0 ? (
+                filteredActive.map(renderRow)
+              ) : (
+                <TransferEmptySection icon={Clock} text={t(language, "downloads.noActive")} />
+              )}
+            </TransferSection>
 
-          <section>
-            <SectionTitle
-              icon={Check}
+            <TransferSection
               title={t(language, "downloads.historySection")}
-              subtitle={t(language, "downloads.historySectionBody")}
-            />
-            {filteredHistory.length > 0 ? (
-              <div
-                style={{ display: "flex", flexDirection: "column", gap: 10 }}
-              >
-                {filteredHistory.map((item) => (
-                  <DownloadRow
-                    key={item.id}
-                    item={item}
-                    language={language}
-                    onCancel={() => {
-                      void cancelDownload(item.id);
-                    }}
-                    onRetry={() => {
-                      void retryDownload(item.id);
-                    }}
-                    onOpenFolder={() => {
-                      void openDownloadFolder(item.local_path);
-                    }}
-                    onDelete={() => {
-                      void deleteDownload(item.id);
-                    }}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div style={emptySectionStyle}>
-                <Check
-                  size={18}
-                  strokeWidth={2.1}
-                  aria-hidden="true"
-                  style={{ display: "block" }}
-                />
-                <span>{t(language, "downloads.noHistory")}</span>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-      </div>{/* /content body */}
+              count={filteredHistory.length}
+              action={
+                historyDownloads.length > 0 ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={Trash2}
+                    onClick={() => void clearCompleted()}
+                  >
+                    {t(language, "downloads.clearCompleted")}
+                  </Button>
+                ) : undefined
+              }
+            >
+              {filteredHistory.length > 0 ? (
+                filteredHistory.map(renderRow)
+              ) : (
+                <TransferEmptySection icon={Check} text={t(language, "downloads.noHistory")} />
+              )}
+            </TransferSection>
+          </>
+        )}
+      </TransferBody>
     </div>
-  );
-}
-
-const metaPill: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 6,
-  minHeight: 30,
-  padding: "0.25rem 0.65rem",
-  borderRadius: "var(--radius-full)",
-  border: "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
-  background: "color-mix(in srgb, var(--color-surface) 88%, transparent)",
-  color: "var(--color-text-muted)",
-  fontSize: 12,
-  fontWeight: 700,
-};
-
-const emptySectionStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  padding: "1rem 1.1rem",
-  borderRadius: "var(--radius-lg)",
-  border: "1px dashed color-mix(in srgb, var(--color-border) 74%, transparent)",
-  background: "color-mix(in srgb, var(--color-surface-2) 70%, transparent)",
-  color: "var(--color-text-muted)",
-  fontSize: 13,
-};
-
-
-function FilterChip({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "6px 12px",
-        borderRadius: 999,
-        border: active
-          ? "1px solid color-mix(in srgb, var(--color-primary) 50%, transparent)"
-          : "1px solid color-mix(in srgb, var(--color-border) 60%, transparent)",
-        background: active
-          ? "color-mix(in srgb, var(--color-primary) 18%, transparent)"
-          : "color-mix(in srgb, var(--color-surface) 70%, transparent)",
-        color: active ? "var(--color-primary)" : "var(--color-text)",
-        fontSize: 12,
-        fontWeight: 700,
-        cursor: "pointer",
-        fontFamily: "inherit",
-      }}
-    >
-      <span>{label}</span>
-      <span style={{ opacity: 0.7, fontSize: 11, fontWeight: 600 }}>{count}</span>
-    </button>
   );
 }

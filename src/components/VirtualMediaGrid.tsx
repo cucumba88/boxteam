@@ -396,6 +396,7 @@ export default memo(function VirtualMediaGrid({
                     hideEpisodeBadge={hideEpisodeBadge}
                     showFileSize={showFileSize}
                     disableQuickAction={disableQuickAction}
+                    selectionMode={selecting}
                     onDownload={handleMediaDownload}
                     onSelect={handleMediaSelect}
                   />

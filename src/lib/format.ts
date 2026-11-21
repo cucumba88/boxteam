@@ -177,3 +177,41 @@ export function formatLanguage(code: string): string {
 export function formatLanguages(codes: string[]): string {
   return codes.map(formatLanguage).join(" · ");
 }
+
+const RELEASE_TYPE_DISPLAY: Record<string, string> = {
+  "WEB-DL": "WEB-DL",
+  WEBDL: "WEB-DL",
+  WEBRIP: "WEBRip",
+  BDREMUX: "BDRemux",
+  BLURAY: "BluRay",
+  BDRIP: "BDRip",
+  HDTV: "HDTV",
+  DVDRIP: "DVDRip",
+  CAM: "CAM",
+};
+
+/** One display spelling for release types everywhere ("WEBRIP" → "WEBRip"). */
+export function formatReleaseType(raw?: string | null): string {
+  if (!raw) return "";
+  const key = raw.trim().toUpperCase().replace(/\s+/g, "-");
+  return RELEASE_TYPE_DISPLAY[key] ?? RELEASE_TYPE_DISPLAY[key.replace(/-/g, "")] ?? raw.trim();
+}
+
+/** One display spelling for resolutions everywhere ("2160P" → "4K", "1080P" → "1080p"). */
+export function formatResolution(raw?: string | null): string {
+  if (!raw) return "";
+  const v = raw.trim().toUpperCase();
+  if (v === "2160P" || v === "4K" || v === "UHD") return "4K";
+  if (/^\d{3,4}P$/.test(v)) return v.slice(0, -1) + "p";
+  return raw.trim();
+}
+
+/** "WEB-DL · 1080p" — the quality label used on cards, chips and rows. */
+export function formatQuality(
+  releaseType?: string | null,
+  resolution?: string | null,
+): string {
+  return [formatReleaseType(releaseType), formatResolution(resolution)]
+    .filter(Boolean)
+    .join(" · ");
+}

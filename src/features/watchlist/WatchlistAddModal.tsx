@@ -416,7 +416,7 @@ export default function WatchlistAddModal({
               <span style={{ color: "var(--color-text)", fontSize: 14 }}>
                 {t(language, "watchlist.autoDownload")}
               </span>
-              <Toggle checked={autoDownload} onChange={setAutoDownload} />
+              <Toggle label={t(language, "watchlist.autoDownload")} checked={autoDownload} onChange={setAutoDownload} />
             </div>
 
             {/* Quality profile — dropdown + always-available "Nuevo perfil" */}

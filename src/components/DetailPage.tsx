@@ -35,9 +35,25 @@ import { t } from "../utils/i18n";
 import { GENRE_MAP } from "../utils/genres";
 import { PROVIDER_BY_ID, parseProviders } from "../utils/providers";
 import PlatformLogo from "./PlatformLogo";
-import { folderPath, formatBytes } from "../lib/format";
+import {
+  folderPath,
+  formatBytes,
+  formatReleaseType,
+  formatResolution,
+} from "../lib/format";
 import WatchlistButton from "../features/watchlist/WatchlistButton";
 import type { AddWatchlistParams } from "../features/watchlist/types";
+
+/** "2023-11-02" → "2 nov 2023" (es) / "Nov 2, 2023" (en). */
+function formatReleaseDate(iso: string, language: AppLanguage): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(language === "es" ? "es-ES" : "en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 const TMDB_POSTER_W500 = "https://image.tmdb.org/t/p/w500";
 const TMDB_POSTER_W342 = "https://image.tmdb.org/t/p/w342";
@@ -358,10 +374,18 @@ export default function DetailPage({
           type="button"
           onClick={() => setShowFix(true)}
           title={t(language, "detail.fixMatch")}
-          style={iconChip}
+          aria-label={t(language, "detail.fixMatch")}
+          style={{
+            ...iconChip,
+            flexShrink: 0,
+            whiteSpace: "nowrap",
+            ...(isMobile ? { padding: 0, width: 36, height: 36, justifyContent: "center" } : {}),
+          }}
         >
-          <Pencil size={13} strokeWidth={2.2} aria-hidden="true" />
-          <span>{t(language, "detail.fixMatch")}</span>
+          <Pencil size={isMobile ? 15 : 13} strokeWidth={2.2} aria-hidden="true" />
+          {/* Icon-only on mobile so the label doesn't wrap onto two lines
+              next to the breadcrumb. */}
+          {!isMobile && <span>{t(language, "detail.fixMatch")}</span>}
         </button>
       </div>
 
@@ -485,7 +509,7 @@ export default function DetailPage({
                     aria-hidden="true"
                     style={{ marginRight: 4, verticalAlign: "-1px" }}
                   />
-                  {releaseDate}
+                  {formatReleaseDate(releaseDate, language)}
                 </span>
               </>
             )}
@@ -510,16 +534,35 @@ export default function DetailPage({
                 </span>
               </>
             )}
+            {secondaryRatings.map((r) => (
+              <span
+                key={r.source}
+                title={`${ratingLabel[r.source]} ${formatRating(r.value)}`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontWeight: 700,
+                }}
+              >
+                <RatingSourceLogo
+                  source={r.source}
+                  height={14}
+                  title={ratingLabel[r.source]}
+                />
+                {formatRating(r.value)}
+              </span>
+            ))}
             {item.resolution && (
               <>
                 <span style={{ opacity: 0.4 }}>·</span>
-                <span>{item.resolution}</span>
+                <span>{formatResolution(item.resolution)}</span>
               </>
             )}
             {item.release_type && (
               <>
                 <span style={{ opacity: 0.4 }}>·</span>
-                <span>{item.release_type}</span>
+                <span>{formatReleaseType(item.release_type)}</span>
               </>
             )}
             {item.hdr && (
@@ -545,45 +588,6 @@ export default function DetailPage({
               </>
             )}
           </div>
-
-          {/* Secondary ratings — show every available source after the primary
-              so the user can compare at a glance. Always shows the primary
-              source's label too, even when there are no secondaries, so the
-              big star isn't unlabeled. */}
-          {secondaryRatings.length > 0 && (
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "center",
-                gap: 12,
-                fontSize: 12,
-                color: "var(--color-text-muted)",
-              }}
-            >
-              {secondaryRatings.map((r) => (
-                <span
-                  key={r.source}
-                  title={`${ratingLabel[r.source]} ${formatRating(r.value)}`}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    opacity: 0.9,
-                  }}
-                >
-                  <RatingSourceLogo
-                    source={r.source}
-                    height={14}
-                    title={ratingLabel[r.source]}
-                  />
-                  <span style={{ color: "var(--color-text)" }}>
-                    {formatRating(r.value)}
-                  </span>
-                </span>
-              ))}
-            </div>
-          )}
 
           {/* Genres */}
           {genres.length > 0 && (
@@ -737,6 +741,7 @@ export default function DetailPage({
                 watchlistedTmdbIds={watchlistedTmdbIds}
                 onAdd={onAddToWatchlist}
                 onNavigateToWatchlist={onOpenWatchlist}
+                labeled
               />
             )}
 
@@ -896,7 +901,7 @@ export default function DetailPage({
                   {item.filename}
                 </span>
               </FileRow>
-              <FileRow label="Path">
+              <FileRow label={language === "es" ? "Ruta" : "Path"}>
                 <span
                   style={{
                     fontFamily: "monospace",
@@ -908,7 +913,7 @@ export default function DetailPage({
                 </span>
               </FileRow>
               {item.release_group && (
-                <FileRow label="Group">{item.release_group}</FileRow>
+                <FileRow label={language === "es" ? "Grupo" : "Group"}>{item.release_group}</FileRow>
               )}
             </div>
           </Section>
@@ -926,7 +931,7 @@ export default function DetailPage({
           <Section title={language === "es" ? "Calidad" : "Quality"}>
             <SpecGrid>
               <Spec label={t(language, "detail.resolution")}>
-                {item.resolution || "—"}
+                {formatResolution(item.resolution) || "—"}
               </Spec>
               <Spec label={t(language, "detail.videoCodec")}>
                 {item.codec || "—"}
@@ -935,7 +940,7 @@ export default function DetailPage({
               <Spec label={t(language, "detail.audio")}>
                 {item.audio_codec ? audioLabel(item.audio_codec) : "—"}
               </Spec>
-              <Spec label="Source">{item.release_type || "—"}</Spec>
+              <Spec label={language === "es" ? "Origen" : "Source"}>{formatReleaseType(item.release_type) || "—"}</Spec>
               <Spec label={t(language, "detail.size")}>
                 {item.size_bytes != null && item.size_bytes > 0
                   ? formatBytes(item.size_bytes)

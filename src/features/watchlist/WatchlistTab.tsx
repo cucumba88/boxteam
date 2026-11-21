@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, X } from "lucide-react";
+import { Bookmark, Plus, Search, X } from "lucide-react";
+import Button from "../../components/ui/Button";
 import type { UseWatchlistReturn } from "./useWatchlist";
 import type { WatchlistItem } from "./types";
 import type { AppLanguage } from "../../utils/mediaLanguage";
@@ -338,34 +339,38 @@ export default function WatchlistTab({
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              height: 200,
-              gap: 12,
+              minHeight: 260,
+              gap: 14,
+              textAlign: "center",
               color: "var(--color-text-muted)",
             }}
           >
-            <span style={{ fontSize: 36 }}>🔖</span>
-            <span>
+            <div
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: 999,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background:
+                  "color-mix(in srgb, var(--color-primary) 12%, transparent)",
+                color: "var(--color-primary)",
+              }}
+            >
+              <Bookmark size={26} strokeWidth={1.8} aria-hidden="true" />
+            </div>
+            <span
+              style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text)" }}
+            >
               {watchlist.items.length === 0
                 ? t(language, "watchlist.empty")
                 : t(language, "watchlist.noResults")}
             </span>
             {watchlist.items.length === 0 && onOpenAdd && (
-              <button
-                onClick={onOpenAdd}
-                style={{
-                  background: "var(--color-primary)",
-                  border: "none",
-                  color: "#fff",
-                  borderRadius: "var(--radius)",
-                  padding: "9px 18px",
-                  cursor: "pointer",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  minHeight: 44,
-                }}
-              >
-                + {t(language, "watchlist.addTitleCta")}
-              </button>
+              <Button variant="primary" icon={Plus} onClick={onOpenAdd}>
+                {t(language, "watchlist.addTitleCta")}
+              </Button>
             )}
           </div>
         ) : (

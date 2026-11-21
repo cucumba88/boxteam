@@ -20,7 +20,21 @@ interface Props {
   items: CommandItem[];
   placeholder?: string;
   emptyMessage?: string;
+  /** Footer hint labels; default to English for standalone use. */
+  labels?: {
+    navigate: string;
+    select: string;
+    close: string;
+    results: (count: number) => string;
+  };
 }
+
+const DEFAULT_LABELS = {
+  navigate: "navigate",
+  select: "select",
+  close: "close",
+  results: (count: number) => `${count} results`,
+};
 
 export default function CommandPalette({
   open,
@@ -28,6 +42,7 @@ export default function CommandPalette({
   items,
   placeholder = "Search library and actions…",
   emptyMessage = "No matches",
+  labels = DEFAULT_LABELS,
 }: Props) {
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
@@ -186,18 +201,18 @@ export default function CommandPalette({
             <span>
               <kbd>↑</kbd>
               <kbd>↓</kbd>
-              navigate
+              {labels.navigate}
             </span>
             <span>
               <kbd>↵</kbd>
-              select
+              {labels.select}
             </span>
             <span>
               <kbd>esc</kbd>
-              close
+              {labels.close}
             </span>
           </div>
-          <span>{filtered.length} results</span>
+          <span>{labels.results(filtered.length)}</span>
         </div>
       </div>
     </div>,

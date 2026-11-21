@@ -33,6 +33,7 @@ export default function ThemeToggle() {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       title={getTitle(theme)}
+      aria-label={getTitle(theme)}
       style={{
         width: 36,
         height: 36,

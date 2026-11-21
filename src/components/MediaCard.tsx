@@ -10,7 +10,7 @@ import {
   getLocalizedPosterPath,
   getLocalizedTitle,
 } from "../utils/mediaLanguage";
-import { formatBytes } from "../lib/format";
+import { formatBytes, formatQuality } from "../lib/format";
 import {
   formatRating,
   ratingLabel,
@@ -44,6 +44,12 @@ interface Props {
    * ambiguous — versions are selected in the detail page instead.
    */
   disableQuickAction?: boolean;
+  /**
+   * True while the grid is in multi-select mode. Hides the hover download
+   * button (a click must toggle the selection, never queue a download) and
+   * shifts the S/E badge right so the selection checkbox doesn't cover it.
+   */
+  selectionMode?: boolean;
 }
 
 const RELEASE_TYPE_COLORS: Record<string, string> = {
@@ -95,7 +101,9 @@ function badgeSurface(
     fontWeight: 800,
     lineHeight: 1,
     letterSpacing: "0.07em",
-    textTransform: options?.iconOnly ? "none" : "uppercase",
+    // No forced uppercase: quality labels keep their canonical spelling
+    // ("WEB-DL · 1080p", "WEBRip"), same as filters and detail pages.
+    textTransform: "none",
     whiteSpace: "nowrap",
   };
 }
@@ -137,6 +145,7 @@ function MediaCard({
   badges,
   downloadItem,
   hideEpisodeBadge = false,
+  selectionMode = false,
   showFileSize = false,
   onDownload,
   onSelect,
@@ -152,6 +161,10 @@ function MediaCard({
     item.media_type === "tv" ||
     item.media_type === "documentary";
   const posterPath = getLocalizedPosterPath(item, language);
+  const episodeCode =
+    item.season != null
+      ? `${language === "es" ? "T" : "S"}${String(item.season).padStart(2, "0")}${item.episode != null ? `E${String(item.episode).padStart(2, "0")}` : ""}${item.episode_end != null && item.episode_end !== item.episode ? `-E${String(item.episode_end).padStart(2, "0")}` : ""}`
+      : "";
   const poster = posterPath
     ? `https://image.tmdb.org/t/p/w185${posterPath}`
     : null;
@@ -264,21 +277,23 @@ function MediaCard({
           }}
         />
 
-        {/* S/E badge top-left */}
+        {/* S/E badge top-left — "T01E05" in Spanish, same as the show page */}
         {!hideEpisodeBadge && item.season != null && (
           <div
             style={{
               position: "absolute",
-              top: "0.4rem",
-              left: "0.4rem",
+              top: selectionMode ? "0.55rem" : "0.4rem",
+              left: selectionMode ? "calc(0.4rem + 36px)" : "0.4rem",
               zIndex: 4,
-              maxWidth: "calc(100% - 3.4rem)",
+              maxWidth: selectionMode
+                ? "calc(100% - 3.4rem - 36px)"
+                : "calc(100% - 3.4rem)",
             }}
           >
             <OverlayBadge
-              title={`S${String(item.season).padStart(2, "0")}${item.episode != null ? `E${String(item.episode).padStart(2, "0")}` : ""}${item.episode_end != null && item.episode_end !== item.episode ? `-E${String(item.episode_end).padStart(2, "0")}` : ""}`}
+              title={episodeCode}
             >
-              {`S${String(item.season).padStart(2, "0")}${item.episode != null ? `E${String(item.episode).padStart(2, "0")}` : ""}${item.episode_end != null && item.episode_end !== item.episode ? `-E${String(item.episode_end).padStart(2, "0")}` : ""}`}
+              {episodeCode}
             </OverlayBadge>
           </div>
         )}
@@ -310,7 +325,7 @@ function MediaCard({
             {inPlex && (
               <OverlayBadge
                 tone="info"
-                title="In Plex"
+                title={language === "es" ? "En Plex" : "In Plex"}
                 iconOnly
                 style={{ background: "#282a2d", borderColor: "#282a2d" }}
               >
@@ -318,12 +333,12 @@ function MediaCard({
               </OverlayBadge>
             )}
             {inEmby && (
-              <OverlayBadge tone="neutral" title="In Emby" iconOnly>
+              <OverlayBadge tone="neutral" title={language === "es" ? "En Emby" : "In Emby"} iconOnly>
                 <EmbyIcon size={13} />
               </OverlayBadge>
             )}
             {showLibraryFallback && (
-              <OverlayBadge tone="info" title="In Library" iconOnly>
+              <OverlayBadge tone="info" title={language === "es" ? "En la biblioteca" : "In Library"} iconOnly>
                 <Check
                   size={11}
                   strokeWidth={2.8}
@@ -399,13 +414,9 @@ function MediaCard({
                       ? RELEASE_TYPE_COLORS[item.release_type] || "#1e293b"
                       : undefined
                   }
-                  title={[item.release_type, item.resolution]
-                    .filter(Boolean)
-                    .join(" · ")}
+                  title={formatQuality(item.release_type, item.resolution)}
                 >
-                  {[item.release_type, item.resolution]
-                    .filter(Boolean)
-                    .join(" · ")}
+                  {formatQuality(item.release_type, item.resolution)}
                 </OverlayBadge>
               )}
             </div>
@@ -423,6 +434,7 @@ function MediaCard({
             (movies grouped, TV grouped) where the poster represents multiple
             file versions and a single-click download is ambiguous. */}
         {!disableQuickAction &&
+          !selectionMode &&
           onDownload &&
           !badges?.downloaded &&
           (!downloadItem ||
@@ -431,8 +443,8 @@ function MediaCard({
             <button
               type="button"
               className="media-card-quick-action"
-              aria-label="Download"
-              title="Download"
+              aria-label={language === "es" ? "Descargar" : "Download"}
+              title={language === "es" ? "Descargar" : "Download"}
               onClick={(e) => {
                 e.stopPropagation();
                 onDownload(item);

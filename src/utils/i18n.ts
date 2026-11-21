@@ -35,13 +35,13 @@ const messages = {
   "library.select": { es: "Seleccionar", en: "Select" },
   "library.selectAll": { es: "Seleccionar todo", en: "Select All" },
   "library.cancel": { es: "Cancelar", en: "Cancel" },
-  "library.fixMatch": { es: "Corregir match", en: "Fix Match" },
+  "library.fixMatch": { es: "Corregir coincidencia", en: "Fix Match" },
   "library.refresh": { es: "Actualizar librería", en: "Refresh Library" },
   "library.refreshAllMetadata": {
     es: "Actualizar metadatos faltantes",
     en: "Refresh Missing Metadata",
   },
-  "library.rematchAll": { es: "Re-hacer match global", en: "Re-Match All" },
+  "library.rematchAll": { es: "Rehacer todas las coincidencias", en: "Re-Match All" },
   "library.clearAllMetadata": {
     es: "Limpiar metadatos",
     en: "Clear All Metadata",
@@ -63,9 +63,9 @@ const messages = {
     es: "Actualizando plataformas…",
     en: "Refreshing platforms…",
   },
-  "library.matching": { es: "Re-haciendo match…", en: "Re-matching…" },
+  "library.matching": { es: "Rehaciendo coincidencias…", en: "Re-matching…" },
   "library.rematchAllPlex": {
-    es: "Re-hacer match (flujo Plex)",
+    es: "Rehacer coincidencias (flujo Plex)",
     en: "Re-Match All (Plex Flow)",
   },
   "library.page": { es: "Página", en: "Page" },
@@ -83,10 +83,18 @@ const messages = {
     es: "{count} títulos",
     en: "{count} titles",
   },
-  "watchlist.allTypes": { es: "Todos", en: "All" },
+  "statusbar.indexedFiles": {
+    es: "{count} archivos indexados en total",
+    en: "{count} files indexed in total",
+  },
+  "library.titlesCountOne": {
+    es: "1 título",
+    en: "1 title",
+  },
+  "watchlist.allTypes": { es: "Todo", en: "All" },
   "watchlist.movies": { es: "Películas", en: "Movies" },
   "watchlist.tv": { es: "Series", en: "TV" },
-  "watchlist.statusAll": { es: "Todo", en: "All" },
+  "watchlist.statusAll": { es: "Cualquier estado", en: "Any status" },
   "watchlist.statusPending": { es: "Pendiente", en: "Pending" },
   "watchlist.statusAvailable": { es: "Disponible", en: "Available" },
   "watchlist.remove": { es: "Quitar", en: "Remove" },
@@ -103,12 +111,16 @@ const messages = {
   "library.actions": { es: "Acciones de librería", en: "Library actions" },
   "library.openSettings": { es: "Abrir ajustes", en: "Open Settings" },
   "library.noMediaStarting": {
-    es: "Todavía no hay contenido indexado. Iniciando…",
-    en: "No media indexed yet. Starting…",
+    es: "Aún no hay nada indexado. Actualiza la librería para escanear el FTP.",
+    en: "Nothing indexed yet. Refresh the library to scan the FTP.",
   },
   "library.noResultsFilters": {
     es: "Ningún resultado coincide con los filtros actuales.",
     en: "No results match your filters.",
+  },
+  "library.noSearchResults": {
+    es: "Nada coincide con «{query}».",
+    en: "Nothing matches “{query}”.",
   },
   "library.noCategory": {
     es: "No se encontraron {category}. Revisa la configuración de tipos de carpeta.",
@@ -120,7 +132,7 @@ const messages = {
   "filter.sort": { es: "Orden", en: "Sort" },
   "filter.type": { es: "Tipo", en: "Type" },
   "filter.resolution": { es: "Resolución", en: "Resolution" },
-  "filter.codec": { es: "Codec de video", en: "Video codec" },
+  "filter.codec": { es: "Códec de vídeo", en: "Video codec" },
   "filter.hdr": { es: "HDR", en: "HDR" },
   "filter.active": { es: "{count} activos", en: "{count} active" },
   "filter.browseHint": {
@@ -128,6 +140,7 @@ const messages = {
     en: "Browse by quality or title",
   },
   "filter.clear": { es: "Limpiar", en: "Clear" },
+  "filter.clearSearch": { es: "Borrar búsqueda", en: "Clear search" },
   "filter.searchPlaceholder": {
     es: "Título, archivo, release group…",
     en: "Title, filename, release group…",
@@ -173,9 +186,9 @@ const messages = {
     es: "Este archivo exacto ya existe en la carpeta de destino.",
     en: "This exact file already exists in the destination folder.",
   },
-  "detail.fixMatch": { es: "Corregir match", en: "Fix Match" },
+  "detail.fixMatch": { es: "Corregir coincidencia", en: "Fix Match" },
   "detail.resolution": { es: "Resolución", en: "Resolution" },
-  "detail.videoCodec": { es: "Codec de video", en: "Video Codec" },
+  "detail.videoCodec": { es: "Códec de vídeo", en: "Video Codec" },
   "detail.audio": { es: "Audio", en: "Audio" },
   "detail.size": { es: "Tamaño", en: "Size" },
   "detail.links": { es: "Enlaces", en: "Links" },
@@ -261,9 +274,9 @@ const messages = {
   "tv.seasons": { es: "Temporadas", en: "Seasons" },
   "tv.episodes": { es: "Episodios", en: "Episodes" },
   "tv.groups": { es: "Grupos", en: "Groups" },
-  "tv.fixShow": { es: "Corregir match de la serie", en: "Fix match for show" },
+  "tv.fixShow": { es: "Corregir coincidencia de la serie", en: "Fix match for show" },
   "tv.fixVisible": {
-    es: "Corregir match de episodios visibles",
+    es: "Corregir coincidencia de los episodios visibles",
     en: "Fix match for visible episodes",
   },
   "tv.clearShowMetadata": {
@@ -308,23 +321,23 @@ const messages = {
     en: "Download all visible episodes",
   },
   "tv.clearConfirm": {
-    es: '¿Limpiar todos los metadatos TMDB de "{title}"? Se volverán a obtener en el próximo rematch.',
+    es: '¿Limpiar todos los metadatos TMDB de "{title}"? Se volverán a obtener la próxima vez que se rehagan las coincidencias.',
     en: 'Clear all TMDB metadata for "{title}"? It will be re-fetched on next rematch.',
   },
 
-  "modal.fixTmdb": { es: "Corregir match TMDB", en: "Fix TMDB match" },
+  "modal.fixTmdb": { es: "Corregir coincidencia en TMDB", en: "Fix TMDB match" },
   "modal.searchTarget": { es: "Búsqueda objetivo", en: "Search target" },
   "modal.search": { es: "Buscar", en: "Search" },
   "modal.searching": { es: "Buscando…", en: "Searching…" },
   "modal.movie": { es: "Película", en: "Movie" },
   "modal.doc": { es: "Doc", en: "Doc" },
-  "modal.useMatch": { es: "Usar match", en: "Use match" },
+  "modal.useMatch": { es: "Usar esta coincidencia", en: "Use match" },
   "modal.applying": { es: "Aplicando…", en: "Applying…" },
   "modal.noResults": {
     es: "No se encontraron resultados TMDB para esa búsqueda.",
     en: "No TMDB results found for that search.",
   },
-  "modal.matchEditor": { es: "Editor de match", en: "Match editor" },
+  "modal.matchEditor": { es: "Editor de coincidencia", en: "Match editor" },
   "modal.untitled": { es: "Sin título", en: "Untitled" },
   "modal.applyOne": { es: "Aplicar a 1 archivo", en: "Apply to 1 file" },
   "modal.applyMany": {
@@ -338,20 +351,20 @@ const messages = {
     en: "Search TMDB title…",
   },
   "modal.emptyTitle": {
-    es: "Busca en TMDB para elegir el match correcto",
+    es: "Busca en TMDB para elegir la coincidencia correcta",
     en: "Search TMDB to choose the correct match",
   },
   "modal.emptyBody": {
-    es: "Usa la búsqueda de arriba y selecciona el mejor resultado. El match elegido se aplicará a todos los archivos de este alcance.",
+    es: "Usa la búsqueda de arriba y selecciona el mejor resultado. La coincidencia elegida se aplicará a todos los archivos de este alcance.",
     en: "Use the title search above, then pick the best result. The selected match will be applied to every file in this scope.",
   },
   "modal.rating": { es: "Puntuación {rating}", en: "Rating {rating}" },
 
   "downloads.queued": { es: "En cola", en: "Queued" },
-  "downloads.downloading": { es: "Descargando…", en: "Downloading…" },
-  "downloads.done": { es: "Completado", en: "Done" },
+  "downloads.downloading": { es: "Descargando", en: "Downloading…" },
+  "downloads.done": { es: "Completada", en: "Done" },
   "downloads.error": { es: "Error", en: "Error" },
-  "downloads.cancelled": { es: "Cancelado", en: "Cancelled" },
+  "downloads.cancelled": { es: "Cancelada", en: "Cancelled" },
   "downloads.toastQueuedTitle": {
     es: "Descarga agregada",
     en: "Download queued",
@@ -445,23 +458,23 @@ const messages = {
   "activity.scanning": { es: "📂 Escaneando {path}", en: "📂 Scanning {path}" },
   "activity.found": { es: "🎬 Encontrado: {name}", en: "🎬 Found: {name}" },
   "activity.rematching": {
-    es: "🔄 Rehaciendo match de {count} elementos con TMDB…",
+    es: "🔄 Rehaciendo coincidencias de {count} elementos con TMDB…",
     en: "🔄 Re-matching {count} items with TMDB…",
   },
   "activity.matching": {
-    es: "🌐 [{current}/{total}] Buscando match: {title} ({type})",
+    es: "🌐 [{current}/{total}] Buscando coincidencia: {title} ({type})",
     en: "🌐 [{current}/{total}] Matching: {title} ({type})",
   },
   "activity.matched": {
-    es: "✓ Match: {from} → {to} ({year})",
+    es: "✓ Coincidencia: {from} → {to} ({year})",
     en: "✓ Matched: {from} → {to} ({year})",
   },
   "activity.noMatch": {
-    es: "⚠ No se encontró match para: {title}",
+    es: "⚠ No se encontró coincidencia para: {title}",
     en: "⚠ No match found for: {title}",
   },
   "activity.rematchComplete": {
-    es: "✓ Rematch completo — {count} elementos procesados",
+    es: "✓ Coincidencias rehechas: {count} elementos procesados",
     en: "✓ Re-match complete — {count} items processed",
   },
   "activity.doneIndexed": {
@@ -899,7 +912,7 @@ const messages = {
     en: "Map your FTP root folders to movies, TV shows, documentaries, or mixed content for better categorization.",
   },
   "settings.folderTypesHelp": {
-    es: "Estas asignaciones alimentan las pestañas de categorías, el matching y las carpetas de destino.",
+    es: "Estas asignaciones alimentan las pestañas de categorías, el emparejamiento con TMDB y las carpetas de destino.",
     en: "These mappings drive category tabs, metadata matching, and destination folders.",
   },
   "settings.loadRootFolders": {
@@ -928,6 +941,16 @@ const messages = {
     es: "Guardar y reindexar",
     en: "Save & Re-index",
   },
+  "settings.unsavedChanges": {
+    es: "{count} cambios sin guardar",
+    en: "{count} unsaved changes",
+  },
+  "settings.unsavedChangesOne": {
+    es: "1 cambio sin guardar",
+    en: "1 unsaved change",
+  },
+  "settings.discardChanges": { es: "Descartar", en: "Discard" },
+  "settings.jumpTo": { es: "Ir a la sección", en: "Jump to section" },
 
   // ── Folder Routing ─────────────────────────────────────────────────────
   "settings.folderRoutingTitle": {
@@ -1227,7 +1250,7 @@ const messages = {
   "watchlist.alreadyAdded": { es: "Ya añadido", en: "Already added" },
 
   // Quality Profiles (Settings section)
-  "qualityProfile.title": { es: "Perfiles de Calidad", en: "Quality Profiles" },
+  "qualityProfile.title": { es: "Perfiles de calidad", en: "Quality Profiles" },
   "qualityProfile.description": {
     es: "Define perfiles personalizados para resolución, codecs, tipo de fuente y tamaño de archivo usados al auto-descargar.",
     en: "Define custom profiles for resolution, codecs, release type, and file size used during auto-downloads.",

@@ -368,3 +368,17 @@ select {
      the bottom of long sections and pushing the sticky header inward
      from the screen edge. Let the inline styles win — no overrides. */
 }
+
+/* Respect the OS "reduce motion" setting everywhere: spinners, shimmer,
+   slide-ins and ring pulses collapse to an instant state change. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+.settings-index::-webkit-scrollbar { display: none; }

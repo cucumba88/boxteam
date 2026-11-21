@@ -145,7 +145,7 @@ export default function StepDataDir({ language, onNext }: StepDataDirProps) {
           <span style={{ fontSize: 13, color: "var(--color-text)" }}>
             {t(language, "wizard.dataDirDefault")}
           </span>
-          <Toggle checked={useDefault} onChange={setUseDefault} />
+          <Toggle label={t(language, "wizard.dataDirDefault")} checked={useDefault} onChange={setUseDefault} />
         </div>
 
         {/* Path display */}

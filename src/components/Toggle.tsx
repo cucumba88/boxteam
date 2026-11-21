@@ -5,6 +5,8 @@ interface ToggleProps {
   onChange: (checked: boolean) => void;
   disabled?: boolean;
   style?: CSSProperties;
+  /** Accessible name — the switch has no visible text of its own. */
+  label?: string;
 }
 
 export default function Toggle({
@@ -12,12 +14,14 @@ export default function Toggle({
   onChange,
   disabled,
   style,
+  label,
 }: ToggleProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       style={{

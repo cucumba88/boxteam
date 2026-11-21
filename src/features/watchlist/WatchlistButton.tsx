@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Bookmark, Plus } from "lucide-react";
+import { Bookmark, BookmarkCheck, Plus } from "lucide-react";
+import Button from "../../components/ui/Button";
 import type { AppLanguage } from "../../utils/mediaLanguage";
 import { t } from "../../utils/i18n";
 import type { AddWatchlistParams } from "./types";
@@ -17,6 +18,9 @@ interface WatchlistButtonProps {
   onNavigateToWatchlist?: () => void;
   /** Render as a full-width pill button (for side panels) */
   fullWidth?: boolean;
+  /** Render as a labelled secondary button next to a primary action
+   *  (detail pages). The default is the round overlay used on posters. */
+  labeled?: boolean;
 }
 
 export default function WatchlistButton({
@@ -31,6 +35,7 @@ export default function WatchlistButton({
   onAdd,
   onNavigateToWatchlist,
   fullWidth = false,
+  labeled = false,
 }: WatchlistButtonProps) {
   const [hovered, setHovered] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -60,8 +65,37 @@ export default function WatchlistButton({
     }
   };
 
+  const label = isAdded
+    ? t(language, "watchlist.inWatchlist")
+    : t(language, "watchlist.addToWatchlist");
+
+  if (labeled) {
+    return (
+      <Button
+        variant="secondary"
+        size="lg"
+        icon={isAdded ? BookmarkCheck : Plus}
+        onClick={(e) => void handleClick(e)}
+        disabled={adding}
+        aria-pressed={isAdded}
+        style={
+          isAdded
+            ? {
+                color: "var(--color-primary)",
+                borderColor:
+                  "color-mix(in srgb, var(--color-primary) 45%, transparent)",
+              }
+            : undefined
+        }
+      >
+        {adding ? "…" : label}
+      </Button>
+    );
+  }
+
   return (
     <button
+      aria-label={label}
       onClick={(e) => void handleClick(e)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}

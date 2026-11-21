@@ -2,6 +2,7 @@ import { hdrFilterKeys } from "../utils/techTags";
 import { useEffect, useRef, useState } from "react";
 import type { MediaItem } from "../hooks/useIndexing";
 import { formSelectCompact } from "../lib/formStyles";
+import { formatReleaseType } from "../lib/format";
 import AppIcon from "./AppIcon";
 import PlatformLogo from "./PlatformLogo";
 import type { AppLanguage } from "../utils/mediaLanguage";
@@ -233,6 +234,7 @@ export default function FilterBar({
   onChange,
   hideHeader = false,
   hideSearch = false,
+  hideSort = false,
 }: {
   filters: Filters;
   items: MediaItem[];
@@ -243,6 +245,8 @@ export default function FilterBar({
   hideHeader?: boolean;
   /** When the host renders its own search input, suppress the internal one. */
   hideSearch?: boolean;
+  /** When the host already shows a sort control (desktop toolbar), hide the duplicate. */
+  hideSort?: boolean;
 }) {
   // Debounced search: the input value updates locally on every keystroke (so
   // typing stays responsive), but the committed `filters.search` only fires
@@ -509,6 +513,7 @@ export default function FilterBar({
       )}
 
       {/* Sort */}
+      {!hideSort && (
       <Section label={t(language, "filter.sort")}>
         <select
           style={selectStyle}
@@ -522,6 +527,7 @@ export default function FilterBar({
           ))}
         </select>
       </Section>
+      )}
 
       {/* Release type */}
       {showReleaseTypeSection && (
@@ -533,7 +539,7 @@ export default function FilterBar({
             {releaseTypeFilterOptions.map((option) => (
               <Pill
                 key={option}
-                label={option}
+                label={formatReleaseType(option)}
                 count={releaseTypeCounts.get(option) ?? 0}
                 active={filters.releaseType === option}
                 onClick={() =>

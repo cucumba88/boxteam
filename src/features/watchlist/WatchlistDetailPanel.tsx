@@ -700,7 +700,7 @@ export default function WatchlistDetailPanel({
                 >
                   {t(language, "watchlist.autoDownload")}
                 </span>
-                <Toggle checked={autoDownload} onChange={setAutoDownload} />
+                <Toggle label={t(language, "watchlist.autoDownload")} checked={autoDownload} onChange={setAutoDownload} />
               </div>
 
               <div

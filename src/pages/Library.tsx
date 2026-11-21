@@ -9,15 +9,19 @@ import {
   Clapperboard,
   FileText,
   Filter,
+  Layers,
   LayoutGrid,
+  List,
   Menu,
   MoreHorizontal,
   Pencil,
   Plus,
   Trash2,
   RefreshCw,
+  Search,
   Settings as SettingsIcon,
   Tv2,
+  X,
 } from "lucide-react";
 import { call, isTauri } from "../lib/transport";
 import { getConfig, prefetchConfig } from "../lib/configCache";
@@ -74,7 +78,7 @@ import OscataMark from "../components/OscataMark";
 import MobileProgressStrip from "../components/MobileProgressStrip";
 import { AppLanguage, getLocalizedTitle } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
-import { formatBytes } from "../lib/format";
+import { formatBytes, formatQuality } from "../lib/format";
 import {
   resolveRating,
   setRatingOrder,
@@ -183,6 +187,9 @@ function EpisodeListView({
   language: AppLanguage;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // On phones the 3-column row squeezed the title to nothing; there the
+  // quality moves under the filename and only size + chevron stay right.
+  const compact = useIsMobile();
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
@@ -194,22 +201,24 @@ function EpisodeListView({
       style={{
         height: "100%",
         overflowY: "auto",
-        padding: "1.5rem 1.5rem 6.5rem",
+        padding: compact ? "0.75rem 0.875rem 6.5rem" : "1.5rem 1.5rem 6.5rem",
       }}
     >
       <div
         style={{
           display: "flex",
           flexDirection: "column",
-          gap: 10,
+          gap: compact ? 8 : 10,
         }}
       >
         {items.map((item) => {
           const title = getLocalizedTitle(item, language);
           const episodeLabel =
             item.season != null || item.episode != null
-              ? `S${String(item.season ?? 0).padStart(2, "0")}E${String(item.episode ?? 0).padStart(2, "0")}${item.episode_end != null && item.episode_end !== item.episode ? `-E${String(item.episode_end).padStart(2, "0")}` : ""}`
+              ? `${language === "es" ? "T" : "S"}${String(item.season ?? 0).padStart(2, "0")}E${String(item.episode ?? 0).padStart(2, "0")}${item.episode_end != null && item.episode_end !== item.episode ? `-E${String(item.episode_end).padStart(2, "0")}` : ""}`
               : t(language, "tv.episode");
+
+          const quality = formatQuality(item.release_type, item.resolution);
 
           return (
             <button
@@ -217,11 +226,13 @@ function EpisodeListView({
               onClick={() => onSelect(item)}
               style={{
                 display: "grid",
-                gridTemplateColumns: "110px minmax(0, 1fr) auto",
+                gridTemplateColumns: compact
+                  ? "64px minmax(0, 1fr) auto"
+                  : "110px minmax(0, 1fr) auto",
                 alignItems: "center",
-                gap: 14,
+                gap: compact ? 10 : 14,
                 width: "100%",
-                padding: "14px 16px",
+                padding: compact ? "12px 12px" : "14px 16px",
                 borderRadius: "var(--radius-lg)",
                 border:
                   "1px solid color-mix(in srgb, var(--color-border) 78%, transparent)",
@@ -276,6 +287,17 @@ function EpisodeListView({
                 >
                   {item.filename}
                 </div>
+                {compact && quality && (
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: 11.5,
+                      color: "var(--color-text-muted)",
+                    }}
+                  >
+                    {quality}
+                  </div>
+                )}
               </div>
 
               <div
@@ -287,8 +309,7 @@ function EpisodeListView({
                   fontSize: 12,
                 }}
               >
-                {item.release_type && <span>{item.release_type}</span>}
-                {item.resolution && <span>{item.resolution}</span>}
+                {!compact && quality && <span>{quality}</span>}
                 {item.size_bytes != null && item.size_bytes > 0 && (
                   <span style={{ fontWeight: 600 }}>
                     {formatBytes(item.size_bytes)}
@@ -456,6 +477,16 @@ export default function Library({
       ? defaultFilters(initialTab, initialPrefs)
       : filtersFromSearchParams(tabDefaultSort);
   });
+  // Badge on the mobile filter button. Search has its own visible box on
+  // mobile, so it isn't counted here (same rule as FilterChipRow).
+  const mobileFilterCount = [
+    filters.releaseType,
+    filters.resolution,
+    filters.hdr,
+    filters.codec,
+    filters.genre,
+    filters.platform,
+  ].filter(Boolean).length;
   const [showSettings, setShowSettings] = useState<boolean>(
     () => !isTauri() && typeof window !== "undefined" && window.location.pathname === "/ajustes",
   );
@@ -503,6 +534,23 @@ export default function Library({
   const [tvView, setTvView] = useState<"shows" | "episodes">(
     () => initialPrefsRef.current.defaultTvView,
   );
+  // "Todo" groups by title too (one card per film / show) so a series with
+  // ten new episodes no longer fills the first rows with the same poster.
+  const [allView, setAllView] = useState<"grouped" | "files">(() => {
+    try {
+      const v = localStorage.getItem("oscata-all-view");
+      return v === "files" ? "files" : "grouped";
+    } catch {
+      return "grouped";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("oscata-all-view", allView);
+    } catch {
+      /* storage unavailable — view just won't persist */
+    }
+  }, [allView]);
   const [jumpRequest, setJumpRequest] = useState<JumpRequest | undefined>(
     undefined,
   );
@@ -922,7 +970,10 @@ export default function Library({
       if (isTV) {
         setTvShow(item);
       } else {
-        setSelectedGroupedView(activeTab === "movie" && movieView === "grouped");
+        setSelectedGroupedView(
+          (activeTab === "movie" && movieView === "grouped") ||
+            (activeTab === "all" && allView === "grouped"),
+        );
         setSelected(item);
       }
       // Push a deep-linkable URL when we have a tmdb_id (web mode only —
@@ -940,7 +991,7 @@ export default function Library({
         }
       }
     },
-    [activeTab, movieView],
+    [activeTab, movieView, allView],
   );
 
   /** Pop the detail segment off the URL back to the tab list (web mode). */
@@ -992,7 +1043,9 @@ export default function Library({
   };
 
   const isSeriesTab = activeTab === "tv" || activeTab === "documentary";
-  const useGroupedMovies = activeTab === "movie" && movieView === "grouped";
+  const useGroupedMovies =
+    (activeTab === "movie" && movieView === "grouped") ||
+    (activeTab === "all" && allView === "grouped");
   const useEpisodeList = activeTab === "tv" && tvView === "episodes";
 
   // Pre-parse tmdb_genres once per items change so filter() never calls JSON.parse.
@@ -1043,7 +1096,9 @@ export default function Library({
     (tab) => tab.id !== "uploads" || uploadsTabVisible,
   );
   const mobileBottomTabs = visibleTabs.filter((tab) =>
-    (["all", "movie", "tv", "downloads"] as TabId[]).includes(tab.id),
+    (["all", "movie", "tv", "watchlist", "downloads"] as TabId[]).includes(
+      tab.id,
+    ),
   );
 
   const tabCounts = useMemo(
@@ -1052,7 +1107,12 @@ export default function Library({
         (acc, t) => {
           switch (t.id) {
             case "all":
-              acc[t.id] = items.length;
+              // Match the header count: grouped view counts titles, the
+              // files view counts files.
+              acc[t.id] =
+                allView === "grouped"
+                  ? deduplicateByTitle(items).length
+                  : items.length;
               break;
             case "downloads":
               acc[t.id] = downloads.filter(
@@ -1076,7 +1136,7 @@ export default function Library({
         },
         {} as Record<TabId, number>,
       ),
-    [downloads, items],
+    [downloads, uploads, items, allView],
   );
 
   const tabItems = useMemo(
@@ -1177,7 +1237,58 @@ export default function Library({
     return useGroupedMovies ? deduplicateByTitle(sortedItems) : sortedItems;
   }, [filterableItems, filters, language, parsedGenreMap, parsedPlatformMap, useGroupedMovies, ratingOrder]);
 
-  const viewResetKey = `${activeTab}:${filters.search}:${filters.releaseType}:${filters.resolution}:${filters.hdr}:${filters.codec}:${filters.genre}:${filters.platform}:${filters.sort}:${tvView}:${movieView}`;
+  // Empty-state copy: distinguish "your search/filters matched nothing" from
+  // "this tab has no content at all" (only the latter points at folder types).
+  const hasNonSearchFilters =
+    filters.releaseType !== "" ||
+    filters.resolution !== "" ||
+    filters.hdr !== "" ||
+    filters.codec !== "" ||
+    filters.genre !== "" ||
+    filters.platform !== "";
+  // Mobile: the grouped/files (or shows/episodes) switch is a compact
+  // two-icon control next to the search box instead of a full-width row
+  // under the title.
+  type MobileViewMode = {
+    id: string;
+    label: string;
+    icon: typeof List;
+    active: boolean;
+    select: () => void;
+  };
+  const mobileViewModes: MobileViewMode[] | null =
+    activeTab === "tv"
+      ? [
+          {
+            id: "shows",
+            label: t(language, "library.shows"),
+            icon: Layers,
+            active: tvView === "shows",
+            select: () => setTvView("shows"),
+          },
+          {
+            id: "episodes",
+            label: t(language, "library.episodes"),
+            icon: List,
+            active: tvView === "episodes",
+            select: () => setTvView("episodes"),
+          },
+        ]
+      : activeTab === "movie" || activeTab === "all"
+        ? (["grouped", "files"] as const).map((mode) => ({
+            id: mode,
+            label: t(
+              language,
+              mode === "grouped" ? "library.grouped" : "library.files",
+            ),
+            icon: mode === "grouped" ? Layers : List,
+            active: (activeTab === "all" ? allView : movieView) === mode,
+            select: () =>
+              activeTab === "all" ? setAllView(mode) : setMovieView(mode),
+          }))
+        : null;
+
+  const viewResetKey = `${activeTab}:${filters.search}:${filters.releaseType}:${filters.resolution}:${filters.hdr}:${filters.codec}:${filters.genre}:${filters.platform}:${filters.sort}:${tvView}:${movieView}:${allView}`;
 
   const isAlphaSort =
     filters.sort === "title-asc" || filters.sort === "title-desc";
@@ -1843,9 +1954,12 @@ export default function Library({
         language={language}
         badgeMap={badgeMap}
         downloadMap={downloadMap}
-        hideEpisodeBadge={isSeriesTab && !useEpisodeList}
+        hideEpisodeBadge={
+          (isSeriesTab && !useEpisodeList) ||
+          (activeTab === "all" && allView === "grouped")
+        }
         showFileSize={
-          activeTab === "all" ||
+          (activeTab === "all" && allView === "files") ||
           (activeTab === "movie" && movieView === "files")
         }
         disableQuickAction={
@@ -1963,7 +2077,11 @@ export default function Library({
                   total: tmdbProgress.total,
                 })
               : t(language, "toast.scanning")
-          : `${items.length} ${language === "es" ? "elementos" : "items"}`,
+          : t(language, "statusbar.indexedFiles", {
+              count: items.length.toLocaleString(
+                language === "es" ? "es-ES" : "en-US",
+              ),
+            }),
       }}
       // Inline progress for background refreshes — replaces the floating
       // bottom-right pills. Each surfaces in the status-bar center slot
@@ -2055,6 +2173,21 @@ export default function Library({
             : "Search library and actions…"
         }
         emptyMessage={language === "es" ? "Sin resultados" : "No matches"}
+        labels={
+          language === "es"
+            ? {
+                navigate: "moverte",
+                select: "abrir",
+                close: "cerrar",
+                results: (n) => (n === 1 ? "1 resultado" : `${n} resultados`),
+              }
+            : {
+                navigate: "navigate",
+                select: "select",
+                close: "close",
+                results: (n) => (n === 1 ? "1 result" : `${n} results`),
+              }
+        }
       />
 
       {/* Filter sheet (desktop) */}
@@ -2220,10 +2353,11 @@ export default function Library({
             </div>
           )}
 
-          {showDevLog && (
+          {showDevLog && !isMobile && (
             <button
               onClick={() => setShowLog((v) => !v)}
               title="Activity Log"
+              aria-label="Activity Log"
               style={{
                 ...iconButton,
                 background: showLog
@@ -2248,14 +2382,18 @@ export default function Library({
               )}
             </button>
           )}
-          {isTauri() && <ThemeToggle />}
+          {/* Theme lives in Settings → Apariencia on mobile; the header keeps
+              only the account, more-sections and settings buttons. */}
+          {isTauri() && !isMobile && <ThemeToggle />}
           {headerSlot}
           {/* Mobile burger — shows hidden tabs (Docu, Watchlist, Uploads) */}
           {isMobile && (
             <div ref={mobileNavMenuRef} style={{ position: "relative" }}>
               <button
                 onClick={() => setShowMobileNavMenu((v) => !v)}
-                title="Más secciones"
+                title={language === "es" ? "Más secciones" : "More sections"}
+                aria-label={language === "es" ? "Más secciones" : "More sections"}
+                aria-expanded={showMobileNavMenu}
                 style={{
                   ...iconButton,
                   background: showMobileNavMenu
@@ -2370,6 +2508,7 @@ export default function Library({
           <button
             onClick={() => setShowSettings(true)}
             title={t(language, "settings.title")}
+            aria-label={t(language, "settings.title")}
             style={iconButton}
           >
             <SettingsIcon
@@ -2524,12 +2663,17 @@ export default function Library({
                 <span style={{ fontSize: 10, fontWeight: active ? 700 : 500, letterSpacing: 0.1 }}>
                   {t(language, tab.labelKey as never)}
                 </span>
-                {tabCounts[tab.id] > 0 && (
+                {/* Library totals (3726, 559…) are noise at this size and
+                    used to cover the icon; only pending transfers get a
+                    badge, anchored to the icon's top-right corner. */}
+                {(tab.id === "downloads" || tab.id === "uploads") &&
+                  tabCounts[tab.id] > 0 && (
                   <span
                     style={{
                       position: "absolute",
-                      top: 6,
-                      right: "calc(50% - 16px)",
+                      top: 2,
+                      left: "calc(50% + 6px)",
+                      lineHeight: "12px",
                       fontSize: 9,
                       fontWeight: 700,
                       background: active
@@ -2809,7 +2953,8 @@ export default function Library({
                   : (
                     <>
                       {sectionTitle[activeTab]}
-                      {activeTab !== "downloads" && (
+                      {activeTab !== "downloads" &&
+                        activeTab !== "uploads" && (
                         <span
                           style={{
                             fontSize: 13,
@@ -2818,12 +2963,15 @@ export default function Library({
                             marginLeft: 10,
                           }}
                         >
-                          {t(language, "library.titlesCount", {
-                            count:
+                          {(() => {
+                            const count =
                               activeTab === "watchlist"
                                 ? watchlist.items.length
-                                : filtered.length,
-                          })}
+                                : filtered.length;
+                            return count === 1
+                              ? t(language, "library.titlesCountOne")
+                              : t(language, "library.titlesCount", { count });
+                          })()}
                         </span>
                       )}
                     </>
@@ -2875,7 +3023,7 @@ export default function Library({
                 </div>
               )}
 
-              {!isMobile && activeTab === "movie" && (
+              {!isMobile && (activeTab === "movie" || activeTab === "all") && (
                 <div
                   style={{
                     display: "flex",
@@ -2890,11 +3038,17 @@ export default function Library({
                   }}
                 >
                   {(["grouped", "files"] as const).map((mode) => {
-                    const active = movieView === mode;
+                    const active =
+                      (activeTab === "all" ? allView : movieView) === mode;
                     return (
                       <button
                         key={mode}
-                        onClick={() => setMovieView(mode)}
+                        aria-pressed={active}
+                        onClick={() =>
+                          activeTab === "all"
+                            ? setAllView(mode)
+                            : setMovieView(mode)
+                        }
                         style={{
                           padding: "6px 12px",
                           borderRadius: "var(--radius-full)",
@@ -2930,7 +3084,12 @@ export default function Library({
                   <button
                     onClick={() => setFilterDrawerOpen(true)}
                     title={t(language, "filter.filters" as never)}
-                    style={ghostBtn}
+                    aria-label={
+                      mobileFilterCount > 0
+                        ? `${t(language, "filter.filters" as never)} (${mobileFilterCount})`
+                        : t(language, "filter.filters" as never)
+                    }
+                    style={{ ...ghostBtn, position: "relative" }}
                   >
                     <Filter
                       size={14}
@@ -2938,6 +3097,29 @@ export default function Library({
                       aria-hidden="true"
                       style={{ display: "block", flexShrink: 0 }}
                     />
+                    {mobileFilterCount > 0 && (
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          position: "absolute",
+                          top: -4,
+                          right: -4,
+                          minWidth: 16,
+                          height: 16,
+                          padding: "0 4px",
+                          borderRadius: 999,
+                          background: "var(--color-primary)",
+                          color: "#fff",
+                          fontSize: 10,
+                          fontWeight: 700,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        {mobileFilterCount}
+                      </span>
+                    )}
                   </button>
                 )}
               {/* Watchlist multi-select: same toolbar position + visual
@@ -3065,7 +3247,12 @@ export default function Library({
                     <button
                       onClick={() => setWatchlistSelecting(true)}
                       title={t(language, "library.selectMultiple")}
-                      style={ghostBtn}
+                      style={{
+                        ...ghostBtn,
+                        opacity: watchlist.items.length === 0 ? 0.5 : 1,
+                        cursor:
+                          watchlist.items.length === 0 ? "default" : "pointer",
+                      }}
                       disabled={watchlist.items.length === 0}
                     >
                       <CheckSquare
@@ -3162,7 +3349,13 @@ export default function Library({
                   <button
                     onClick={() => setSelecting(true)}
                     title={t(language, "library.selectMultiple")}
-                    style={ghostBtn}
+                    aria-label={t(language, "library.selectMultiple")}
+                    disabled={filtered.length === 0}
+                    style={{
+                      ...ghostBtn,
+                      opacity: filtered.length === 0 ? 0.5 : 1,
+                      cursor: filtered.length === 0 ? "default" : "pointer",
+                    }}
                   >
                     <CheckSquare
                       size={14}
@@ -3176,6 +3369,8 @@ export default function Library({
                     <button
                       onClick={() => setShowActionsMenu((open) => !open)}
                       title={t(language, "library.actions")}
+                      aria-label={t(language, "library.actions")}
+                      aria-expanded={showActionsMenu}
                       style={{ ...ghostBtn, padding: "7px 11px" }}
                     >
                       <MoreHorizontal
@@ -3479,96 +3674,6 @@ export default function Library({
           </div>
           {/* closes main row */}
 
-          {/* Mobile-only view toggle sub-row */}
-          {isMobile && activeTab === "tv" && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "0.2rem",
-                borderRadius: "var(--radius-full)",
-                border:
-                  "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
-                background:
-                  "color-mix(in srgb, var(--color-surface) 94%, transparent)",
-                alignSelf: "flex-start",
-              }}
-            >
-              {(["shows", "episodes"] as const).map((mode) => {
-                const active = tvView === mode;
-                return (
-                  <button
-                    key={mode}
-                    onClick={() => setTvView(mode)}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: "var(--radius-full)",
-                      border: "none",
-                      background: active
-                        ? "color-mix(in srgb, var(--color-primary) 18%, transparent)"
-                        : "transparent",
-                      color: active
-                        ? "var(--color-primary)"
-                        : "var(--color-text-muted)",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {mode === "shows"
-                      ? t(language, "library.shows")
-                      : t(language, "library.episodes")}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          {isMobile && activeTab === "movie" && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "0.2rem",
-                borderRadius: "var(--radius-full)",
-                border:
-                  "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
-                background:
-                  "color-mix(in srgb, var(--color-surface) 94%, transparent)",
-                alignSelf: "flex-start",
-              }}
-            >
-              {(["grouped", "files"] as const).map((mode) => {
-                const active = movieView === mode;
-                return (
-                  <button
-                    key={mode}
-                    onClick={() => setMovieView(mode)}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: "var(--radius-full)",
-                      border: "none",
-                      background: active
-                        ? "color-mix(in srgb, var(--color-primary) 18%, transparent)"
-                        : "transparent",
-                      color: active
-                        ? "var(--color-primary)"
-                        : "var(--color-text-muted)",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {t(
-                      language,
-                      mode === "grouped" ? "library.grouped" : "library.files",
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
         </div>
 
         {/* Desktop filter chip row — slim, lives above the grid. Hidden on
@@ -3593,6 +3698,136 @@ export default function Library({
                 onOpenFilters={() => setFilterSheetOpen(true)}
                 searchInputRef={searchInputRef}
               />
+            </div>
+          )}
+
+        {/* Mobile search — always visible above the grid so finding a
+            title doesn't require opening the filter sheet. */}
+        {isMobile &&
+          activeTab !== "downloads" &&
+          activeTab !== "uploads" &&
+          activeTab !== "watchlist" && (
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                padding: "8px 0.875rem 4px",
+                flexShrink: 0,
+              }}
+            >
+              <div
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  height: 40,
+                  padding: "0 12px",
+                  borderRadius: "var(--radius)",
+                  border:
+                    "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
+                  background:
+                    "color-mix(in srgb, var(--color-surface) 90%, transparent)",
+                }}
+              >
+                <Search
+                  size={15}
+                  strokeWidth={2.2}
+                  aria-hidden="true"
+                  style={{ color: "var(--color-text-muted)", flexShrink: 0 }}
+                />
+                <input
+                  type="search"
+                  value={filters.search}
+                  onChange={(e) =>
+                    setFilters({ ...filters, search: e.target.value })
+                  }
+                  placeholder={t(language, "filter.searchPlaceholder")}
+                  aria-label={t(language, "filter.searchPlaceholder")}
+                  enterKeyHint="search"
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    color: "var(--color-text)",
+                    // 16px keeps iOS Safari from zooming on focus.
+                    fontSize: 16,
+                    fontFamily: "inherit",
+                  }}
+                />
+                {filters.search && (
+                  <button
+                    type="button"
+                    onClick={() => setFilters({ ...filters, search: "" })}
+                    aria-label={t(language, "filter.clearSearch")}
+                    style={{
+                      flexShrink: 0,
+                      background: "none",
+                      border: "none",
+                      padding: 4,
+                      cursor: "pointer",
+                      color: "var(--color-text-muted)",
+                      lineHeight: 0,
+                    }}
+                  >
+                    <X size={14} strokeWidth={2.2} aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+              {mobileViewModes && (
+                <div
+                  role="group"
+                  aria-label={language === "es" ? "Vista" : "View"}
+                  style={{
+                    display: "flex",
+                    flexShrink: 0,
+                    gap: 2,
+                    padding: 3,
+                    height: 40,
+                    boxSizing: "border-box",
+                    borderRadius: "var(--radius)",
+                    border:
+                      "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
+                    background:
+                      "color-mix(in srgb, var(--color-surface) 90%, transparent)",
+                  }}
+                >
+                  {mobileViewModes.map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      aria-pressed={mode.active}
+                      aria-label={mode.label}
+                      title={mode.label}
+                      onClick={mode.select}
+                      style={{
+                        width: 34,
+                        border: "none",
+                        borderRadius: "calc(var(--radius) - 3px)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        background: mode.active
+                          ? "color-mix(in srgb, var(--color-primary) 18%, transparent)"
+                          : "transparent",
+                        color: mode.active
+                          ? "var(--color-primary)"
+                          : "var(--color-text-muted)",
+                      }}
+                    >
+                      <mode.icon
+                        size={16}
+                        strokeWidth={2.2}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -3684,7 +3919,13 @@ export default function Library({
                     >
                       {items.length === 0
                         ? t(language, "library.noMediaStarting")
-                        : activeTab !== "all"
+                        : filters.search.trim() && !hasNonSearchFilters
+                          ? t(language, "library.noSearchResults", {
+                              query: filters.search.trim(),
+                            })
+                          : hasNonSearchFilters
+                            ? t(language, "library.noResultsFilters")
+                            : activeTab !== "all"
                           ? t(language, "library.noCategory", {
                               category: t(
                                 language,
@@ -3757,7 +3998,9 @@ export default function Library({
                             cursor: "pointer",
                           }}
                         >
-                          {t(language, "filter.clear")}
+                          {filters.search.trim() && !hasNonSearchFilters
+                            ? t(language, "filter.clearSearch")
+                            : t(language, "filter.clear")}
                         </button>
                       )}
                     </div>

@@ -8,6 +8,7 @@ import {
   Download,
   ExternalLink,
   Folder,
+  Loader2,
   Pencil,
   Tv2,
 } from "lucide-react";
@@ -24,7 +25,8 @@ import {
 } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
 import { GENRE_MAP } from "../utils/genres";
-import { folderPath, formatBytes } from "../lib/format";
+import { folderPath, formatBytes, formatQuality, formatReleaseType, formatResolution } from "../lib/format";
+import IconButton from "./ui/IconButton";
 import WatchlistButton from "../features/watchlist/WatchlistButton";
 import type { AddWatchlistParams } from "../features/watchlist/types";
 import {
@@ -553,10 +555,18 @@ export default function TVShowPage({
           type="button"
           onClick={() => onFixMatch(allEpisodes)}
           title={t(language, "detail.fixMatch")}
-          style={iconChip}
+          aria-label={t(language, "detail.fixMatch")}
+          style={{
+            ...iconChip,
+            flexShrink: 0,
+            whiteSpace: "nowrap",
+            ...(isMobile ? { padding: 0, width: 36, height: 36, justifyContent: "center" } : {}),
+          }}
         >
-          <Pencil size={13} strokeWidth={2.2} aria-hidden="true" />
-          <span>{t(language, "detail.fixMatch")}</span>
+          <Pencil size={isMobile ? 15 : 13} strokeWidth={2.2} aria-hidden="true" />
+          {/* Icon-only on mobile so the label doesn't wrap onto two lines
+              next to the breadcrumb. */}
+          {!isMobile && <span>{t(language, "detail.fixMatch")}</span>}
         </button>
       </div>
 
@@ -782,6 +792,7 @@ export default function TVShowPage({
                 watchlistedTmdbIds={watchlistedTmdbIds}
                 onAdd={onAddToWatchlist}
                 onNavigateToWatchlist={onOpenWatchlist}
+                labeled
               />
             )}
             <span style={{ opacity: 0.7 }}>
@@ -1062,18 +1073,11 @@ function ReleaseGroupBlock({
               alignItems: "center",
             }}
           >
-            {group.resolution && (
+            {(group.resolution || group.release_type) && (
               <QualityChip
                 tone="resolution"
-                label={
-                  group.resolution.toUpperCase() === "2160P"
-                    ? "4K"
-                    : group.resolution
-                }
+                label={formatQuality(group.release_type, group.resolution)}
               />
-            )}
-            {group.release_type && (
-              <QualityChip tone="source" label={group.release_type} />
             )}
             {group.codec && (
               <QualityChip tone="muted" label={group.codec} />
@@ -1446,20 +1450,34 @@ function EpisodeRow({
           {inPlex && <PlexIcon size={11} />}
           {inEmby && <EmbyIcon size={11} />}
           <span
-            title={episode.filename}
             style={{
               fontSize: 13.5,
               fontWeight: 600,
               color: "var(--color-text)",
-              fontFamily: "monospace",
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
               minWidth: 0,
             }}
           >
-            {episode.filename}
+            {ep.episode != null
+              ? `${language === "es" ? "Episodio" : "Episode"} ${ep.episode}${ep.episodeEnd != null ? `–${ep.episodeEnd}` : ""}`
+              : episode.title ?? episode.filename}
           </span>
+        </div>
+        <div
+          title={episode.filename}
+          style={{
+            fontSize: 11.5,
+            color: "var(--color-text-muted)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            minWidth: 0,
+            opacity: 0.85,
+          }}
+        >
+          {episode.filename}
         </div>
         <div
           style={{
@@ -1470,8 +1488,8 @@ function EpisodeRow({
             color: "var(--color-text-muted)",
           }}
         >
-          {episode.resolution && <span>{episode.resolution}</span>}
-          {episode.release_type && <span>{episode.release_type}</span>}
+          {episode.resolution && <span>{formatResolution(episode.resolution)}</span>}
+          {episode.release_type && <span>{formatReleaseType(episode.release_type)}</span>}
           {episode.codec && <span>{episode.codec}</span>}
           {episode.hdr && (
             <span style={{ color: "#a78bfa", fontWeight: 700 }}>
@@ -1488,51 +1506,28 @@ function EpisodeRow({
           )}
         </div>
       </div>
-      <button
-        type="button"
+      <IconButton
+        icon={isDone ? Check : isActive ? Loader2 : Download}
+        size="sm"
+        variant={isDone || isActive ? "ghost" : "secondary"}
         onClick={() => onDownload(episode)}
         disabled={isActive || isDone}
-        title={
+        className={isActive ? "ui-spin-icon" : undefined}
+        style={
+          isDone
+            ? { color: "var(--color-success)", opacity: 1 }
+            : isActive
+              ? { color: "var(--color-warning)", opacity: 1 }
+              : undefined
+        }
+        label={
           isDone
             ? t(language, "detail.alreadyDownloaded")
             : isActive
               ? t(language, "downloads.downloading")
-              : t(language, "tv.downloadEpisode" as never) ||
-                t(language, "detail.download")
+              : `${t(language, "detail.download")} ${epLabel}`
         }
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "8px 12px",
-          borderRadius: 999,
-          border: "none",
-          background: isDone
-            ? "color-mix(in srgb, var(--color-success) 22%, transparent)"
-            : isActive
-              ? "color-mix(in srgb, var(--color-warning) 22%, transparent)"
-              : "color-mix(in srgb, var(--color-primary) 18%, transparent)",
-          color: isDone
-            ? "var(--color-success)"
-            : isActive
-              ? "var(--color-warning)"
-              : "var(--color-primary)",
-          cursor: isActive || isDone ? "default" : "pointer",
-          fontSize: 12,
-          fontWeight: 700,
-        }}
-      >
-        {isDone ? (
-          <Check size={12} strokeWidth={2.4} aria-hidden="true" />
-        ) : (
-          <Download size={12} strokeWidth={2.2} aria-hidden="true" />
-        )}
-        {isDone
-          ? language === "es" ? "Listo" : "Done"
-          : isActive
-            ? language === "es" ? "En curso" : "Active"
-            : language === "es" ? "Descargar" : "Download"}
-      </button>
+      />
     </div>
   );
 }

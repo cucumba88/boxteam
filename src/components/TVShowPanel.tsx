@@ -1232,7 +1232,7 @@ export default function TVShowPanel({
                   )}
                   {showBadge?.plexInLibrary && (
                     <span
-                      title="In Plex"
+                      title={language === "es" ? "En Plex" : "In Plex"}
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
@@ -1247,7 +1247,7 @@ export default function TVShowPanel({
                   )}
                   {showBadge?.embyInLibrary && (
                     <span
-                      title="In Emby"
+                      title={language === "es" ? "En Emby" : "In Emby"}
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
@@ -1736,7 +1736,7 @@ export default function TVShowPanel({
                   )}
                   {showBadge?.plexInLibrary && (
                     <span
-                      title="In Plex"
+                      title={language === "es" ? "En Plex" : "In Plex"}
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
@@ -1752,7 +1752,7 @@ export default function TVShowPanel({
                   )}
                   {showBadge?.embyInLibrary && (
                     <span
-                      title="In Emby"
+                      title={language === "es" ? "En Emby" : "In Emby"}
                       style={{
                         display: "inline-flex",
                         alignItems: "center",

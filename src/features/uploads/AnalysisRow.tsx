@@ -1365,7 +1365,7 @@ export default function AnalysisRow({
                 <span style={{ fontSize: 13, color: "var(--color-text)" }}>
                   Renombrar {isDirectory ? "archivos" : "archivo"}
                 </span>
-                <Toggle checked={rename} onChange={setRename} />
+                <Toggle label={isDirectory ? "Renombrar archivos" : "Renombrar archivo"} checked={rename} onChange={setRename} />
               </div>
 
               {/* Show name + season */}
@@ -1912,7 +1912,7 @@ export default function AnalysisRow({
               <span style={{ fontSize: 13, color: "var(--color-text)" }}>
                 Renombrar archivo
               </span>
-              <Toggle checked={rename} onChange={setRename} />
+              <Toggle label="Renombrar archivo" checked={rename} onChange={setRename} />
             </div>
           )}
 

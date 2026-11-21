@@ -50,13 +50,10 @@ const mutedStyle: React.CSSProperties = {
   color: "var(--color-text-muted)",
 };
 
+// A missing permission isn't an error (a read-only FTP account is a valid
+// setup — it just hides uploads), so "no" is shown neutral, not red.
 function Mark({ ok }: { ok: boolean | null }) {
-  const color =
-    ok === null
-      ? "var(--color-text-muted)"
-      : ok
-        ? "var(--color-success)"
-        : "var(--color-danger)";
+  const color = ok ? "var(--color-success)" : "var(--color-text-muted)";
   return (
     <span
       aria-hidden
@@ -74,7 +71,7 @@ function Mark({ ok }: { ok: boolean | null }) {
         background: `color-mix(in srgb, ${color} 16%, transparent)`,
       }}
     >
-      {ok === null ? "?" : ok ? "✓" : "✕"}
+      {ok === null ? "?" : ok ? "✓" : "–"}
     </span>
   );
 }

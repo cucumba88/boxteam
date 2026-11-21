@@ -545,7 +545,7 @@ export default function FilenameBuilder({
             >
               SUBS
             </span>
-            <Toggle
+            <Toggle label="Subtítulos"
               checked={subs}
               onChange={(v) => {
                 setSubs(v);

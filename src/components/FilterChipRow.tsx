@@ -8,6 +8,7 @@ import { GENRE_LIST } from "../utils/genres";
 import { PROVIDER_BY_ID } from "../utils/providers";
 import PlatformLogo from "./PlatformLogo";
 import { type Filters } from "../utils/filterUtils";
+import { formatReleaseType } from "../lib/format";
 
 const SORT_OPTIONS = [
   { value: "release-desc", labelKey: "filter.sort.releaseDesc" },
@@ -61,7 +62,7 @@ export default function FilterChipRow({
     if (filters.releaseType) {
       chips.push({
         key: `type:${filters.releaseType}`,
-        label: filters.releaseType,
+        label: formatReleaseType(filters.releaseType),
         clear: () => onChange({ ...filters, releaseType: "" }),
       });
     }
@@ -109,7 +110,9 @@ export default function FilterChipRow({
     // items is intentionally excluded; chips don't depend on the catalog.
   }, [filters, language, onChange]);
 
-  const activeFilterCount = activeChips.length + (filters.search ? 1 : 0);
+  // The search box has its own clear (×) button, so it doesn't count as a
+  // filter here — otherwise a plain search showed "Filtros 1" + "Limpiar".
+  const activeFilterCount = activeChips.length;
 
   // `/` focuses the search input (skip if typing in another input).
   useEffect(() => {

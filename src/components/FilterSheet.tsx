@@ -131,6 +131,7 @@ export default function FilterSheet({
             onChange={onChange}
             hideHeader
             hideSearch
+            hideSort
           />
         </div>
       </aside>
