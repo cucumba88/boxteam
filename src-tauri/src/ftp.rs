@@ -109,6 +109,17 @@ fn clean_ftp_error_redacted(e: impl std::fmt::Display, secret: &str) -> String {
     }
 }
 
+/// Reject any value that would be sent on the FTP control channel if it
+/// contains CR, LF or NUL. suppaftp < 10 does not escape these, so a crafted
+/// path, filename or credential could inject extra FTP commands
+/// (RUSTSEC-2026-0271). Remove once suppaftp is upgraded to >= 10.0.2.
+fn reject_control_chars(label: &str, value: &str) -> Result<(), String> {
+    if value.contains(['\r', '\n', '\0']) {
+        return Err(format!("{label} contiene caracteres de control no permitidos"));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FtpFile {
     pub path: String,
@@ -121,6 +132,8 @@ const MEDIA_EXTENSIONS: &[&str] = &["mkv", "mp4", "avi", "m2ts", "mov", "ts"];
 
 /// Open a fresh authenticated FTP connection.
 async fn connect(host: &str, port: u16, user: &str, pass: &str) -> Result<AsyncFtpStream, String> {
+    reject_control_chars("Usuario FTP", user)?;
+    reject_control_chars("Contraseña FTP", pass)?;
     let mut ftp = AsyncFtpStream::connect(format!("{host}:{port}"))
         .await
         .map_err(|e| clean_ftp_error_redacted(e, pass))?;
@@ -164,6 +177,9 @@ fn parse_entries(raw: &[String], parent_path: &str) -> (Vec<String>, Vec<FtpFile
         let name = parts[name_start..].join(" ");
         let name = name.trim().to_string();
         if name == "." || name == ".." || name.is_empty() { continue; }
+        // A name with control characters would be echoed back on CWD/MDTM
+        // and could smuggle extra FTP commands — skip it.
+        if name.contains(['\r', '\n', '\0']) { continue; }
         let child_path = format!("{}/{}", parent_path.trim_end_matches('/'), name);
         if is_dir {
             dirs.push(child_path);
@@ -252,6 +268,8 @@ pub async fn test_connection(
     user: &str,
     pass: &str,
 ) -> Result<(), String> {
+    reject_control_chars("Usuario FTP", user)?;
+    reject_control_chars("Contraseña FTP", pass)?;
     let addr = format!("{host}:{port}");
     let mut ftp = AsyncFtpStream::connect(&addr)
         .await
@@ -272,6 +290,8 @@ pub async fn delete_file(
     remote_dir: &str,
     filename: &str,
 ) -> Result<(), String> {
+    reject_control_chars("Ruta remota", remote_dir)?;
+    reject_control_chars("Nombre de archivo", filename)?;
     let mut ftp = connect(host, port, user, pass).await?;
     let full_path = format!("{}/{}", remote_dir.trim_end_matches('/'), filename);
     ftp.rm(&full_path)
@@ -288,6 +308,7 @@ pub async fn list_raw(
     pass: &str,
     path: &str,
 ) -> Result<Vec<String>, String> {
+    reject_control_chars("Ruta remota", path)?;
     let mut ftp = connect(host, port, user, pass).await?;
     ftp.cwd(path).await.map_err(|e| format!("CWD {path}: {e}"))?;
     let entries = ftp.list(None).await.map_err(|e| e.to_string())?;
@@ -311,6 +332,8 @@ pub async fn list_raw_sub(
     parent_path: &str,
     subdir: &str,
 ) -> Result<Vec<String>, String> {
+    reject_control_chars("Ruta remota", parent_path)?;
+    reject_control_chars("Subcarpeta", subdir)?;
     let mut ftp = connect(host, port, user, pass).await?;
     ftp.cwd(parent_path).await.map_err(|e| format!("CWD {parent_path}: {e}"))?;
     // Pass subdir as the LIST argument — avoids a second CWD with a potentially
@@ -336,6 +359,7 @@ pub async fn list_files(
     on_log: Arc<dyn Fn(String) + Send + Sync>,
 ) -> Result<Vec<FtpFile>, String> {
     const MAX_WORKERS: usize = 8;
+    reject_control_chars("Ruta raíz", root)?;
 
     // Seed: one shallow scan of root to populate the initial queue.
     on_log(format!("Connected — discovering root entries in {root}"));
@@ -480,10 +504,8 @@ pub async fn download_file(
     local_path: &str,
     on_progress: impl Fn(u64, u64) -> bool,
 ) -> Result<(), String> {
-    let mut ftp = AsyncFtpStream::connect(format!("{host}:{port}"))
-        .await
-        .map_err(|e| e.to_string())?;
-    ftp.login(user, pass).await.map_err(|e| e.to_string())?;
+    reject_control_chars("Ruta remota", remote_path)?;
+    let mut ftp = connect(host, port, user, pass).await?;
     ftp.transfer_type(FileType::Binary)
         .await
         .map_err(|e| e.to_string())?;
@@ -588,6 +610,8 @@ pub async fn upload_file(
     local_path: &str,
     on_progress: impl Fn(u64, u64) -> bool,
 ) -> Result<(), String> {
+    reject_control_chars("Ruta remota", remote_dir)?;
+    reject_control_chars("Nombre de archivo", filename)?;
     let file_size = tokio::fs::metadata(local_path)
         .await
         .map(|m| m.len())
@@ -709,6 +733,7 @@ pub async fn check_write_permission(
     pass: &str,
     root: &str,
 ) -> Result<bool, String> {
+    reject_control_chars("Ruta raíz", root)?;
     let mut ftp = connect(host, port, user, pass).await?;
     let test_dir = format!("{root}/.oscata-write-test");
     let writable = ftp.mkdir(&test_dir).await.is_ok();
@@ -717,4 +742,28 @@ pub async fn check_write_permission(
     }
     ftp.quit().await.ok();
     Ok(writable)
+}
+
+#[cfg(test)]
+mod control_char_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_crlf_and_nul() {
+        assert!(reject_control_chars("x", "/media/Películas").is_ok());
+        assert!(reject_control_chars("x", "a\r\nDELE b").is_err());
+        assert!(reject_control_chars("x", "a\nb").is_err());
+        assert!(reject_control_chars("x", "a\0b").is_err());
+    }
+
+    #[test]
+    fn listing_skips_names_with_control_chars() {
+        let raw = vec![
+            "-rw-r--r-- 1 u g 100 Jan 01 2024 ok.mkv".to_string(),
+            "-rw-r--r-- 1 u g 100 Jan 01 2024 bad\0.mkv".to_string(),
+        ];
+        let (_, files) = parse_entries(&raw, "/m");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].filename, "ok.mkv");
+    }
 }

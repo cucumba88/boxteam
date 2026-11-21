@@ -936,18 +936,17 @@ pub async fn get_config(
 pub async fn ftp_list_raw(
     state: tauri::State<'_, crate::db::Db>,
 ) -> Result<Vec<String>, String> {
-    use suppaftp::AsyncFtpStream;
     let config = state.load_config()?;
-    let mut ftp = AsyncFtpStream::connect(format!("{}:{}", config.ftp_host, config.ftp_port))
-        .await
-        .map_err(|e| e.to_string())?;
-    ftp.login(&config.ftp_user, &config.ftp_pass)
-        .await
-        .map_err(|e| e.to_string())?;
-    ftp.cwd(&config.ftp_root).await.map_err(|e| format!("CWD {}: {e}", config.ftp_root))?;
-    let entries = ftp.list(None).await.map_err(|e| e.to_string())?;
-    ftp.quit().await.ok();
-    Ok(entries)
+    // Goes through ftp::list_raw so the login error is password-redacted and
+    // the root path is checked for CR/LF before hitting the control channel.
+    crate::ftp::list_raw(
+        &config.ftp_host,
+        config.ftp_port,
+        &config.ftp_user,
+        &config.ftp_pass,
+        &config.ftp_root,
+    )
+    .await
 }
 
 #[tauri::command]
