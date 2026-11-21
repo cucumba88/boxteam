@@ -154,6 +154,7 @@ const WEB_ROUTES: Record<
     { notify_new_content: a.notifyNewContent, notify_downloads: a.notifyDownloads },
   ],
   revoke_telegram_sub: ["DELETE", "/notifications/subscription"],
+  get_ftp_permissions: ["GET", "/ftp/permissions"],
   test_ftp_connection: (a) => [
     "POST",
     "/ftp/test",

@@ -41,6 +41,9 @@ import {
 } from "../utils/userPrefs";
 import { SORT_OPTIONS } from "../components/FilterBar";
 import FtpTlsFields from "../components/FtpTlsFields";
+import FtpPermissionsPanel, {
+  FTP_CONFIG_SAVED_EVENT,
+} from "../components/FtpPermissionsPanel";
 import {
   CANONICAL_ORDER,
   parseRatingOrder,
@@ -1185,6 +1188,8 @@ export default function Settings({
         max: form.max_concurrent_downloads ?? 2,
       });
       invalidateConfig();
+      // Re-probe FTP permissions (Settings panel + Library's Uploads gate).
+      window.dispatchEvent(new CustomEvent(FTP_CONFIG_SAVED_EVENT));
       // Push the saved rating order into the live store so existing screens
       // (Library cards, detail panels) re-render with the new preference
       // without requiring a refresh.
@@ -1730,6 +1735,10 @@ export default function Settings({
                 )}
                 <StatusPill state={ftpStatus} text={ftpStatusText} />
               </div>
+
+              {canWrite && (
+                <FtpPermissionsPanel language={language} buttonStyle={ghostBtn} />
+              )}
 
               {rawList !== null && (
                 <div

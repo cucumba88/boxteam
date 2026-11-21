@@ -187,6 +187,7 @@ pub fn run() {
             commands::analyze_local_file,
             commands::list_local_video_files,
             commands::check_ftp_write_permission,
+            commands::get_ftp_permissions,
             commands::suggest_upload_destination,
             commands::ftp_list_dir,
             commands::generate_upload_filename,

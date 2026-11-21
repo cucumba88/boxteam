@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FTP_CONFIG_SAVED_EVENT } from "../components/FtpPermissionsPanel";
 import { createPortal } from "react-dom";
 import {
   Activity,
@@ -621,9 +622,16 @@ export default function Library({
 
   useEffect(() => {
     if (!isTauri()) return;
-    invoke<boolean>("check_ftp_write_permission")
-      .then((ok) => setFtpWriteOk(ok))
-      .catch(() => setFtpWriteOk(false));
+    const check = () => {
+      invoke<boolean>("check_ftp_write_permission")
+        .then((ok) => setFtpWriteOk(ok))
+        .catch(() => setFtpWriteOk(false));
+    };
+    check();
+    // Re-check when FTP settings are saved, so the Uploads tab appears or
+    // disappears without restarting the app.
+    window.addEventListener(FTP_CONFIG_SAVED_EVENT, check);
+    return () => window.removeEventListener(FTP_CONFIG_SAVED_EVENT, check);
   }, []);
 
   useEffect(() => {

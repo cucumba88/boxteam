@@ -3564,6 +3564,20 @@ pub async fn check_ftp_write_permission(
     .await
 }
 
+/// Full permission report for Settings → FTP (list / mkdir / upload /
+/// download / delete), measured against the saved configuration.
+#[tauri::command]
+pub async fn get_ftp_permissions(
+    state: tauri::State<'_, crate::db::Db>,
+) -> Result<crate::ftp::FtpPermissions, String> {
+    let config = state.load_config()?;
+    Ok(crate::ftp::probe_permissions(
+        &crate::ftp::FtpEndpoint::from_config(&config),
+        &config.ftp_root,
+    )
+    .await)
+}
+
 // ─── Upload destination suggestion ───────────────────────────────────────────
 
 #[derive(serde::Serialize)]

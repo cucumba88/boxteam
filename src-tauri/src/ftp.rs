@@ -878,21 +878,137 @@ async fn ensure_remote_dir(ftp: &mut FtpConn, path: &str) -> Result<(), String> 
     Ok(())
 }
 
-/// Test whether the FTP user has write permission by attempting to create
-/// and immediately remove a temporary directory.
-pub async fn check_write_permission(
-    ep: &FtpEndpoint,
-    root: &str,
-) -> Result<bool, String> {
-    reject_control_chars("Ruta raíz", root)?;
-    let mut ftp = connect(ep).await?;
-    let test_dir = format!("{root}/.oscata-write-test");
-    let writable = ftp.mkdir(&test_dir).await.is_ok();
-    if writable {
-        ftp.rmdir(&test_dir).await.ok();
+/// What the configured FTP account can actually do in the library root,
+/// measured with a throw-away directory and file (see [`probe_permissions`]).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct FtpPermissions {
+    /// Connected and logged in.
+    pub connected: bool,
+    /// Connection is FTPS (TLS).
+    pub tls: bool,
+    /// LIST of the root works.
+    pub can_list: bool,
+    /// MKD works (needed when an upload targets a new folder).
+    pub can_create_dirs: bool,
+    /// STOR works — this is what gates the Uploads tab.
+    pub can_upload: bool,
+    /// RETR works (download). `None` when there was nothing to try it on:
+    /// the probe file could not be uploaded and no existing file was found.
+    pub can_download: Option<bool>,
+    /// DELE works (removing uploaded files). `None` when it could not be
+    /// tried because the probe file could not be uploaded.
+    pub can_delete: Option<bool>,
+    /// Login / connection error, already humanised, when `connected` is false.
+    pub error: Option<String>,
+    /// RFC 3339 timestamp of the check.
+    pub checked_at: String,
+}
+
+/// Probe the account's permissions in `root`: LIST, then MKD a temporary
+/// `.oscata-permcheck-<n>` folder, STOR a 16-byte file in it, RETR it back,
+/// DELE it and RMD the folder. Everything it creates is removed (best effort).
+/// Never fails: problems are reported in the returned struct.
+pub async fn probe_permissions(ep: &FtpEndpoint, root: &str) -> FtpPermissions {
+    let mut p = FtpPermissions {
+        tls: ep.tls,
+        checked_at: Utc::now().to_rfc3339(),
+        ..Default::default()
+    };
+    if let Err(e) = reject_control_chars("Ruta raíz", root) {
+        p.error = Some(e);
+        return p;
+    }
+    let mut ftp = match connect(ep).await {
+        Ok(f) => f,
+        Err(e) => {
+            p.error = Some(humanize_ftp_error(&e));
+            return p;
+        }
+    };
+    p.connected = true;
+    if ftp.transfer_type(FileType::Binary).await.is_err() {
+        p.error = Some("El servidor rechazó el modo binario (TYPE I)".into());
+    }
+
+    p.can_list = ftp.cwd(root).await.is_ok() && ftp.list(None).await.is_ok();
+
+    let nonce = Utc::now().timestamp_millis();
+    let dir = format!("{}/.oscata-permcheck-{nonce}", root.trim_end_matches('/'));
+    p.can_create_dirs = ftp.mkdir(&dir).await.is_ok();
+    // If MKD is refused, still try STOR straight into the root: some servers
+    // allow uploading files but not creating folders.
+    let target_dir = if p.can_create_dirs { dir.clone() } else { root.to_string() };
+    let file = format!("{}/.oscata-permcheck-{nonce}.tmp", target_dir.trim_end_matches('/'));
+    const PAYLOAD: &[u8] = b"oscata permcheck";
+
+    if let Ok(mut up) = ftp.put_with_stream(&file).await {
+        let wrote = up.write_all(PAYLOAD).await.is_ok();
+        p.can_upload = wrote && up.finish().await.is_ok();
+    }
+    if p.can_upload {
+        if let Ok(mut down) = ftp.retr_as_stream(&file).await {
+            let mut buf = Vec::new();
+            let read = down.read_to_end(&mut buf).await.is_ok();
+            p.can_download = Some(read && down.finish().await.is_ok() && buf == PAYLOAD);
+        } else {
+            p.can_download = Some(false);
+        }
+        p.can_delete = Some(ftp.rm(&file).await.is_ok());
+    }
+    if p.can_create_dirs {
+        ftp.rmdir(&dir).await.ok();
+    }
+    if p.can_download.is_none() && p.can_list {
+        // Read-only account: try reading one byte of an existing file, then
+        // abort the transfer. Done last because ABOR handling varies.
+        p.can_download = probe_existing_download(&mut ftp, root).await;
     }
     ftp.quit().await.ok();
-    Ok(writable)
+    p
+}
+
+/// RETR the first byte of an existing file found by walking down the first
+/// subfolder of `root` (at most 6 levels, 15 entries per level). `None` if no
+/// file was found to try.
+async fn probe_existing_download(ftp: &mut FtpConn, root: &str) -> Option<bool> {
+    let mut folder = root.trim_end_matches('/').to_string();
+    for _depth in 0..6 {
+        let names = ftp.nlst(Some(&folder)).await.ok()?;
+        let mut first_sub: Option<String> = None;
+        for name in names.iter().take(15) {
+            let base = name.rsplit('/').next().unwrap_or(name);
+            if base.is_empty() || base == "." || base == ".." {
+                continue;
+            }
+            let path = format!("{folder}/{base}");
+            if ftp.size(&path).await.is_err() {
+                // Not a file (or SIZE unsupported).
+                first_sub.get_or_insert(path);
+                continue;
+            }
+            return Some(match ftp.retr_as_stream(&path).await {
+                Ok(mut down) => {
+                    let mut byte = [0u8; 1];
+                    let ok = down.read(&mut byte).await.is_ok();
+                    ftp.abort(down).await.ok();
+                    ok
+                }
+                Err(_) => false,
+            });
+        }
+        folder = first_sub?;
+    }
+    None
+}
+
+/// Whether the account can upload into `root` (STOR). Kept for the
+/// `check_ftp_write_permission` command that gates the Uploads tab.
+pub async fn check_write_permission(ep: &FtpEndpoint, root: &str) -> Result<bool, String> {
+    let p = probe_permissions(ep, root).await;
+    match (p.connected, p.error) {
+        (false, Some(e)) => Err(e),
+        _ => Ok(p.can_upload),
+    }
 }
 
 #[cfg(test)]
@@ -926,3 +1042,4 @@ mod control_char_tests {
         assert_eq!(files[0].filename, "ok.mkv");
     }
 }
+

@@ -778,6 +778,18 @@ pub async fn test_ftp_handler(
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
+/// Settings → FTP permission report. Admin-only: the probe writes (and
+/// removes) a temporary folder and file on the FTP server.
+pub async fn ftp_permissions_handler(
+    AdminUser(_admin): AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<crate::ftp::FtpPermissions>> {
+    let config = state.db.load_config().map_err(ApiError::from)?;
+    Ok(Json(
+        crate::ftp::probe_permissions(&crate::ftp::FtpEndpoint::from_config(&config), &config.ftp_root).await,
+    ))
+}
+
 /// Resolves the REDACTED sentinel back to the stored key so the user can press
 /// "Probar" without retyping the existing credential. An empty `api_key` is
 /// treated as a deliberate "test with no key" — the upstream probe will fail.
