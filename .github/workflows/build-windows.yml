@@ -43,6 +43,15 @@ jobs:
         with:
           ref: ${{ inputs.release_tag || github.ref }}
 
+      # Build helpers from the workflow's own commit. With release_tag the
+      # source above is an older tag that may not have them yet.
+      - name: Checkout CI helpers
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: _ci
+          sparse-checkout: scripts/nsis-include
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -89,7 +98,7 @@ jobs:
           # if makensis doesn't already have it.
           NSIS_INC=/usr/share/nsis/Include
           if [ ! -f "$NSIS_INC/Win/RestartManager.nsh" ]; then
-            $SUDO install -D -m 644 scripts/nsis-include/Win/RestartManager.nsh "$NSIS_INC/Win/RestartManager.nsh"
+            $SUDO install -D -m 644 _ci/scripts/nsis-include/Win/RestartManager.nsh "$NSIS_INC/Win/RestartManager.nsh"
           fi
           makensis -VERSION
 
