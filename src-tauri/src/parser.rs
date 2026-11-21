@@ -40,11 +40,12 @@ static TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid tag regex")
 });
 
-/// Supports S01E01, S01 E01, S01-E01, S01E01-E03, S01E01E02.
+/// Supports S01E01, S01 E01, S01-E01, S01E01-E03, S01E01E02, and the Spanish
+/// "T2E05" / "T01E03" (Temporada) spelling.
 /// Also handles S100E01 convention (S[season*100]E[ep]) used by some release groups.
 static SE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)\bS(\d{1,3})[\s._-]*E(\d{1,3})(?:\s*[-~]\s*E?(\d{1,3})|[\s._-]*E(\d{1,3}))?\b",
+        r"(?ix)\b[ST](\d{1,3})[\s._-]*E(\d{1,3})(?:\s*[-~]\s*E?(\d{1,3})|[\s._-]*E(\d{1,3}))?\b",
     )
     .expect("valid SE regex")
 });
@@ -60,17 +61,64 @@ static S_ONLY_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid season-only regex")
 });
 
-/// Episode-only: E01 / EP01 / Episode 01 / Capitulo 01 without season prefix.
+/// Episode-only: E01 / EP01 / Episode 01 / Episodio 01 without season prefix.
+/// ("Cap"/"Capitulo" are handled by `CAP_RE`, which understands the Spanish
+/// "Cap.101" = season 1 episode 1 convention.)
 static E_ONLY_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)(?:^|\s)(?:E|EP|EPISODE|CAP(?:ITULO)?)[\s._-]?(\d{1,3})(?:\s*[-~]\s*(?:E|EP|EPISODE|CAP(?:ITULO)?)?[\s._-]?(\d{1,3}))?\b",
+        r"(?ix)(?:^|\s)(?:E|EP|EPISODE|EPISODIO)[\s._-]?(\d{1,3})(?:\s*[-~]\s*(?:E|EP|EPISODE|EPISODIO)?[\s._-]?(\d{1,3}))?\b",
     )
     .expect("valid episode-only regex")
 });
 
-/// Files named as "01 - Title" (used when season is in parent folder).
+/// Spanish tracker episode marker: "Cap.101" / "[Cap.2201]" / "Capitulo 42" /
+/// "Capítulo 7" / "Cap.101_103" (range). Group 1 is the "cap" vs "capitulo"
+/// spelling (the short form is the one that packs season*100+episode), group 2
+/// the number, group 3 the optional range end.
+static CAP_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?ix)\b(cap(?:[ií]tulo)?)[\s._-]*(\d{1,4})(?:\s*[-_~\s]\s*(\d{3,4}))?\b",
+    )
+    .expect("valid cap regex")
+});
+
+/// Files named as "01 - Title" or just "01" (used when season is in parent folder).
 static LEADING_EP_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^\s*0*(\d{1,3})\b(?:\s*[-._]\s*|\s+)").expect("valid leading episode regex")
+    Regex::new(r"(?ix)^\s*0*(\d{1,3})\b(?:\s*[-._]\s*|\s+|\s*$)").expect("valid leading episode regex")
+});
+
+/// Trailing episode number "Show 01" / "Breaking Bad 101" — only trusted when
+/// the season is already known from a season folder.
+static TRAILING_EP_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?ix)\s(\d{1,3})\s*$").expect("valid trailing episode regex")
+});
+
+/// Leading fansub/scene group in brackets: "[SubsPlease] Title - 01 (1080p)".
+static LEADING_BRACKET_GROUP_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?ix)^\s*\[([^\]]+)\]\s*").expect("valid leading bracket group regex")
+});
+
+/// Anime absolute episode numbering after a dash: "Title - 87" / "Title - 01v2".
+static ANIME_ABS_EP_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?ix)\s-\s(\d{1,3})(?:v\d)?(?:\s|$)").expect("valid anime episode regex")
+});
+
+/// Trailing parenthesised non-year qualifier, e.g. "The Office (US)".
+static TRAILING_QUALIFIER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?ix)\s*\((?:US|UK|AU|CA|NZ|ES|MX)\)?\s*$").expect("valid qualifier regex")
+});
+
+/// Folder names that carry no show/movie title (season or extras folders).
+static NON_TITLE_FOLDER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?ix)^\s*(?:
+            (?:season|temporada|series|serie|staffel|saison)[\s._-]*\d{1,4}
+          | s\d{1,4}
+          | t\d{1,3}
+          | specials? | especiales | extras? | featurettes?
+        )\s*$",
+    )
+    .expect("valid non-title folder regex")
 });
 
 static RESOLUTION_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -149,7 +197,7 @@ static SEASON_PATH_RES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"(?i)(?:^|[/\s-])season[\s._-]*(\d{1,2})(?:[/\s-]|$)",
         r"(?i)(?:^|[/\s-])temporada[\s._-]*(\d{1,2})(?:[/\s-]|$)",
         r"(?i)(?:^|[/\s-])s(\d{1,2})(?:[/\s-]|$)",
-        r"(?i)\bS(\d{1,3})[\s._-]*E\d{1,3}\b",
+        r"(?i)\b[ST](\d{1,3})[\s._-]*E\d{1,3}\b",
         r"(?i)\b(\d{1,2})x\d{1,3}\b",
     ]
     .iter()
@@ -160,7 +208,7 @@ static SEASON_PATH_RES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 /// Episode inference patterns for path-based episode detection (checked in order).
 static EPISODE_PATH_RES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
-        r"(?i)\bS\d{1,3}[\s._-]*E(\d{1,3})(?:\s*[-~]\s*E?(\d{1,3})|[\s._-]*E(\d{1,3}))?\b",
+        r"(?i)\b[ST]\d{1,3}[\s._-]*E(\d{1,3})(?:\s*[-~]\s*E?(\d{1,3})|[\s._-]*E(\d{1,3}))?\b",
         r"(?i)\b\d{1,2}x(\d{1,3})(?:\s*[-~]\s*(\d{1,3}))?\b",
         r"(?i)(?:^|[/\s-])(?:E|EP|EPISODE|CAP(?:ITULO)?)[\s._-]?(\d{1,3})(?:\s*[-~]\s*(?:E|EP|EPISODE|CAP(?:ITULO)?)?[\s._-]?(\d{1,3}))?(?:[/\s-]|$)",
     ]
@@ -174,11 +222,11 @@ static EPISODE_PATH_RES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 static RELEASE_TYPE_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     let specs: &[(&str, &str)] = &[
         (r"(?i)\bBD[-. ]?REMUX\b", "BDREMUX"),
+        (r"(?i)\bREMUX\b", "BDREMUX"),
         (r"(?i)\bBDMV\b", "BDMV"),
         (r"(?i)\bBDRip\b", "BDRip"),
         (r"(?i)\bBRRip\b", "BRRip"),
         (r"(?i)\bBluRay\b", "BluRay"),
-        (r"(?i)\bREMUX\b", "BDREMUX"),
         (r"(?i)\bWEB[-. ]?DL\b", "WEB-DL"),
         (r"(?i)\bWEBDL\b", "WEB-DL"),
         (r"(?i)\bWEBRip\b", "WEBRip"),
@@ -266,77 +314,160 @@ fn parse_with_context(ftp_path: Option<&str>, filename: &str) -> ParsedMedia {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(filename);
+    parse_stem(ftp_path, without_ext)
+}
+
+fn parse_stem(ftp_path: Option<&str>, without_ext: &str) -> ParsedMedia {
+    // A leading "[Group]" (fansub / scene convention: "[SubsPlease] Title - 01")
+    // is never part of the title. Strip it up front and keep it as a
+    // release-group fallback.
+    let (leading_group, body) = match LEADING_BRACKET_GROUP_RE.captures(without_ext) {
+        Some(caps) => {
+            let end = caps.get(0).map(|m| m.end()).unwrap_or(0);
+            let rest = &without_ext[end..];
+            if rest.trim().is_empty() {
+                (None, without_ext)
+            } else {
+                let group = caps
+                    .get(1)
+                    .map(|m| m.as_str().trim().to_uppercase())
+                    .filter(|g| {
+                        !g.is_empty()
+                            && g.len() <= 24
+                            && g.chars().all(|c| c.is_alphanumeric() || c == '-' || c == ' ')
+                            && !YEAR_RE.is_match(g)
+                    });
+                (group, rest)
+            }
+        }
+        None => (None, without_ext),
+    };
 
     // Replace dots, underscores and multiple spaces with single space
-    let clean = without_ext.replace(['.', '_'], " ");
-    let clean = WHITESPACE_RE.replace_all(&clean, " ").to_string();
+    let clean = body.replace(['.', '_'], " ");
+    let clean = WHITESPACE_RE.replace_all(&clean, " ").trim().to_string();
+
+    let path_season = ftp_path.and_then(infer_season_from_path);
+
+    // ── Season / episode markers in the filename ──────────────────────────
+    let mut filename_season: Option<u8> = None;
+    let mut episode: Option<u8> = None;
+    let mut episode_end: Option<u8> = None;
+    let mut se_start = clean.len();
+
+    if let Some(caps) = SE_RE.captures(&clean) {
+        let raw_s: u16 = caps[1].parse().unwrap_or(0);
+        filename_season = Some(normalize_season(raw_s));
+        episode = caps[2].parse().ok();
+        episode_end = caps
+            .get(3)
+            .or_else(|| caps.get(4))
+            .and_then(|m| m.as_str().parse().ok());
+        se_start = caps.get(0).map(|m| m.start()).unwrap_or(se_start);
+    } else if let Some(caps) = X_RE.captures(&clean) {
+        filename_season = caps[1].parse().ok();
+        episode = caps[2].parse().ok();
+        episode_end = caps.get(3).and_then(|m| m.as_str().parse().ok());
+        se_start = caps.get(0).map(|m| m.start()).unwrap_or(se_start);
+    } else {
+        // Season and episode may be spelled separately:
+        // "Narcos Temporada 1 Capitulo 3", "La Casa de Papel - Temporada 2 [Cap.205]".
+        if let Some(caps) = S_ONLY_RE.captures(&clean) {
+            let raw_s: u16 = caps[1].parse().unwrap_or(0);
+            filename_season = Some(normalize_season(raw_s));
+            se_start = caps.get(0).map(|m| m.start()).unwrap_or(se_start);
+        }
+        let known_season = filename_season.or(path_season);
+
+        if let Some(caps) = CAP_RE.captures(&clean) {
+            let short_form = caps
+                .get(1)
+                .map(|m| m.as_str().len() <= 3)
+                .unwrap_or(false);
+            let n: u16 = caps[2].parse().unwrap_or(0);
+            let n_end: Option<u16> = caps.get(3).and_then(|m| m.as_str().parse().ok());
+            let (cap_season, ep, ep_end) = split_cap_number(n, n_end, short_form, known_season);
+            if filename_season.is_none() {
+                filename_season = cap_season;
+            }
+            episode = ep;
+            episode_end = ep_end;
+            if let Some(m) = caps.get(0) {
+                se_start = se_start.min(m.start());
+            }
+        } else if let Some(caps) = E_ONLY_RE.captures(&clean) {
+            episode = caps[1].parse().ok();
+            episode_end = caps.get(2).and_then(|m| m.as_str().parse().ok());
+            if let Some(m) = caps.get(0) {
+                se_start = se_start.min(m.start());
+            }
+        } else if leading_group.is_some() && known_season.is_none() {
+            // Anime absolute numbering: "[Group] Title - 87 (1080p)".
+            if let Some(caps) = ANIME_ABS_EP_RE.captures(&clean) {
+                episode = caps[1].parse().ok();
+                if let Some(m) = caps.get(0) {
+                    se_start = se_start.min(m.start());
+                }
+            }
+        }
+    }
+
+    let season = filename_season.or(path_season);
+
+    let tag_pos = TAG_RE.find(&clean).map(|m| m.start()).unwrap_or(clean.len());
+    // A "[...]" block after the title ("Cars 2 [BluRay 1080p][Castellano]") ends it.
+    let bracket_pos = clean
+        .char_indices()
+        .find(|&(i, c)| i > 0 && c == '[')
+        .map(|(i, _)| i)
+        .unwrap_or(clean.len());
 
     // Pick the release year and the position where the title ends. Priority:
     //  1. A parenthesised year "(2025)" — the conventional release marker, which
     //     lets a title legitimately contain a 4-digit number ("1975 El fin de
     //     una era (2025)", "Blade Runner 2049 (2017)").
-    //  2. Otherwise the first bare 4-digit year, but NEVER one at position 0 — a
+    //  2. Otherwise a bare 4-digit year, but NEVER one at position 0 — a
     //     filename never opens with its release year, so a leading number is part
-    //     of the title, not the year.
+    //     of the title. When several bare years appear before the first tech tag
+    //     ("Blade.Runner.2049.2017.2160p") the LAST one is the release year.
+    //  3. Years in the future (beyond next year) are never release years.
     // Both the `year` value and the title boundary derive from this single hit so
     // they can't disagree (which previously emptied the title).
+    let max_year = current_year().saturating_add(1);
+    let plausible = |y: u16| (1900..=max_year).contains(&y);
+    let title_boundary = se_start.min(tag_pos).min(bracket_pos);
     let year_hit: Option<(usize, u16)> = PAREN_YEAR_RE
-        .captures(&clean)
-        .and_then(|caps| {
+        .captures_iter(&clean)
+        .filter_map(|caps| {
             let whole = caps.get(0)?;
-            let year = caps.get(1)?.as_str().parse().ok()?;
-            Some((whole.start(), year))
+            let year: u16 = caps.get(1)?.as_str().parse().ok()?;
+            plausible(year).then_some((whole.start(), year))
         })
+        .next()
         .or_else(|| {
-            YEAR_RE
+            let candidates: Vec<(usize, u16)> = YEAR_RE
                 .find_iter(&clean)
-                .find(|m| m.start() != 0)
-                .and_then(|m| m.as_str().parse().ok().map(|y| (m.start(), y)))
+                .filter(|m| m.start() != 0)
+                .filter_map(|m| m.as_str().parse().ok().map(|y| (m.start(), y)))
+                .filter(|&(_, y)| plausible(y))
+                .collect();
+            candidates
+                .iter()
+                .filter(|&&(pos, _)| pos < title_boundary)
+                .last()
+                .or_else(|| candidates.first())
+                .copied()
         });
     let year: Option<u16> = year_hit.map(|(_, y)| y);
 
-    let (filename_season, mut episode, mut episode_end, se_start) =
-        if let Some(caps) = SE_RE.captures(&clean) {
-            let raw_s: u16 = caps[1].parse().unwrap_or(0);
-            // Normalize S100→1, S200→2 convention used by some release groups
-            let s = if raw_s > 0 && raw_s % 100 == 0 {
-                (raw_s / 100) as u8
-            } else {
-                raw_s as u8
-            };
-            let e: u8 = caps[2].parse().unwrap_or(0);
-            let e_end: Option<u8> = caps
-                .get(3)
-                .or_else(|| caps.get(4))
-                .and_then(|m| m.as_str().parse().ok());
-            let start = SE_RE.find(&clean).map(|m| m.start()).unwrap_or(clean.len());
-            (Some(s), Some(e), e_end, start)
-        } else if let Some(caps) = X_RE.captures(&clean) {
-            let s: u8 = caps[1].parse().unwrap_or(0);
-            let e: u8 = caps[2].parse().unwrap_or(0);
-            let e_end: Option<u8> = caps.get(3).and_then(|m| m.as_str().parse().ok());
-            let start = X_RE.find(&clean).map(|m| m.start()).unwrap_or(clean.len());
-            (Some(s), Some(e), e_end, start)
-        } else if let Some(caps) = S_ONLY_RE.captures(&clean) {
-            let raw_s: u16 = caps[1].parse().unwrap_or(0);
-            let s = if raw_s > 0 && raw_s % 100 == 0 {
-                (raw_s / 100) as u8
-            } else {
-                raw_s as u8
-            };
-            let start = S_ONLY_RE.find(&clean).map(|m| m.start()).unwrap_or(clean.len());
-            (Some(s), None, None, start)
-        } else if let Some(caps) = E_ONLY_RE.captures(&clean) {
-            let e: u8 = caps[1].parse().unwrap_or(0);
-            let e_end: Option<u8> = caps.get(2).and_then(|m| m.as_str().parse().ok());
-            let start = E_ONLY_RE.find(&clean).map(|m| m.start()).unwrap_or(clean.len());
-            (None, Some(e), e_end, start)
-        } else {
-            (None, None, None, clean.len())
-        };
+    // Title ends at: year, S##E## marker, first tech tag or "[" — whichever comes first
+    let year_pos = year_hit.map(|(pos, _)| pos).unwrap_or(clean.len());
+    let title_end = year_pos.min(title_boundary);
+    let mut title_part: &str = &clean[..title_end];
 
-    let season = filename_season.or_else(|| ftp_path.and_then(infer_season_from_path));
-
+    // Episode inferred from the path or from a bare number, only once nothing
+    // in the filename spelled it out.
+    let mut used_leading_ep = false;
     if episode.is_none() {
         if let Some(path) = ftp_path {
             if let Some((ep, ep_end)) = infer_episode_from_path(path) {
@@ -348,25 +479,57 @@ fn parse_with_context(ftp_path: Option<&str>, filename: &str) -> ParsedMedia {
         if episode.is_none() && season.is_some() {
             if let Some(caps) = LEADING_EP_RE.captures(&clean) {
                 episode = caps.get(1).and_then(|m| m.as_str().parse::<u8>().ok());
+                used_leading_ep = episode.is_some();
+            }
+        }
+
+        // "Show 01.mkv" / "Breaking Bad 101.mkv" inside a season folder.
+        if episode.is_none() && filename_season.is_none() {
+            if let Some(s) = path_season {
+                if let Some(caps) = TRAILING_EP_RE.captures(title_part) {
+                    let n: u16 = caps[1].parse().unwrap_or(0);
+                    let ep = if n >= 100 && n / 100 == u16::from(s) && n % 100 > 0 {
+                        Some((n % 100) as u8)
+                    } else if n > 0 && n < 100 {
+                        Some(n as u8)
+                    } else {
+                        None
+                    };
+                    if let (Some(ep), Some(m)) = (ep, caps.get(0)) {
+                        episode = Some(ep);
+                        title_part = &title_part[..m.start()];
+                    }
+                }
             }
         }
     }
 
-    // Title ends at: year, S##E## marker, or first tech tag — whichever comes first
-    let title_end = {
-        let year_pos = year_hit.map(|(pos, _)| pos).unwrap_or(clean.len());
-        let tag_pos = TAG_RE.find(&clean).map(|m| m.start()).unwrap_or(clean.len());
-        year_pos.min(se_start).min(tag_pos)
-    };
+    let mut title = tidy_title(title_part);
 
-    let title = clean[..title_end]
-        .trim()
-        .trim_end_matches(|c: char| !c.is_alphanumeric())
-        .trim()
-        .to_string();
+    // Fall back to the show / movie folder when the filename carries no usable
+    // title: "Season 1/01.mkv", "S1/E01.mkv", "Season 02/01 - Episode Name.mkv",
+    // "Dune (2021)/movie.mkv".
+    let generic = matches!(
+        normalize_generic(&title).as_str(),
+        "movie" | "film" | "pelicula" | "video" | "episode" | "episodio" | "capitulo"
+    );
+    let needs_folder_title = title.is_empty()
+        || used_leading_ep
+        || generic
+        || ((season.is_some() || episode.is_some()) && !title.chars().any(char::is_alphabetic));
+    if needs_folder_title {
+        if let Some(folder_title) = ftp_path.and_then(title_from_folders) {
+            title = folder_title;
+        }
+    }
+    // Still nothing: the marker we cut at was really part of the title
+    // ("Episode.50.2011.1080p" is a movie) — keep the text up to the year/tag.
+    if title.is_empty() {
+        title = tidy_title(&clean[..year_pos.min(tag_pos).min(bracket_pos)]);
+    }
 
     let release_type_from_filename = parse_release_type(&clean);
-    let release_group = parse_release_group(without_ext);
+    let release_group = parse_release_group(without_ext).or(leading_group);
     let languages = parse_languages(&clean);
 
     // Build a list of ancestor folder names (immediate parent first, then
@@ -424,6 +587,114 @@ fn parse_with_context(ftp_path: Option<&str>, filename: &str) -> ParsedMedia {
     }
 }
 
+/// Normalize the S100→1, S200→2 convention used by some release groups.
+fn normalize_season(raw: u16) -> u8 {
+    if raw > 0 && raw % 100 == 0 {
+        u8::try_from(raw / 100).unwrap_or(0)
+    } else {
+        u8::try_from(raw).unwrap_or(0)
+    }
+}
+
+/// Interpret a Spanish "Cap" number. The tracker convention packs
+/// season*100+episode into it ("Cap.101" = S01E01, "Cap.2201" = S22E01).
+/// We only unpack it when it is safe:
+///  - the season it encodes equals the season we already know, or
+///  - no season is known and the short "Cap." spelling was used.
+/// Otherwise ("Capitulo 150" of a telenovela) the number is the episode.
+/// Returns (season, episode, episode_end).
+fn split_cap_number(
+    n: u16,
+    n_end: Option<u16>,
+    short_form: bool,
+    known_season: Option<u8>,
+) -> (Option<u8>, Option<u8>, Option<u8>) {
+    if n >= 100 && n % 100 > 0 {
+        let s = n / 100;
+        let season_matches = known_season.map(u16::from) == Some(s);
+        if season_matches || (known_season.is_none() && short_form) {
+            let season = u8::try_from(s).ok();
+            let ep = u8::try_from(n % 100).ok();
+            let ep_end = n_end
+                .filter(|e| e / 100 == s && e % 100 > n % 100)
+                .and_then(|e| u8::try_from(e % 100).ok());
+            return (season, ep, ep_end);
+        }
+    }
+    let ep = u8::try_from(n).ok().filter(|&e| e > 0);
+    let ep_end = n_end
+        .and_then(|e| u8::try_from(e).ok())
+        .filter(|&e| ep.is_some_and(|start| e > start));
+    (None, ep, ep_end)
+}
+
+fn current_year() -> u16 {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // 31_556_952 s = average Gregorian year; precision is irrelevant here.
+    u16::try_from(1970 + secs / 31_556_952).unwrap_or(u16::MAX)
+}
+
+/// Trim separators and dangling punctuation off a raw title slice, drop
+/// unbalanced "(" fragments and country qualifiers like "(US)".
+fn tidy_title(raw: &str) -> String {
+    let mut t = raw.trim().to_string();
+    loop {
+        let before = t.clone();
+        t = t
+            .trim()
+            .trim_end_matches(|c: char| !c.is_alphanumeric() && c != ')')
+            .trim()
+            .to_string();
+        t = TRAILING_QUALIFIER_RE.replace(&t, "").to_string();
+        let open = t.matches('(').count();
+        let close = t.matches(')').count();
+        if open > close {
+            if let Some(idx) = t.rfind('(') {
+                t.truncate(idx);
+            }
+        } else if close > open && t.ends_with(')') {
+            t.pop();
+        }
+        if t == before {
+            break;
+        }
+    }
+    t
+}
+
+fn normalize_generic(title: &str) -> String {
+    title
+        .to_lowercase()
+        .replace(['í', 'é'], "i")
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
+}
+
+/// Walk up from the file's parent folder and return the first folder name that
+/// carries a real title, skipping season / specials / extras folders.
+fn title_from_folders(ftp_path: &str) -> Option<String> {
+    let mut dir = std::path::Path::new(ftp_path).parent();
+    while let Some(d) = dir {
+        if let Some(name) = d.file_name().and_then(|n| n.to_str()) {
+            let spaced = WHITESPACE_RE
+                .replace_all(&name.replace(['.', '_'], " "), " ")
+                .to_string();
+            if !NON_TITLE_FOLDER_RE.is_match(&spaced) {
+                let parsed = parse_stem(None, name);
+                if parsed.title.chars().any(char::is_alphanumeric) {
+                    return Some(parsed.title);
+                }
+            }
+        }
+        dir = d.parent();
+    }
+    None
+}
+
 fn infer_season_from_path(ftp_path: &str) -> Option<u8> {
     let path = ftp_path.replace(['.', '_'], " ");
     for re in SEASON_PATH_RES.iter() {
@@ -473,9 +744,21 @@ fn parse_release_group(without_ext: &str) -> Option<String> {
         "mkv", "mp4", "avi", "mov", "DL", "DTS", "AAC", "MA", "HD", "H264", "H265", "x264",
         "x265", "HEVC", "AVC", "WEB", "DL",
     ];
-    let last = without_ext.split('-').last()?;
-    // Must be 1–12 chars, alphanumeric only
-    if last.len() >= 2 && last.len() <= 12 && last.chars().all(|c| c.is_alphanumeric()) {
+    // No hyphen → no "-GROUP" suffix ("Dune.mkv" must not yield group "DUNE").
+    // Scene groups are glued to the hyphen ("-FLUX"); " - Rose" / " - S01E03" are
+    // episode titles or markers, and fail the alphanumeric check below.
+    let (_, last) = without_ext.rsplit_once('-')?;
+    // A trailing episode range ("S01E01-E02", "S01E16-17") is not a group.
+    let looks_episode = last.chars().all(|c| c.is_ascii_digit())
+        || ((last.starts_with('E') || last.starts_with('e'))
+            && last.len() > 1
+            && last[1..].chars().all(|c| c.is_ascii_digit()));
+    // Must be 2–12 chars, alphanumeric only
+    if !looks_episode
+        && last.len() >= 2
+        && last.len() <= 12
+        && last.chars().all(|c| c.is_alphanumeric())
+    {
         if !non_group.iter().any(|&n| n.eq_ignore_ascii_case(last)) {
             return Some(last.to_uppercase());
         }
@@ -811,5 +1094,165 @@ mod tests {
             "S01E01.2160p.x264.mkv",
         );
         assert_eq!(p.codec.as_deref(), Some("X264"));
+    }
+
+    // ── QA corpus: real-world release names ───────────────────────────────
+    // Each row: (ftp_path, filename, title, year, season, episode, episode_end).
+    // ftp_path "" means "parsed without folder context".
+
+    type Row = (
+        &'static str,
+        &'static str,
+        &'static str,
+        Option<u16>,
+        Option<u8>,
+        Option<u8>,
+        Option<u8>,
+    );
+
+    fn check_rows(rows: &[Row]) {
+        let mut failures = Vec::new();
+        for &(path, file, title, year, season, episode, episode_end) in rows {
+            let p = parse_media_path(path, file);
+            let got = (p.title.as_str(), p.year, p.season, p.episode, p.episode_end);
+            let want = (title, year, season, episode, episode_end);
+            if got != want {
+                failures.push(format!("{file}\n    got  {got:?}\n    want {want:?}"));
+            }
+        }
+        assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
+    }
+
+    #[test]
+    fn corpus_movies() {
+        check_rows(&[
+            ("", "The.Matrix.1999.1080p.BluRay.x264-SPARKS.mkv", "The Matrix", Some(1999), None, None, None),
+            ("", "2001.A.Space.Odyssey.1968.1080p.BluRay.x264.mkv", "2001 A Space Odyssey", Some(1968), None, None, None),
+            ("", "1917.2019.1080p.BluRay.x264-SPARKS.mkv", "1917", Some(2019), None, None, None),
+            ("", "2012.2009.1080p.BluRay.x264.mkv", "2012", Some(2009), None, None, None),
+            ("", "Blade.Runner.2049.2017.2160p.UHD.BluRay.x265.mkv", "Blade Runner 2049", Some(2017), None, None, None),
+            ("", "Blade.Runner.2049.2160p.UHD.BluRay.x265.mkv", "Blade Runner 2049", None, None, None, None),
+            ("", "Toy.Story.3.2010.1080p.BluRay.x264.mkv", "Toy Story 3", Some(2010), None, None, None),
+            ("", "Rocky.IV.1985.1080p.BluRay.x264.mkv", "Rocky IV", Some(1985), None, None, None),
+            ("", "300.2006.1080p.BluRay.x264.mkv", "300", Some(2006), None, None, None),
+            ("", "Se7en.1995.1080p.BluRay.x264.mkv", "Se7en", Some(1995), None, None, None),
+            ("", "Oppenheimer (2023) [1080p] [BluRay] [5.1] [YTS.MX].mp4", "Oppenheimer", Some(2023), None, None, None),
+            ("", "Oppenheimer [2023] 1080p.mkv", "Oppenheimer", Some(2023), None, None, None),
+            ("", "La Sociedad de la Nieve (2023) [BDRip 1080p][Castellano AC3 5.1].mkv", "La Sociedad de la Nieve", Some(2023), None, None, None),
+            ("", "El Hoyo 2 (2024) WEB-DL 1080p Castellano.mkv", "El Hoyo 2", Some(2024), None, None, None),
+            ("", "Cars 2 [BluRay 1080p][Castellano].mkv", "Cars 2", None, None, None, None),
+            ("", "Star Wars Episode IV - A New Hope (1977).mkv", "Star Wars Episode IV - A New Hope", Some(1977), None, None, None),
+            ("", "Season.of.the.Witch.2011.1080p.BluRay.mkv", "Season of the Witch", Some(2011), None, None, None),
+            ("", "Deadpool & Wolverine (2024) 2160p.mkv", "Deadpool & Wolverine", Some(2024), None, None, None),
+            ("", "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv", "Dune Part Two", Some(2024), None, None, None),
+            ("", "Episode.50.2011.1080p.mkv", "Episode 50", Some(2011), None, Some(50), None),
+            ("/Peliculas/Dune (2021)/movie.mkv", "movie.mkv", "Dune", None, None, None, None),
+        ]);
+    }
+
+    #[test]
+    fn corpus_series_scene_names() {
+        check_rows(&[
+            ("", "Breaking.Bad.S01E01.Pilot.1080p.BluRay.x264.mkv", "Breaking Bad", None, Some(1), Some(1), None),
+            ("", "Doctor.Who.2005.S01E01.Rose.1080p.mkv", "Doctor Who", Some(2005), Some(1), Some(1), None),
+            ("", "Doctor Who (2005) - S01E01 - Rose.mkv", "Doctor Who", Some(2005), Some(1), Some(1), None),
+            ("", "House.of.the.Dragon.S02E01E02.1080p.mkv", "House of the Dragon", None, Some(2), Some(1), Some(2)),
+            ("", "Friends.S01E01-E02.mkv", "Friends", None, Some(1), Some(1), Some(2)),
+            ("", "Friends.S01E16-17.mkv", "Friends", None, Some(1), Some(16), Some(17)),
+            ("", "Friends - 1x01 - The One Where Monica Gets a Roommate.mkv", "Friends", None, Some(1), Some(1), None),
+            ("", "the.simpsons.s35e01.720p.hdtv.x264.mkv", "the simpsons", None, Some(35), Some(1), None),
+            ("", "Shogun.2024.S01E01.Anjin.1080p.DSNP.WEB-DL.mkv", "Shogun", Some(2024), Some(1), Some(1), None),
+            ("", "9-1-1.S07E01.1080p.mkv", "9-1-1", None, Some(7), Some(1), None),
+            ("", "24.S01E01.mkv", "24", None, Some(1), Some(1), None),
+            ("", "The.100.S01E01.720p.mkv", "The 100", None, Some(1), Some(1), None),
+            ("", "1923.S01E01.1080p.mkv", "1923", None, Some(1), Some(1), None),
+            ("", "Sherlock.S00E01.The.Abominable.Bride.mkv", "Sherlock", None, Some(0), Some(1), None),
+            ("", "Show.Name.S01.COMPLETE.1080p.WEB-DL.mkv", "Show Name", None, Some(1), None, None),
+            ("", "The Office (US) - S02E01.mkv", "The Office", None, Some(2), Some(1), None),
+        ]);
+    }
+
+    #[test]
+    fn corpus_series_spanish_conventions() {
+        check_rows(&[
+            ("", "La Casa de Papel - Temporada 1 [HDTV 720p][Cap.101][AC3 5.1 Castellano].mkv", "La Casa de Papel", None, Some(1), Some(1), None),
+            ("", "La Casa de Papel - Temporada 2 [HDTV][Cap.205][Español Castellano].avi", "La Casa de Papel", None, Some(2), Some(5), None),
+            ("", "Merli [HDTV][Cap.312].avi", "Merli", None, Some(3), Some(12), None),
+            ("", "Aqui no hay quien viva [Cap.508].avi", "Aqui no hay quien viva", None, Some(5), Some(8), None),
+            ("", "Cuentame como paso - Temporada 22 [HDTV 720p][Cap.2201].mkv", "Cuentame como paso", None, Some(22), Some(1), None),
+            ("", "Serie [HDTV][Cap.101_103].avi", "Serie", None, Some(1), Some(1), Some(3)),
+            ("", "Los Serrano Capitulo 42.avi", "Los Serrano", None, None, Some(42), None),
+            ("", "La.Revuelta.Cap.12.mkv", "La Revuelta", None, None, Some(12), None),
+            ("", "Elite 3x05.mkv", "Elite", None, Some(3), Some(5), None),
+            ("", "El Ministerio del Tiempo T2E05.mkv", "El Ministerio del Tiempo", None, Some(2), Some(5), None),
+            ("", "Vis a vis T01E03.mkv", "Vis a vis", None, Some(1), Some(3), None),
+            ("", "Narcos Temporada 1 Capitulo 3.mkv", "Narcos", None, Some(1), Some(3), None),
+            ("", "Narcos Temporada 1 Episodio 3.mkv", "Narcos", None, Some(1), Some(3), None),
+            ("/Series/Merlí/Temporada 2/Merlí - Episodio 05.mkv", "Merlí - Episodio 05.mkv", "Merlí", None, Some(2), Some(5), None),
+        ]);
+    }
+
+    #[test]
+    fn corpus_series_folder_layouts() {
+        check_rows(&[
+            ("/Series/Breaking Bad/Season 1/01.mkv", "01.mkv", "Breaking Bad", None, Some(1), Some(1), None),
+            ("/Series/Breaking Bad/Season 1/Breaking Bad 101.mkv", "Breaking Bad 101.mkv", "Breaking Bad", None, Some(1), Some(1), None),
+            ("/Series/Show/Season 10/Show 01.mkv", "Show 01.mkv", "Show", None, Some(10), Some(1), None),
+            ("/Series/Show/S1/E01.mkv", "E01.mkv", "Show", None, Some(1), Some(1), None),
+            ("/Series/Friends/Temporada 03/Friends - 3x05.mkv", "Friends - 3x05.mkv", "Friends", None, Some(3), Some(5), None),
+            ("/TV/Daredevil Born Again/Season 02/01 - Heaven's Half Hour.mkv", "01 - Heaven's Half Hour.mkv", "Daredevil Born Again", None, Some(2), Some(1), None),
+        ]);
+    }
+
+    #[test]
+    fn corpus_anime_absolute_numbering() {
+        check_rows(&[
+            ("", "[SubsPlease] Shingeki no Kyojin - 87 (1080p) [ABCD1234].mkv", "Shingeki no Kyojin", None, None, Some(87), None),
+            ("", "[Erai-raws] Spy x Family - 01 [1080p].mkv", "Spy x Family", None, None, Some(1), None),
+        ]);
+        let p = parse_media_path("", "[SubsPlease] Shingeki no Kyojin - 87 (1080p) [ABCD1234].mkv");
+        assert_eq!(p.release_group.as_deref(), Some("SUBSPLEASE"));
+    }
+
+    #[test]
+    fn release_group_ignores_titles_without_hyphen_and_episode_ranges() {
+        for file in [
+            "Dune.mkv",
+            "Friends.S01E01-E02.mkv",
+            "Friends.S01E16-17.mkv",
+            "Doctor Who (2005) - S01E01 - Rose.mkv",
+            "The Last of Us - S01E03.mkv",
+        ] {
+            assert_eq!(parse_media_path("", file).release_group, None, "{file}");
+        }
+        assert_eq!(
+            parse_media_path("", "Severance.S02E10.2160p.ATVP.WEB-DL.H.265-FLUX.mkv").release_group.as_deref(),
+            Some("FLUX")
+        );
+    }
+
+    #[test]
+    fn remux_wins_over_bluray_release_type() {
+        let p = parse_media_path("", "Avengers.Endgame.2019.2160p.UHD.BluRay.REMUX.HDR.HEVC.Atmos-EPSiLON.mkv");
+        assert_eq!(p.release_type.as_deref(), Some("BDREMUX"));
+    }
+
+    #[test]
+    fn folder_title_skips_extras_and_season_folders() {
+        assert_eq!(title_from_folders("/Series/Lost/Specials/x.mkv").as_deref(), Some("Lost"));
+        assert_eq!(title_from_folders("/Series/Lost/Temporada 1/x.mkv").as_deref(), Some("Lost"));
+        assert_eq!(title_from_folders("/Mr. Robot/Season 1/x.mkv").as_deref(), Some("Mr Robot"));
+    }
+
+    #[test]
+    fn cap_number_split_rules() {
+        // Short "Cap." with 3 digits and no season known → season*100+episode.
+        assert_eq!(split_cap_number(101, None, true, None), (Some(1), Some(1), None));
+        // Long "Capitulo" without season context is a plain episode number.
+        assert_eq!(split_cap_number(150, None, false, None), (None, Some(150), None));
+        // Known season that matches the prefix → split even for the long form.
+        assert_eq!(split_cap_number(205, None, false, Some(2)), (Some(2), Some(5), None));
+        // Known season that does NOT match → plain episode number.
+        assert_eq!(split_cap_number(205, None, true, Some(1)), (None, Some(205), None));
     }
 }

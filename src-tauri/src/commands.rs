@@ -19,9 +19,13 @@ static MEDIA_SERVER_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 static TV_CONTENT_HINT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(
         r"(?ix)
-        (?:\bS\d{1,3}[\s._-]*E\d{1,3}\b)
+        (?:\b[ST]\d{1,3}[\s._-]*E\d{1,3}\b)
         |(?:\b\d{1,2}x\d{1,3}\b)
-        |(?:\b(?:season|temporada|episode|episodio|capitulo)\b)
+        # The keyword must be followed by a number: a bare word is common in
+        # movie titles (Season of the Witch, Star Wars Episode IV).
+        |(?:\b(?:season|temporada|episode|episodio|cap|cap[ií]tulo)[\s._-]*\d{1,4}\b)
+        # Date-stamped daily shows: The Daily Show 2024 11 05
+        |(?:\b(?:19|20)\d{2}[\s-](?:0[1-9]|1[0-2])[\s-](?:0[1-9]|[12]\d|3[01])\b)
         ",
     )
     .expect("valid tv content hint regex")
@@ -898,7 +902,9 @@ async fn resolve_tmdb_match_with_plex(
     }
 
     let result = if tmdb_search_type == "tv" {
-        crate::tmdb::search_tmdb_multi(api_key, title, "tv")
+        // Pass the parsed year: it is what tells "Doctor Who (2005)" from the
+        // 1963 series, or "Shogun (2024)" from the 1980 miniseries.
+        crate::tmdb::search_tmdb_multi_with_year(api_key, title, "tv", year)
             .await
             .ok()
             .and_then(|mut r| if r.is_empty() { None } else { Some(r.remove(0)) })
@@ -5411,6 +5417,47 @@ mod batching_tests {
                 expected_batches,
                 "Wrong batch count for total={total}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod classification_tests {
+    use super::looks_like_tv_content;
+
+    fn is_tv(path: &str) -> bool {
+        let filename = path.rsplit('/').next().unwrap_or(path);
+        let parsed = crate::parser::parse_media_path(path, filename);
+        looks_like_tv_content(path, filename, &parsed)
+    }
+
+    #[test]
+    fn movies_with_tv_words_in_the_title_stay_movies() {
+        for path in [
+            "/Peliculas/Season.of.the.Witch.2011.1080p.BluRay.mkv",
+            "/Peliculas/Star Wars Episode IV - A New Hope (1977).mkv",
+            "/Peliculas/Blade.Runner.2049.2017.2160p.mkv",
+            "/Peliculas/1917.2019.1080p.BluRay.x264-SPARKS.mkv",
+            "/Peliculas/Capitan America Brave New World (2025) 4K.mkv",
+            "/Peliculas/Dune (2021)/movie.mkv",
+        ] {
+            assert!(!is_tv(path), "classified as TV: {path}");
+        }
+    }
+
+    #[test]
+    fn episodes_are_detected_as_tv() {
+        for path in [
+            "/Mixto/Breaking.Bad.S01E01.1080p.mkv",
+            "/Mixto/El Ministerio del Tiempo T2E05.mkv",
+            "/Mixto/Merli [HDTV][Cap.312].avi",
+            "/Mixto/Los Serrano Capitulo 42.avi",
+            "/Mixto/Elite 3x05.mkv",
+            "/Mixto/The.Daily.Show.2024.11.05.Guest.1080p.mkv",
+            "/Mixto/Breaking Bad/Season 1/01.mkv",
+            "/Mixto/[SubsPlease] Shingeki no Kyojin - 87 (1080p).mkv",
+        ] {
+            assert!(is_tv(path), "not classified as TV: {path}");
         }
     }
 }
