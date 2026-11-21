@@ -1132,6 +1132,7 @@ export default function TVShowPanel({
             >
               {heroPoster ? (
                 <img
+                  decoding="async"
                   src={heroPoster}
                   alt={showTitle}
                   style={{
@@ -1530,6 +1531,8 @@ export default function TVShowPanel({
               <div>
                 {heroPoster ? (
                   <img
+                    loading="lazy"
+                    decoding="async"
                     src={heroPoster}
                     alt={showTitle}
                     style={{

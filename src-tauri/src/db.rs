@@ -32,6 +32,12 @@ pub struct AppConfig {
     pub ftp_user: String,
     pub ftp_pass: String,
     pub ftp_root: String,
+    /// Explicit FTPS (AUTH TLS). false = plain FTP (the historic behaviour).
+    #[serde(default)]
+    pub ftp_tls: bool,
+    /// Accept self-signed / invalid certificates when `ftp_tls` is on.
+    #[serde(default)]
+    pub ftp_tls_accept_invalid_certs: bool,
     pub tmdb_api_key: String,
     pub default_language: String,
     pub download_folder: String,
@@ -501,6 +507,20 @@ impl Db {
         (Self::default_data_dir(), false)
     }
 
+    /// Per-connection performance settings. With WAL, `synchronous=NORMAL`
+    /// is still corruption-safe (at worst the last commit is lost on power
+    /// failure) and avoids an fsync on every write during indexing.
+    /// `busy_timeout` makes a concurrent writer (e.g. a backup) wait instead
+    /// of failing with SQLITE_BUSY.
+    fn tune_connection(conn: &Connection) -> SqlResult<()> {
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.execute_batch(
+            "PRAGMA synchronous = NORMAL;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA cache_size = -32000;",
+        )
+    }
+
     fn apply_migrations(conn: &Connection) -> SqlResult<()> {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch(
@@ -868,6 +888,7 @@ impl Db {
             )
             .into())
         })?;
+        Self::tune_connection(&conn)?;
         Self::apply_migrations(&conn)?;
         // Best-effort offline backfill of streaming providers from the
         // bundled JSON snapshot. Defensive by design: parse errors, missing
@@ -1837,6 +1858,11 @@ impl Db {
             ("omdb_api_key", config.omdb_api_key.as_str()),
             ("tvdb_api_key", config.tvdb_api_key.as_str()),
             ("rating_source_order", config.rating_source_order.as_str()),
+            ("ftp_tls", if config.ftp_tls { "1" } else { "0" }),
+            (
+                "ftp_tls_accept_invalid_certs",
+                if config.ftp_tls_accept_invalid_certs { "1" } else { "0" },
+            ),
         ];
         let port_str = config.ftp_port.to_string();
         for (k, v) in &pairs {
@@ -2257,6 +2283,10 @@ impl Db {
             ftp_user: get("ftp_user")?,
             ftp_pass: get("ftp_pass")?,
             ftp_root: get("ftp_root").unwrap_or_else(|_| DEFAULT_FTP_ROOT.to_string()),
+            ftp_tls: get("ftp_tls").map(|v| v == "1").unwrap_or(false),
+            ftp_tls_accept_invalid_certs: get("ftp_tls_accept_invalid_certs")
+                .map(|v| v == "1")
+                .unwrap_or(false),
             tmdb_api_key: get("tmdb_api_key")?,
             default_language: get("default_language").unwrap_or_else(|_| "es".to_string()),
             download_folder: get("download_folder").unwrap_or_default(),

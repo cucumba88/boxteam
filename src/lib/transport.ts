@@ -154,6 +154,18 @@ const WEB_ROUTES: Record<
     { notify_new_content: a.notifyNewContent, notify_downloads: a.notifyDownloads },
   ],
   revoke_telegram_sub: ["DELETE", "/notifications/subscription"],
+  test_ftp_connection: (a) => [
+    "POST",
+    "/ftp/test",
+    {
+      host: a.host,
+      port: a.port,
+      user: a.user,
+      pass: a.pass,
+      tls: a.tls,
+      tls_accept_invalid_certs: a.tlsAcceptInvalidCerts,
+    },
+  ],
 };
 
 export async function call<T>(

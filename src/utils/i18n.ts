@@ -577,6 +577,23 @@ const messages = {
   },
   "settings.close": { es: "Cerrar ajustes", en: "Close settings" },
   "settings.ftpTitle": { es: "Servidor FTP", en: "FTP Server" },
+  "ftp.tls": { es: "Usar FTPS (TLS explícito)", en: "Use FTPS (explicit TLS)" },
+  "ftp.tlsHintOff": {
+    es: "Desactivado: usuario, contraseña y archivos viajan sin cifrar. Actívalo si tu servidor admite AUTH TLS.",
+    en: "Off: username, password and files travel unencrypted. Turn it on if your server supports AUTH TLS.",
+  },
+  "ftp.tlsHintOn": {
+    es: "Usuario, contraseña, listados y transferencias van cifrados.",
+    en: "Username, password, listings and transfers are encrypted.",
+  },
+  "ftp.tlsInsecure": {
+    es: "Aceptar certificados autofirmados",
+    en: "Accept self-signed certificates",
+  },
+  "ftp.tlsInsecureHint": {
+    es: "Cifra la conexión pero no comprueba la identidad del servidor. Úsalo solo con servidores de confianza.",
+    en: "Encrypts the connection but does not verify the server's identity. Only use it with servers you trust.",
+  },
   "settings.ftpDescription": {
     es: "Datos de conexión para navegar e indexar tu librería remota.",
     en: "Connection details for browsing and indexing your remote media library.",

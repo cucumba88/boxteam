@@ -40,6 +40,7 @@ import {
   type SortKey,
 } from "../utils/userPrefs";
 import { SORT_OPTIONS } from "../components/FilterBar";
+import FtpTlsFields from "../components/FtpTlsFields";
 import {
   CANONICAL_ORDER,
   parseRatingOrder,
@@ -55,6 +56,8 @@ interface Config {
   ftp_user: string;
   ftp_pass: string;
   ftp_root: string;
+  ftp_tls?: boolean;
+  ftp_tls_accept_invalid_certs?: boolean;
   tmdb_api_key: string;
   default_language: "es" | "en";
   download_folder: string;
@@ -1070,6 +1073,8 @@ export default function Settings({
         port: form.ftp_port,
         user: form.ftp_user,
         pass: form.ftp_pass,
+        tls: Boolean(form.ftp_tls),
+        tlsAcceptInvalidCerts: Boolean(form.ftp_tls_accept_invalid_certs),
       });
       setFtpStatus("ok");
     } catch (error: unknown) {
@@ -1223,6 +1228,8 @@ export default function Settings({
         user: form.ftp_user,
         pass: form.ftp_pass,
         root: form.ftp_root,
+        tls: Boolean(form.ftp_tls),
+        tlsAcceptInvalidCerts: Boolean(form.ftp_tls_accept_invalid_certs),
       });
       setRootDirs(dirs);
       setForm((current) =>
@@ -1669,6 +1676,24 @@ export default function Settings({
                   value={form.ftp_root}
                   onChange={set("ftp_root")}
                   placeholder="/"
+                />
+              </div>
+
+              <div style={{ marginBottom: 14 }}>
+                <FtpTlsFields
+                  language={language}
+                  value={{
+                    ftp_tls: Boolean(form.ftp_tls),
+                    ftp_tls_accept_invalid_certs: Boolean(
+                      form.ftp_tls_accept_invalid_certs,
+                    ),
+                  }}
+                  onChange={(next) => {
+                    setFtpStatus("idle");
+                    setForm((current) =>
+                      current ? { ...current, ...next } : current,
+                    );
+                  }}
                 />
               </div>
 

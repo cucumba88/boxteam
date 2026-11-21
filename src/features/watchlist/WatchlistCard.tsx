@@ -112,6 +112,8 @@ export default function WatchlistCard({
       {/* Poster */}
       {poster ? (
         <img
+          loading="lazy"
+          decoding="async"
           src={poster}
           alt={displayTitle}
           style={{

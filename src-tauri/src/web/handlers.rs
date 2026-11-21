@@ -750,10 +750,30 @@ pub async fn has_config_handler(State(state): State<AppState>) -> Json<Value> {
 
 pub async fn test_ftp_handler(
     AuthUser(_u): AuthUser,
+    State(state): State<AppState>,
     Json(body): Json<TestFtpRequest>,
 ) -> ApiResult<Json<Value>> {
-    crate::ftp::test_connection(&body.host, body.port, &body.user, &body.pass)
-        .await
+    // Let Settings test with the stored password (GET /settings returns it
+    // redacted) — but ONLY against the stored host/port/user. Otherwise a
+    // client could point the test at its own server and receive the real
+    // FTP password in the PASS command.
+    let pass = if body.pass == redact::REDACTED {
+        match state.db.load_config() {
+            Ok(c) if c.ftp_host == body.host && c.ftp_port == body.port && c.ftp_user == body.user => c.ftp_pass,
+            _ => return Err(ApiError::from("Vuelve a escribir la contraseña FTP para probar un servidor distinto".to_string())),
+        }
+    } else {
+        body.pass
+    };
+    crate::ftp::test_connection(&crate::ftp::FtpEndpoint {
+        host: body.host,
+        port: body.port,
+        user: body.user,
+        pass,
+        tls: body.tls,
+        tls_accept_invalid_certs: body.tls_accept_invalid_certs,
+    })
+    .await
         .map_err(ApiError::from)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }

@@ -320,6 +320,8 @@ export default function WatchlistAddModal({
             <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
               {selected!.poster_path && (
                 <img
+                  loading="lazy"
+                  decoding="async"
                   src={`${TMDB_IMG}${selected!.poster_path}`}
                   alt={selected!.title}
                   style={{
@@ -600,6 +602,8 @@ export default function WatchlistAddModal({
                   >
                     {r.poster_path ? (
                       <img
+                        loading="lazy"
+                        decoding="async"
                         src={`${TMDB_IMG}${r.poster_path}`}
                         alt={displayTitle}
                         style={{

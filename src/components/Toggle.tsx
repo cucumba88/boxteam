@@ -15,6 +15,7 @@ export default function Toggle({
 }: ToggleProps) {
   return (
     <button
+      type="button"
       role="switch"
       aria-checked={checked}
       disabled={disabled}

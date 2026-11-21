@@ -965,6 +965,8 @@ export default function AnalysisRow({
               >
                 {tmdbSelected.poster_path && (
                   <img
+                    loading="lazy"
+                    decoding="async"
                     src={`${TMDB_IMG}${tmdbSelected.poster_path}`}
                     alt=""
                     style={{

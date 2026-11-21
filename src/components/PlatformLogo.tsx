@@ -1,15 +1,37 @@
-import * as si from "simple-icons";
+import {
+  siAppletv,
+  siCrunchyroll,
+  siHbomax,
+  siMax,
+  siMovistar,
+  siNetflix,
+  siParamountplus,
+  siRakuten,
+  siShowtime,
+  siYoutube,
+} from "simple-icons";
 import { PROVIDER_BY_ID, type ProviderEntry } from "../utils/providers";
 
-// Map of provider iconSlug → simple-icons object. simple-icons exports each
-// icon as `siNetflix`, `siAppletv`, etc. We cache the lookup so misses also
-// don't repeat. The library inherits currentColor in its SVG paths, so the
-// logo automatically follows the chip's text color.
+// Explicit named imports keep the bundle small: a namespace import
+// (`import * as si`) plus a dynamic key lookup defeats tree-shaking and
+// pulled all ~3,400 simple-icons (several MB) into the main chunk.
+// When adding a provider with a new `iconSlug` in utils/providers.ts, add its
+// icon here too. The SVG paths inherit currentColor, so the logo follows the
+// chip's text color.
 type SimpleIcon = { path: string };
-const slugToExport = (slug: string): SimpleIcon | undefined => {
-  const key = "si" + slug.charAt(0).toUpperCase() + slug.slice(1);
-  return (si as unknown as Record<string, SimpleIcon | undefined>)[key];
+const ICONS: Record<string, SimpleIcon> = {
+  appletv: siAppletv,
+  crunchyroll: siCrunchyroll,
+  hbomax: siHbomax,
+  max: siMax,
+  movistar: siMovistar,
+  netflix: siNetflix,
+  paramountplus: siParamountplus,
+  rakuten: siRakuten,
+  showtime: siShowtime,
+  youtube: siYoutube,
 };
+const slugToExport = (slug: string): SimpleIcon | undefined => ICONS[slug];
 
 function fallbackGlyph(entry: ProviderEntry): string {
   if (entry.fallback) return entry.fallback;

@@ -280,6 +280,7 @@ export default function DetailPanel({
         >
           {posterPath ? (
             <img
+              decoding="async"
               src={`${TMDB_IMG}${posterPath}`}
               alt={title}
               style={{

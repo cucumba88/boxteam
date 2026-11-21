@@ -213,10 +213,7 @@ pub(crate) fn spawn_download_job_pub(
         let window_for_progress = window.clone();
 
         let result = crate::ftp::download_file(
-            &config.ftp_host,
-            config.ftp_port,
-            &config.ftp_user,
-            &config.ftp_pass,
+            &crate::ftp::FtpEndpoint::from_config(&config),
             &ftp_path,
             &local_path,
             move |done, total| {
@@ -940,10 +937,7 @@ pub async fn ftp_list_raw(
     // Goes through ftp::list_raw so the login error is password-redacted and
     // the root path is checked for CR/LF before hitting the control channel.
     crate::ftp::list_raw(
-        &config.ftp_host,
-        config.ftp_port,
-        &config.ftp_user,
-        &config.ftp_pass,
+        &crate::ftp::FtpEndpoint::from_config(&config),
         &config.ftp_root,
     )
     .await
@@ -955,8 +949,18 @@ pub async fn test_ftp_connection(
     port: u16,
     user: String,
     pass: String,
+    tls: Option<bool>,
+    tls_accept_invalid_certs: Option<bool>,
 ) -> Result<(), String> {
-    crate::ftp::test_connection(&host, port, &user, &pass).await
+    crate::ftp::test_connection(&crate::ftp::FtpEndpoint {
+        host,
+        port,
+        user,
+        pass,
+        tls: tls.unwrap_or(false),
+        tls_accept_invalid_certs: tls_accept_invalid_certs.unwrap_or(false),
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1589,10 +1593,7 @@ pub async fn start_indexing_internal(
         let mut attempt = 0u32;
         loop {
             match crate::ftp::list_files(
-                &config.ftp_host,
-                config.ftp_port,
-                &config.ftp_user,
-                &config.ftp_pass,
+                &crate::ftp::FtpEndpoint::from_config(&config),
                 &root,
                 on_log.clone(),
             )
@@ -2778,10 +2779,7 @@ pub async fn ftp_list_root_dirs(
 ) -> Result<Vec<String>, String> {
     let config = state.load_config()?;
     let entries = crate::ftp::list_raw(
-        &config.ftp_host,
-        config.ftp_port,
-        &config.ftp_user,
-        &config.ftp_pass,
+        &crate::ftp::FtpEndpoint::from_config(&config),
         &config.ftp_root,
     ).await?;
     // Parse directory entries (Unix: starts with 'd', Windows: contains '<DIR>')
@@ -2805,8 +2803,18 @@ pub async fn ftp_list_root_dirs_preview(
     user: String,
     pass: String,
     root: String,
+    tls: Option<bool>,
+    tls_accept_invalid_certs: Option<bool>,
 ) -> Result<Vec<String>, String> {
-    let entries = crate::ftp::list_raw(&host, port, &user, &pass, &root).await?;
+    let ep = crate::ftp::FtpEndpoint {
+        host,
+        port,
+        user,
+        pass,
+        tls: tls.unwrap_or(false),
+        tls_accept_invalid_certs: tls_accept_invalid_certs.unwrap_or(false),
+    };
+    let entries = crate::ftp::list_raw(&ep, &root).await?;
     let dirs = entries
         .into_iter()
         .filter_map(|line| {
@@ -3550,10 +3558,7 @@ pub async fn check_ftp_write_permission(
 ) -> Result<bool, String> {
     let config = state.load_config()?;
     crate::ftp::check_write_permission(
-        &config.ftp_host,
-        config.ftp_port,
-        &config.ftp_user,
-        &config.ftp_pass,
+        &crate::ftp::FtpEndpoint::from_config(&config),
         &config.ftp_root,
     )
     .await
@@ -3852,7 +3857,7 @@ pub async fn suggest_upload_destination(
         // Step 1: list tv_dest to find actual category folder names on the server.
         // If the list fails or no category folders are found, fall back to hardcoded names.
         let level1_dirs = crate::ftp::list_raw(
-            &config.ftp_host, config.ftp_port, &config.ftp_user, &config.ftp_pass,
+            &crate::ftp::FtpEndpoint::from_config(&config),
             &tv_dest,
         ).await.map(|r| extract_dir_names(&r)).unwrap_or_default();
 
@@ -3893,7 +3898,7 @@ pub async fn suggest_upload_destination(
         // CWD failures from Latin-1 accented chars in the category folder name.
         let existing_show = if !show_title.is_empty() && !cat_dir.is_empty() {
             crate::ftp::list_raw_sub(
-                &config.ftp_host, config.ftp_port, &config.ftp_user, &config.ftp_pass,
+                &crate::ftp::FtpEndpoint::from_config(&config),
                 &tv_dest, &cat_dir,
             ).await
             .map(|r| {
@@ -3925,8 +3930,7 @@ pub async fn suggest_upload_destination(
     // The frontend uses it when the user manually switches the content type to TV.
     let resolved_tv_category = if resolved_tv_category.is_empty() && !tv_dest.is_empty() {
         let cat_dirs = crate::ftp::list_raw(
-            &config.ftp_host, config.ftp_port,
-            &config.ftp_user, &config.ftp_pass,
+            &crate::ftp::FtpEndpoint::from_config(&config),
             &tv_dest,
         ).await.map(|r| extract_dir_names(&r)).unwrap_or_default();
         let (cat_dirs_fb, _): (Vec<String>, Vec<String>) = cat_dirs
@@ -3992,10 +3996,7 @@ pub async fn ftp_list_dir(
 ) -> Result<Vec<String>, String> {
     let config = state.load_config()?;
     let entries = crate::ftp::list_raw(
-        &config.ftp_host,
-        config.ftp_port,
-        &config.ftp_user,
-        &config.ftp_pass,
+        &crate::ftp::FtpEndpoint::from_config(&config),
         &path,
     )
     .await?;
@@ -4175,10 +4176,7 @@ fn spawn_upload_job(
             let upload_id = id;
             let cancel_flag_progress = cancel_flag.clone();
             let result = crate::ftp::upload_file(
-                &config.ftp_host,
-                config.ftp_port,
-                &config.ftp_user,
-                &config.ftp_pass,
+                &crate::ftp::FtpEndpoint::from_config(&config),
                 &ftp_dest_path,
                 &filename,
                 &local_path,
@@ -4819,10 +4817,7 @@ pub async fn delete_upload(
         if item.status == crate::uploads::UploadStatus::Done {
             if let Ok(config) = db.load_config() {
                 if let Err(e) = crate::ftp::delete_file(
-                    &config.ftp_host,
-                    config.ftp_port,
-                    &config.ftp_user,
-                    &config.ftp_pass,
+                    &crate::ftp::FtpEndpoint::from_config(&config),
                     &item.ftp_dest_path,
                     &item.filename,
                 ).await {

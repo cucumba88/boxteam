@@ -22,6 +22,8 @@ interface Config {
   ftp_user: string;
   ftp_pass: string;
   ftp_root: string;
+  ftp_tls: boolean;
+  ftp_tls_accept_invalid_certs: boolean;
   tmdb_api_key: string;
   default_language: "es" | "en";
   download_folder: string;
@@ -172,6 +174,8 @@ export default function Wizard({
     ftp_user: "",
     ftp_pass: "",
     ftp_root: DEFAULT_FTP_ROOT,
+    ftp_tls: false,
+    ftp_tls_accept_invalid_certs: false,
     tmdb_api_key: "",
     default_language: "es",
     download_folder: "",
@@ -199,6 +203,8 @@ export default function Wizard({
           user: merged.ftp_user,
           pass: merged.ftp_pass,
           root: merged.ftp_root,
+          tls: merged.ftp_tls,
+          tlsAcceptInvalidCerts: merged.ftp_tls_accept_invalid_certs,
         });
         merged.folder_types = mergeInferredFolderTypes(
           merged.folder_types,

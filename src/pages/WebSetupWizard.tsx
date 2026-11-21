@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { apiBase, getToken } from "../lib/transport";
 import AppIcon from "../components/AppIcon";
+import FtpTlsFields from "../components/FtpTlsFields";
 
 interface WebSetupWizardProps {
   onComplete: () => void;
@@ -12,6 +13,8 @@ interface FtpFields {
   ftp_user: string;
   ftp_pass: string;
   ftp_root: string;
+  ftp_tls: boolean;
+  ftp_tls_accept_invalid_certs: boolean;
 }
 
 const shellCard: React.CSSProperties = {
@@ -133,6 +136,8 @@ function StepFTP({
           port: form.ftp_port,
           user: form.ftp_user,
           pass: form.ftp_pass,
+          tls: form.ftp_tls,
+          tls_accept_invalid_certs: form.ftp_tls_accept_invalid_certs,
         }),
       });
       if (!res.ok) {
@@ -193,6 +198,15 @@ function StepFTP({
             <label style={labelStyle}>Ruta raíz</label>
             <input style={inputStyle} value={form.ftp_root} onChange={set("ftp_root")} placeholder="/Compartida" required />
           </div>
+
+          <FtpTlsFields
+            language="es"
+            value={{ ftp_tls: form.ftp_tls, ftp_tls_accept_invalid_certs: form.ftp_tls_accept_invalid_certs }}
+            onChange={(next) => {
+              setTestStatus("idle");
+              setForm((f) => ({ ...f, ...next }));
+            }}
+          />
 
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <button
@@ -316,6 +330,8 @@ export default function WebSetupWizard({ onComplete }: WebSetupWizardProps) {
     ftp_user: "",
     ftp_pass: "",
     ftp_root: "/Compartida",
+    ftp_tls: false,
+    ftp_tls_accept_invalid_certs: false,
   });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");

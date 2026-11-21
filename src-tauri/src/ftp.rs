@@ -1,8 +1,7 @@
-use std::sync::Arc;
-use suppaftp::AsyncFtpStream;
+use std::sync::{Arc, OnceLock};
+use suppaftp::tokio::{AsyncRustlsConnector, AsyncRustlsFtpStream};
 use suppaftp::types::FileType;
-use futures::io::AsyncReadExt;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Utc};
 
 /// suppaftp formats addresses with backtick+quote: `"host:port"` — strip that.
@@ -49,6 +48,10 @@ pub fn is_transient_ftp_error(e: &str) -> bool {
 pub fn humanize_ftp_error(raw: &str) -> String {
     let s = raw.to_lowercase();
     let map: &[(&str, &str)] = &[
+        // FTPS-specific — must come before the generic "530" rule.
+        ("must use encryption", "El servidor exige FTPS: activa «Usar FTPS» en la configuración FTP"),
+        ("invalid peer certificate", "Certificado TLS del servidor no válido (¿autofirmado?). Si confías en el servidor, activa «Aceptar certificados autofirmados»"),
+        ("auth tls) failed", "El servidor no admite FTPS (AUTH TLS). Desactiva «Usar FTPS»"),
         ("broken pipe", "Conexión interrumpida durante la transferencia"),
         ("connection reset", "Conexión cerrada por el servidor"),
         ("connection aborted", "Conexión cerrada por el servidor"),
@@ -109,6 +112,119 @@ fn clean_ftp_error_redacted(e: impl std::fmt::Display, secret: &str) -> String {
     }
 }
 
+/// The FTP stream type used everywhere. It is TLS-capable, but stays plain
+/// FTP unless [`FtpEndpoint::tls`] is set, in which case `connect()` upgrades
+/// it with `AUTH TLS` (explicit FTPS) before sending credentials.
+type FtpConn = AsyncRustlsFtpStream;
+
+/// Everything needed to open an authenticated FTP/FTPS session.
+#[derive(Clone)]
+pub struct FtpEndpoint {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub pass: String,
+    /// Explicit FTPS (`AUTH TLS` + `PROT P`). `false` = plain FTP.
+    pub tls: bool,
+    /// Skip certificate verification (self-signed certificates). Only
+    /// meaningful when `tls` is true. Encrypts but does not authenticate the
+    /// server, so it is still vulnerable to an active MITM.
+    pub tls_accept_invalid_certs: bool,
+}
+
+impl std::fmt::Debug for FtpEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FtpEndpoint")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("user", &self.user)
+            .field("pass", &"***")
+            .field("tls", &self.tls)
+            .field("tls_accept_invalid_certs", &self.tls_accept_invalid_certs)
+            .finish()
+    }
+}
+
+impl FtpEndpoint {
+    pub fn from_config(c: &crate::db::AppConfig) -> Self {
+        Self {
+            host: c.ftp_host.clone(),
+            port: c.ftp_port,
+            user: c.ftp_user.clone(),
+            pass: c.ftp_pass.clone(),
+            tls: c.ftp_tls,
+            tls_accept_invalid_certs: c.ftp_tls_accept_invalid_certs,
+        }
+    }
+}
+
+/// Certificate verifier that accepts any server certificate but still checks
+/// the handshake signatures. Used only when the user explicitly opts in to
+/// self-signed certificates.
+#[derive(Debug)]
+struct AcceptAnyServerCert(Arc<rustls::crypto::CryptoProvider>);
+
+impl rustls::client::danger::ServerCertVerifier for AcceptAnyServerCert {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.0.signature_verification_algorithms)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.0.signature_verification_algorithms)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.0.signature_verification_algorithms.supported_schemes()
+    }
+}
+
+/// Shared rustls configs (one verifying, one permissive). Sharing them keeps
+/// the TLS session cache alive across connections, which servers that require
+/// session reuse on the data channel (vsftpd `require_ssl_reuse`) rely on.
+fn tls_client_config(accept_invalid_certs: bool) -> Result<Arc<rustls::ClientConfig>, String> {
+    static STRICT: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
+    static PERMISSIVE: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
+    let cell = if accept_invalid_certs { &PERMISSIVE } else { &STRICT };
+    if let Some(cfg) = cell.get() {
+        return Ok(cfg.clone());
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()
+        .map_err(|e| format!("TLS: {e}"))?;
+    let cfg = if accept_invalid_certs {
+        builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAnyServerCert(provider)))
+            .with_no_client_auth()
+    } else {
+        let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        builder.with_root_certificates(roots).with_no_client_auth()
+    };
+    Ok(cell.get_or_init(|| Arc::new(cfg)).clone())
+}
+
 /// Reject any value that would be sent on the FTP control channel if it
 /// contains CR, LF or NUL. suppaftp < 10 does not escape these, so a crafted
 /// path, filename or credential could inject extra FTP commands
@@ -130,15 +246,34 @@ pub struct FtpFile {
 
 const MEDIA_EXTENSIONS: &[&str] = &["mkv", "mp4", "avi", "m2ts", "mov", "ts"];
 
-/// Open a fresh authenticated FTP connection.
-async fn connect(host: &str, port: u16, user: &str, pass: &str) -> Result<AsyncFtpStream, String> {
-    reject_control_chars("Usuario FTP", user)?;
-    reject_control_chars("Contraseña FTP", pass)?;
-    let mut ftp = AsyncFtpStream::connect(format!("{host}:{port}"))
+/// Open a TCP connection and, when FTPS is enabled, upgrade it with
+/// `AUTH TLS` before anything sensitive is sent. Does not log in.
+async fn open(ep: &FtpEndpoint) -> Result<FtpConn, String> {
+    reject_control_chars("Usuario FTP", &ep.user)?;
+    reject_control_chars("Contraseña FTP", &ep.pass)?;
+    let host = ep.host.trim();
+    let ftp = FtpConn::connect(format!("{host}:{}", ep.port))
         .await
-        .map_err(|e| clean_ftp_error_redacted(e, pass))?;
-    apply_keepalive(ftp.get_ref());
-    ftp.login(user, pass).await.map_err(|e| clean_ftp_error_redacted(e, pass))?;
+        .map_err(|e| format!("Cannot connect to {host}:{}: {}", ep.port, clean_ftp_error_redacted(e, &ep.pass)))?;
+    apply_keepalive(&*ftp.get_ref().await);
+    if !ep.tls {
+        return Ok(ftp);
+    }
+    let cfg = tls_client_config(ep.tls_accept_invalid_certs)?;
+    let connector = AsyncRustlsConnector::from(tokio_rustls::TlsConnector::from(cfg));
+    // IPv6 literals may arrive bracketed; rustls wants the bare address.
+    let domain = host.trim_start_matches('[').trim_end_matches(']');
+    ftp.into_secure(connector, domain)
+        .await
+        .map_err(|e| format!("FTPS (AUTH TLS) failed: {}", clean_ftp_error_redacted(e, &ep.pass)))
+}
+
+/// Open a fresh authenticated FTP/FTPS connection.
+async fn connect(ep: &FtpEndpoint) -> Result<FtpConn, String> {
+    let mut ftp = open(ep).await?;
+    ftp.login(ep.user.as_str(), ep.pass.as_str())
+        .await
+        .map_err(|e| clean_ftp_error_redacted(e, &ep.pass))?;
     Ok(ftp)
 }
 
@@ -202,6 +337,13 @@ fn parse_entries(raw: &[String], parent_path: &str) -> (Vec<String>, Vec<FtpFile
     (dirs, files)
 }
 
+/// MDTM replies are UTC (RFC 3659); suppaftp hands them back as a civil time.
+fn civil_to_utc(c: jiff::civil::DateTime) -> Option<DateTime<Utc>> {
+    let naive = NaiveDate::from_ymd_opt(c.year() as i32, c.month() as u32, c.day() as u32)?
+        .and_hms_opt(c.hour() as u32, c.minute() as u32, c.second() as u32)?;
+    Some(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
+}
+
 fn normalize_ftp_modified(dt: DateTime<Utc>) -> DateTime<Utc> {
     let now = Utc::now();
     if dt > now + chrono::Duration::days(1) {
@@ -262,37 +404,26 @@ fn parse_windows_list_modified(parts: &[&str]) -> Option<DateTime<Utc>> {
     )))
 }
 
-pub async fn test_connection(
-    host: &str,
-    port: u16,
-    user: &str,
-    pass: &str,
-) -> Result<(), String> {
-    reject_control_chars("Usuario FTP", user)?;
-    reject_control_chars("Contraseña FTP", pass)?;
-    let addr = format!("{host}:{port}");
-    let mut ftp = AsyncFtpStream::connect(&addr)
+pub async fn test_connection(ep: &FtpEndpoint) -> Result<(), String> {
+    // Shown verbatim in the wizard / settings, so translate known failures
+    // (FTPS required, bad certificate, wrong credentials…) into Spanish.
+    let mut ftp = open(ep).await.map_err(|e| humanize_ftp_error(&e))?;
+    ftp.login(ep.user.as_str(), ep.pass.as_str())
         .await
-        .map_err(|e| format!("Cannot connect to {addr}: {}", clean_ftp_error_redacted(e, pass)))?;
-    ftp.login(user, pass)
-        .await
-        .map_err(|e| format!("Login failed: {}", clean_ftp_error_redacted(e, pass)))?;
+        .map_err(|e| humanize_ftp_error(&format!("Login failed: {}", clean_ftp_error_redacted(e, &ep.pass))))?;
     ftp.quit().await.ok();
     Ok(())
 }
 
 /// Delete a single file on the FTP server at `remote_dir/filename`.
 pub async fn delete_file(
-    host: &str,
-    port: u16,
-    user: &str,
-    pass: &str,
+    ep: &FtpEndpoint,
     remote_dir: &str,
     filename: &str,
 ) -> Result<(), String> {
     reject_control_chars("Ruta remota", remote_dir)?;
     reject_control_chars("Nombre de archivo", filename)?;
-    let mut ftp = connect(host, port, user, pass).await?;
+    let mut ftp = connect(ep).await?;
     let full_path = format!("{}/{}", remote_dir.trim_end_matches('/'), filename);
     ftp.rm(&full_path)
         .await
@@ -302,14 +433,11 @@ pub async fn delete_file(
 }
 
 pub async fn list_raw(
-    host: &str,
-    port: u16,
-    user: &str,
-    pass: &str,
+    ep: &FtpEndpoint,
     path: &str,
 ) -> Result<Vec<String>, String> {
     reject_control_chars("Ruta remota", path)?;
-    let mut ftp = connect(host, port, user, pass).await?;
+    let mut ftp = connect(ep).await?;
     ftp.cwd(path).await.map_err(|e| format!("CWD {path}: {e}"))?;
     let entries = ftp.list(None).await.map_err(|e| e.to_string())?;
     ftp.quit().await.ok();
@@ -325,16 +453,13 @@ pub async fn list_raw(
 /// `LIST subdir` as a relative path argument so the server uses its native
 /// path without us re-encoding the accented characters.
 pub async fn list_raw_sub(
-    host: &str,
-    port: u16,
-    user: &str,
-    pass: &str,
+    ep: &FtpEndpoint,
     parent_path: &str,
     subdir: &str,
 ) -> Result<Vec<String>, String> {
     reject_control_chars("Ruta remota", parent_path)?;
     reject_control_chars("Subcarpeta", subdir)?;
-    let mut ftp = connect(host, port, user, pass).await?;
+    let mut ftp = connect(ep).await?;
     ftp.cwd(parent_path).await.map_err(|e| format!("CWD {parent_path}: {e}"))?;
     // Pass subdir as the LIST argument — avoids a second CWD with a potentially
     // broken UTF-8 string derived from a Latin-1 FTP response.
@@ -351,10 +476,7 @@ pub async fn list_raw_sub(
 /// so all N workers stay busy at every depth level.  This gives an O(N× depth)
 /// speed-up on wide server libraries.
 pub async fn list_files(
-    host: &str,
-    port: u16,
-    user: &str,
-    pass: &str,
+    ep: &FtpEndpoint,
     root: &str,
     on_log: Arc<dyn Fn(String) + Send + Sync>,
 ) -> Result<Vec<FtpFile>, String> {
@@ -363,7 +485,7 @@ pub async fn list_files(
 
     // Seed: one shallow scan of root to populate the initial queue.
     on_log(format!("Connected — discovering root entries in {root}"));
-    let mut root_ftp = connect(host, port, user, pass).await?;
+    let mut root_ftp = connect(ep).await?;
     root_ftp.cwd(root).await.map_err(|e| format!("CWD {root}: {e}"))?;
     let root_entries = root_ftp.list(None).await.map_err(|e| e.to_string())?;
     root_ftp.quit().await.ok();
@@ -383,6 +505,9 @@ pub async fn list_files(
     // Number of workers currently holding an item from the queue.
     // When queue is empty AND busy == 0, the crawl is complete.
     let busy = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    // Wakes idle workers when new directories are queued or a busy worker
+    // finishes (instead of polling the queue every few milliseconds).
+    let wake = Arc::new(tokio::sync::Notify::new());
 
     let mut handles = vec![];
 
@@ -390,14 +515,13 @@ pub async fn list_files(
         let queue = queue.clone();
         let all_files = all_files.clone();
         let busy = busy.clone();
+        let wake = wake.clone();
         let log = on_log.clone();
-        let host = host.to_string();
-        let user = user.to_string();
-        let pass = pass.to_string();
+        let ep = ep.clone();
 
         handles.push(tokio::spawn(async move {
             // Each worker opens and reuses its own FTP connection.
-            let mut ftp = match connect(&host, port, &user, &pass).await {
+            let mut ftp = match connect(&ep).await {
                 Ok(f) => f,
                 Err(e) => {
                     log(format!("⚠ Worker failed to connect: {e}"));
@@ -406,6 +530,12 @@ pub async fn list_files(
             };
 
             loop {
+                // Register for a wake-up *before* inspecting the queue so a
+                // notify that lands in between is not lost.
+                let notified = wake.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+
                 // Pop a directory from the queue, incrementing busy *before*
                 // releasing the lock so the "done" check is race-free.
                 let dir = {
@@ -423,24 +553,43 @@ pub async fn list_files(
                         // Queue is empty. If no other worker is busy, all
                         // directories have been processed — we're done.
                         if busy.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                            wake.notify_waiters();
                             break;
                         }
                         // Another worker is still active and may push more dirs.
-                        tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+                        notified.await;
                         continue;
                     }
                 };
 
-                // CWD + LIST this directory.
-                match list_one_dir(&mut ftp, &dir).await {
+                // CWD + LIST this directory. If the control connection died
+                // (server idle timeout, network blip), reconnect once and
+                // retry: otherwise every later directory this worker pops
+                // would fail too and its media would be missing from the scan.
+                let mut listed = list_one_dir(&mut ftp, &dir).await;
+                if let Err(e) = &listed {
+                    if is_transient_ftp_error(e) {
+                        match connect(&ep).await {
+                            Ok(fresh) => {
+                                log(format!("↻ Reconnected after: {e}"));
+                                ftp = fresh;
+                                listed = list_one_dir(&mut ftp, &dir).await;
+                            }
+                            Err(ce) => log(format!("⚠ Reconnect failed: {ce}")),
+                        }
+                    }
+                }
+
+                match listed {
                     Ok((sub_dirs, mut files)) => {
                         // MDTM fallback for files whose date LIST couldn't parse.
                         // We're still CWD'd in `dir` so filename-only MDTM works.
                         for file in &mut files {
                             if file.modified_at.is_none() {
-                                if let Ok(naive) = ftp.mdtm(&file.filename).await {
-                                    let dt = DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc);
-                                    file.modified_at = Some(normalize_ftp_modified(dt).to_rfc3339());
+                                if let Ok(civil) = ftp.mdtm(&file.filename).await {
+                                    if let Some(dt) = civil_to_utc(civil) {
+                                        file.modified_at = Some(normalize_ftp_modified(dt).to_rfc3339());
+                                    }
                                 }
                             }
                         }
@@ -463,6 +612,7 @@ pub async fn list_files(
                 }
 
                 busy.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                wake.notify_waiters();
             }
 
             ftp.quit().await.ok();
@@ -487,7 +637,7 @@ pub async fn list_files(
 
 /// CWD into `path` then LIST it, returning (subdirectories, media files).
 async fn list_one_dir(
-    ftp: &mut AsyncFtpStream,
+    ftp: &mut FtpConn,
     path: &str,
 ) -> Result<(Vec<String>, Vec<FtpFile>), String> {
     ftp.cwd(path).await.map_err(|e| format!("CWD {path}: {e}"))?;
@@ -496,16 +646,13 @@ async fn list_one_dir(
 }
 
 pub async fn download_file(
-    host: &str,
-    port: u16,
-    user: &str,
-    pass: &str,
+    ep: &FtpEndpoint,
     remote_path: &str,
     local_path: &str,
     on_progress: impl Fn(u64, u64) -> bool,
 ) -> Result<(), String> {
     reject_control_chars("Ruta remota", remote_path)?;
-    let mut ftp = connect(host, port, user, pass).await?;
+    let mut ftp = connect(ep).await?;
     ftp.transfer_type(FileType::Binary)
         .await
         .map_err(|e| e.to_string())?;
@@ -531,11 +678,10 @@ pub async fn download_file(
         }
     }
 
-    let mut reader = Box::pin(
-        ftp.retr_as_stream(remote_path)
-            .await
-            .map_err(|e| e.to_string())?,
-    );
+    let mut reader = ftp
+        .retr_as_stream(remote_path)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut file = if existing_size > 0 {
         tokio::fs::OpenOptions::new()
             .create(true)
@@ -573,7 +719,14 @@ pub async fn download_file(
         }
     }
 
-    drop(reader);
+    // Close the data channel and read the 226 reply. A dropped (cancelled)
+    // stream defers that reply; quit() consumes it.
+    let finish_err = if cancelled {
+        drop(reader);
+        None
+    } else {
+        reader.finish().await.err().map(clean_ftp_error)
+    };
     ftp.quit().await.ok();
 
     if cancelled {
@@ -591,6 +744,12 @@ pub async fn download_file(
             downloaded, size
         ));
     }
+    // Without a SIZE reply the server's completion code is the only signal.
+    if size == 0 {
+        if let Some(e) = finish_err {
+            return Err(format!("Download failed: {e}"));
+        }
+    }
 
     Ok(())
 }
@@ -601,10 +760,7 @@ pub async fn download_file(
 /// `on_progress(bytes_done, bytes_total)` is called periodically; returning
 /// `false` cancels the transfer.
 pub async fn upload_file(
-    host: &str,
-    port: u16,
-    user: &str,
-    pass: &str,
+    ep: &FtpEndpoint,
     remote_dir: &str,
     filename: &str,
     local_path: &str,
@@ -617,7 +773,7 @@ pub async fn upload_file(
         .map(|m| m.len())
         .unwrap_or(0);
 
-    let mut ftp = connect(host, port, user, pass).await?;
+    let mut ftp = connect(ep).await?;
     ftp.transfer_type(FileType::Binary).await.map_err(|e| clean_ftp_error(e))?;
 
     // Ensure remote directory exists (create each segment, ignore "already exists").
@@ -642,13 +798,10 @@ pub async fn upload_file(
 
     // Disable Nagle's algorithm so each chunk goes out immediately without
     // waiting to coalesce with the next write.
-    data_stream.get_ref().set_nodelay(true).ok();
+    data_stream.get_ref().get_ref().set_nodelay(true).ok();
     // Keepalive on the data stream — long uploads of large files can otherwise
     // exceed the server's idle timeout on the data channel.
-    apply_keepalive(data_stream.get_ref());
-
-    use futures::io::AsyncWriteExt;
-    use tokio::io::AsyncReadExt;
+    apply_keepalive(data_stream.get_ref().get_ref());
 
     // Double-buffer: while writing chunk N to the socket, read chunk N+1 from
     // disk in parallel.  This keeps both I/O paths busy and avoids idle time.
@@ -689,13 +842,14 @@ pub async fn upload_file(
     }
 
     if cancelled {
-        drop(data_stream);
+        ftp.abort(data_stream).await.ok();
         ftp.quit().await.ok();
         return Err("Cancelled".to_string());
     }
 
     // Flush the data stream and wait for the server's 226 Transfer complete.
-    ftp.finalize_put_stream(data_stream)
+    data_stream
+        .finish()
         .await
         .map_err(|e| format!("Upload failed for {remote_full}: {}", clean_ftp_error(e)))?;
 
@@ -706,7 +860,7 @@ pub async fn upload_file(
 /// Recursively ensure that all segments of `path` exist on the FTP server.
 /// Ignores "550 directory already exists" type errors (FTP 550 is also returned
 /// for other errors, so we attempt MKD and continue regardless).
-async fn ensure_remote_dir(ftp: &mut AsyncFtpStream, path: &str) -> Result<(), String> {
+async fn ensure_remote_dir(ftp: &mut FtpConn, path: &str) -> Result<(), String> {
     let mut current = String::new();
     for segment in path.split('/') {
         if segment.is_empty() {
@@ -727,14 +881,11 @@ async fn ensure_remote_dir(ftp: &mut AsyncFtpStream, path: &str) -> Result<(), S
 /// Test whether the FTP user has write permission by attempting to create
 /// and immediately remove a temporary directory.
 pub async fn check_write_permission(
-    host: &str,
-    port: u16,
-    user: &str,
-    pass: &str,
+    ep: &FtpEndpoint,
     root: &str,
 ) -> Result<bool, String> {
     reject_control_chars("Ruta raíz", root)?;
-    let mut ftp = connect(host, port, user, pass).await?;
+    let mut ftp = connect(ep).await?;
     let test_dir = format!("{root}/.oscata-write-test");
     let writable = ftp.mkdir(&test_dir).await.is_ok();
     if writable {
@@ -747,6 +898,14 @@ pub async fn check_write_permission(
 #[cfg(test)]
 mod control_char_tests {
     use super::*;
+
+    #[test]
+    fn humanizes_ftps_errors() {
+        assert!(humanize_ftp_error("Login failed: Invalid response: [530] 530 Non-anonymous sessions must use encryption.").contains("exige FTPS"));
+        assert!(humanize_ftp_error("FTPS (AUTH TLS) failed: Secure error: invalid peer certificate: UnknownIssuer").contains("autofirmado"));
+        assert!(humanize_ftp_error("FTPS (AUTH TLS) failed: Invalid response: [530] 530 Please login with USER and PASS.").contains("no admite FTPS"));
+        assert!(humanize_ftp_error("Login failed: [530] Login incorrect.").contains("Credenciales"));
+    }
 
     #[test]
     fn rejects_crlf_and_nul() {

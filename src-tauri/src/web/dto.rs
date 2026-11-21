@@ -219,6 +219,10 @@ pub struct TestFtpRequest {
     pub port: u16,
     pub user: String,
     pub pass: String,
+    #[serde(default)]
+    pub tls: bool,
+    #[serde(default)]
+    pub tls_accept_invalid_certs: bool,
 }
 
 #[derive(Debug, Deserialize)]

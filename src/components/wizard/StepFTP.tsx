@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import AppIcon from "../AppIcon";
+import FtpTlsFields from "../FtpTlsFields";
 import type { AppLanguage } from "../../utils/mediaLanguage";
 import { t } from "../../utils/i18n";
 
@@ -109,6 +110,8 @@ export default function StepFTP({
         port: form.ftp_port,
         user: form.ftp_user,
         pass: form.ftp_pass,
+        tls: Boolean(form.ftp_tls),
+        tlsAcceptInvalidCerts: Boolean(form.ftp_tls_accept_invalid_certs),
       });
       setStatus("ok");
     } catch (e: any) {
@@ -186,6 +189,20 @@ export default function StepFTP({
               {t(language, "settings.ftpDescription")}
             </span>
           </div>
+
+          <FtpTlsFields
+            language={language}
+            value={{
+              ftp_tls: Boolean(form.ftp_tls),
+              ftp_tls_accept_invalid_certs: Boolean(
+                form.ftp_tls_accept_invalid_certs,
+              ),
+            }}
+            onChange={(next) => {
+              setStatus("idle");
+              setForm((f: any) => ({ ...f, ...next }));
+            }}
+          />
         </div>
       </section>
 

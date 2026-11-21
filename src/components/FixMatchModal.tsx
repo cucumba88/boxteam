@@ -501,6 +501,8 @@ export default function FixMatchModal({
                   >
                     {posterPath ? (
                       <img
+                        loading="lazy"
+                        decoding="async"
                         src={`${TMDB_IMG}${posterPath}`}
                         alt={title}
                         style={{
