@@ -194,6 +194,12 @@ pub struct MediaItem {
     pub ratings_fetched_at: Option<String>,
 }
 
+/// `app_config` keys that survive a factory reset (and don't count as setup).
+/// Static SQL: no user input is interpolated.
+const PRESERVED_ON_FACTORY_RESET_SQL: &str =
+    "key IN ('bootstrap_complete', 'last_app_version', 'last_update_backup_path') \
+     OR key LIKE 'webgui\\_%' ESCAPE '\\'";
+
 #[derive(Clone)]
 pub struct Db {
     conn: Arc<Mutex<Connection>>,
@@ -2329,11 +2335,69 @@ impl Db {
     }
 
     pub fn has_config(&self) -> Result<bool, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        // Only count real setup keys: bookkeeping values (last_indexed_at,
+        // bootstrap_complete, …) and the web-GUI block survive a factory
+        // reset and must not make the app look configured.
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM app_config", [], |r| r.get(0))
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM app_config
+                     WHERE key != 'last_indexed_at' AND NOT ({PRESERVED_ON_FACTORY_RESET_SQL})"
+                ),
+                [],
+                |r| r.get(0),
+            )
             .map_err(|e| e.to_string())?;
         Ok(count >= 6)
+    }
+
+    /// "Reiniciar biblioteca": forget every indexed file (and its TMDB match)
+    /// so the next index re-parses the whole FTP from scratch. Settings, the
+    /// watchlist, quality profiles and web users are kept. Returns the number
+    /// of library rows removed.
+    pub fn reset_library(&self) -> Result<usize, String> {
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let removed = tx
+            .execute("DELETE FROM media_items", [])
+            .map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM app_config WHERE key = 'last_indexed_at'", [])
+            .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(removed)
+    }
+
+    /// "Restablecer de fábrica": wipe the library and every setting so the app
+    /// starts at the setup wizard again.
+    ///
+    /// Deliberately KEPT (see docs/SECURITY.md §9):
+    /// - `web_users` / sessions / invites — wiping them would reopen the
+    ///   first-admin bootstrap on a public web install and lock out the admin.
+    /// - `bootstrap_complete` — the one-way bootstrap flag.
+    /// - `webgui_*` — so a Docker/web install stays reachable after the reset.
+    /// - `last_app_version` — drives the version-transition backup logic.
+    pub fn factory_reset(&self) -> Result<(), String> {
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        for table in [
+            "media_items",
+            "watchlist",
+            "watchlist_grabbed",
+            "quality_profiles",
+            "telegram_subscriptions",
+            "telegram_verify_tokens",
+        ] {
+            tx.execute(&format!("DELETE FROM {table}"), [])
+                .map_err(|e| format!("factory reset: {table}: {e}"))?;
+        }
+        tx.execute(
+            &format!("DELETE FROM app_config WHERE NOT ({PRESERVED_ON_FACTORY_RESET_SQL})"),
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     pub fn clear_app_config(&self) -> Result<(), String> {
@@ -3470,6 +3534,63 @@ mod tests {
             release_type: None,
             release_group: None,
         }
+    }
+
+    // ── Reset library / factory reset ──────────────────────────────────────
+
+    fn seed_for_reset(db: &Db) {
+        for key in [
+            "ftp_host", "ftp_port", "ftp_user", "ftp_pass", "ftp_root", "tmdb_api_key",
+            "default_language",
+        ] {
+            db.save_app_value(key, "x").expect("save config");
+        }
+        db.save_app_value("bootstrap_complete", "1").expect("save flag");
+        db.save_app_value("webgui_enabled", "true").expect("save webgui");
+        db.save_app_value("last_app_version", "0.16.0").expect("save version");
+        db.save_last_indexed_at("2026-01-01T00:00:00Z").expect("save last indexed");
+        db.upsert_media("/Peliculas/A.mkv", "A.mkv", Some(1), &parsed("A"), Some("movie"), None, "/")
+            .expect("insert a");
+        db.upsert_media("/Series/B.S01E01.mkv", "B.S01E01.mkv", Some(1), &parsed("B"), Some("tv"), None, "/")
+            .expect("insert b");
+    }
+
+    #[test]
+    fn reset_library_removes_media_but_keeps_settings() {
+        let db = in_memory_db();
+        seed_for_reset(&db);
+        assert_eq!(db.reset_library().expect("reset"), 2);
+        assert_eq!(db.count_media_items().expect("count"), 0);
+        assert!(db.has_config().expect("has_config"), "settings must survive");
+        assert_eq!(db.load_last_indexed_at().expect("load"), None);
+    }
+
+    #[test]
+    fn factory_reset_returns_to_wizard_but_keeps_web_access() {
+        let db = in_memory_db();
+        seed_for_reset(&db);
+        assert!(db.has_config().expect("has_config"));
+        db.factory_reset().expect("factory reset");
+        assert_eq!(db.count_media_items().expect("count"), 0);
+        assert!(!db.has_config().expect("has_config"), "wizard must show again");
+        assert_eq!(db.load_app_value("bootstrap_complete").ok().flatten().as_deref(), Some("1"));
+        assert_eq!(db.load_app_value("webgui_enabled").ok().flatten().as_deref(), Some("true"));
+        assert_eq!(db.load_app_value("last_app_version").ok().flatten().as_deref(), Some("0.16.0"));
+        assert_eq!(db.load_app_value("ftp_host").ok().flatten(), None);
+        assert_eq!(db.load_last_indexed_at().expect("load"), None);
+    }
+
+    #[test]
+    fn has_config_ignores_webgui_and_bookkeeping_keys() {
+        let db = in_memory_db();
+        for key in [
+            "webgui_enabled", "webgui_port", "webgui_host", "webgui_app_url",
+            "webgui_smtp_host", "webgui_smtp_port", "bootstrap_complete", "last_app_version",
+        ] {
+            db.save_app_value(key, "x").expect("save");
+        }
+        db.save_last_indexed_at("2026-01-01T00:00:00Z").expect("save");
+        assert!(!db.has_config().expect("has_config"));
     }
 
     // ── folder_types: saved config is authoritative ────────────────────────

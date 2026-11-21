@@ -385,6 +385,7 @@ export default function Library({
     appendLog,
     clearLog,
     initialLoading,
+    resetItems,
   } = useIndexing();
 
   // Drive the brand-mark animation from a body data-attribute so both the
@@ -2658,6 +2659,11 @@ export default function Library({
             <Settings
               language={language}
               onClose={() => setShowSettings(false)}
+              onLibraryReset={() => {
+                resetItems();
+                setShowSettings(false);
+                call("start_indexing").catch(console.error);
+              }}
             />
           </Suspense>
         )}

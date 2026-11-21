@@ -450,5 +450,11 @@ export function useIndexing() {
     log,
     appendLog: addLog,
     clearLog: () => setLog([]),
+    /** Empty the in-memory library after a server-side library reset. */
+    resetItems: () => {
+      setItems([]);
+      rebuildIndex([]);
+      setCompletionSummary(null);
+    },
   };
 }

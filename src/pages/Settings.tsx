@@ -41,6 +41,7 @@ import {
 } from "../utils/userPrefs";
 import { SORT_OPTIONS } from "../components/FilterBar";
 import FtpTlsFields from "../components/FtpTlsFields";
+import DangerZone from "../features/reset/DangerZone";
 import FtpPermissionsPanel, {
   FTP_CONFIG_SAVED_EVENT,
 } from "../components/FtpPermissionsPanel";
@@ -176,6 +177,29 @@ const ghostBtn: React.CSSProperties = {
 const primaryBtn: React.CSSProperties = {
   ...ghostBtn,
   border: "none",
+  background: "var(--color-primary)",
+  color: "#fff",
+};
+
+const footerBtnBase: React.CSSProperties = {
+  ...ghostBtn,
+  minHeight: 40,
+  justifyContent: "center",
+  whiteSpace: "nowrap",
+  transition: "background 0.15s ease, border-color 0.15s ease",
+};
+
+const footerSecondaryBtn: React.CSSProperties = {
+  ...footerBtnBase,
+  border:
+    "1px solid color-mix(in srgb, var(--color-primary) 55%, var(--color-border))",
+  background: "color-mix(in srgb, var(--color-primary) 10%, transparent)",
+  color: "var(--color-text)",
+};
+
+const footerPrimaryBtn: React.CSSProperties = {
+  ...footerBtnBase,
+  border: "1px solid var(--color-primary)",
   background: "var(--color-primary)",
   color: "#fff",
 };
@@ -732,9 +756,12 @@ function QualityProfilesSection({ language }: { language: AppLanguage }) {
 export default function Settings({
   language,
   onClose,
+  onLibraryReset,
 }: {
   language: AppLanguage;
   onClose: () => void;
+  /** Library wiped from the danger zone: clear the grid and re-index. */
+  onLibraryReset?: () => void;
 }) {
   const { theme, setTheme } = useTheme();
   const { user } = useAuth();
@@ -4211,6 +4238,10 @@ export default function Settings({
                 )}
               </div>
             </SectionCard>
+
+            {(isTauri() || (user && user.role === "admin")) && (
+              <DangerZone language={language} onLibraryReset={onLibraryReset} />
+            )}
           </div>
         </div>
       </div>
@@ -4258,11 +4289,18 @@ export default function Settings({
                 {t(language, "common.cancel")}
               </button>
             )}
+            {/* One primary action (violet) and a quieter secondary one, both
+                centred and single-line; on mobile "Guardar" sizes to its
+                label and the main action takes the remaining width. */}
             <button
               onClick={saveConfig}
               disabled={saving}
-              style={{ ...primaryBtn, flex: isMobile ? 1 : undefined }}
+              style={{
+                ...footerSecondaryBtn,
+                flex: isMobile ? "0 0 auto" : undefined,
+              }}
             >
+              <AppIcon name="check" size={15} />
               {saved
                 ? t(language, "common.saved")
                 : saving
@@ -4273,9 +4311,8 @@ export default function Settings({
               onClick={saveAndReindex}
               disabled={saving}
               style={{
-                ...successBtn,
-                flex: isMobile ? 1 : undefined,
-                justifyContent: "center",
+                ...footerPrimaryBtn,
+                flex: isMobile ? "1 1 auto" : undefined,
               }}
             >
               <AppIcon name="refresh" size={15} />

@@ -1464,11 +1464,17 @@ pub async fn start_indexing(
     queue_state: tauri::State<'_, crate::downloads::SharedQueue>,
     window: WebviewWindow,
 ) -> Result<(), String> {
-    start_indexing_internal(
+    use std::sync::atomic::Ordering;
+    // Shared with the web handler and the reset commands so a reset can't
+    // wipe the table under a running index pass.
+    crate::INDEXING_RUNNING.store(true, Ordering::SeqCst);
+    let result = start_indexing_internal(
         state.inner().clone(),
         Some(window.clone()),
         Some(queue_state.inner().clone()),
-    ).await
+    ).await;
+    crate::INDEXING_RUNNING.store(false, Ordering::SeqCst);
+    result
 }
 
 #[tauri::command]
@@ -2260,6 +2266,30 @@ pub async fn clear_show_metadata(
     tmdb_id: i64,
 ) -> Result<usize, String> {
     state.clear_show_metadata(tmdb_id)
+}
+
+/// Refuse destructive resets while an index pass is writing to the library.
+pub(crate) fn ensure_not_indexing() -> Result<(), String> {
+    if crate::INDEXING_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("Hay una indexación en curso. Espera a que termine e inténtalo de nuevo.".to_string());
+    }
+    Ok(())
+}
+
+/// Delete every indexed file so the next index re-parses the FTP from scratch.
+/// Settings are kept. Returns the number of removed items.
+#[tauri::command]
+pub async fn reset_library(state: tauri::State<'_, crate::db::Db>) -> Result<usize, String> {
+    ensure_not_indexing()?;
+    state.reset_library()
+}
+
+/// Wipe library + settings and go back to the setup wizard. Web users and
+/// the web-GUI block are kept (see `Db::factory_reset`).
+#[tauri::command]
+pub async fn factory_reset(state: tauri::State<'_, crate::db::Db>) -> Result<(), String> {
+    ensure_not_indexing()?;
+    state.factory_reset()
 }
 
 #[tauri::command]

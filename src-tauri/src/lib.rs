@@ -164,6 +164,8 @@ pub fn run() {
             commands::clear_item_metadata,
             commands::clear_show_metadata,
             commands::clear_all_metadata,
+            commands::reset_library,
+            commands::factory_reset,
             commands::refresh_all_metadata,
             commands::refresh_watch_providers,
             commands::check_media_badges,

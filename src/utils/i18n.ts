@@ -1332,6 +1332,79 @@ const messages = {
   "telegram.testing": { es: "Probando…", en: "Testing…" },
   "telegram.ok": { es: "Mensaje enviado", en: "Message sent" },
   "telegram.error": { es: "Error al enviar", en: "Send failed" },
+
+  "reset.sectionTitle": { es: "Zona de peligro", en: "Danger zone" },
+  "reset.sectionDescription": {
+    es: "Acciones que borran datos de Oscata. Los archivos del FTP nunca se tocan.",
+    en: "Actions that delete Oscata data. Files on the FTP are never touched.",
+  },
+  "reset.libraryTitle": { es: "Reiniciar biblioteca", en: "Reset library" },
+  "reset.libraryDescription": {
+    es: "Borra el índice y los emparejamientos con TMDB y vuelve a indexar el FTP desde cero. Útil tras mejorar la detección de series y películas.",
+    en: "Deletes the index and TMDB matches and re-indexes the FTP from scratch. Useful after detection improvements.",
+  },
+  "reset.libraryButton": { es: "Reiniciar biblioteca", en: "Reset library" },
+  "reset.libraryConfirmTitle": {
+    es: "¿Reiniciar la biblioteca?",
+    en: "Reset the library?",
+  },
+  "reset.libraryConfirmDescription": {
+    es: "Se volverá a indexar todo el FTP. Según el tamaño de tu biblioteca puede tardar un rato.",
+    en: "The whole FTP will be indexed again. Depending on your library size this can take a while.",
+  },
+  "reset.factoryTitle": { es: "Restablecer de fábrica", en: "Factory reset" },
+  "reset.factoryDescription": {
+    es: "Borra la biblioteca y toda la configuración y vuelve al asistente inicial.",
+    en: "Deletes the library and every setting and goes back to the setup wizard.",
+  },
+  "reset.factoryButton": { es: "Restablecer de fábrica", en: "Factory reset" },
+  "reset.factoryConfirmTitle": {
+    es: "¿Restablecer Oscata de fábrica?",
+    en: "Factory reset Oscata?",
+  },
+  "reset.factoryConfirmDescription": {
+    es: "No se puede deshacer. Si quieres conservar algo, exporta antes una copia de seguridad.",
+    en: "This can't be undone. Export a backup first if you want to keep anything.",
+  },
+  "reset.factoryPhrase": { es: "BORRAR", en: "DELETE" },
+  "reset.factoryPhrasePrompt": {
+    es: "Escribe {phrase} para confirmar",
+    en: "Type {phrase} to confirm",
+  },
+  "reset.removesIndex": {
+    es: "Todos los elementos indexados",
+    en: "Every indexed item",
+  },
+  "reset.removesMatches": {
+    es: "Los emparejamientos con TMDB, también los corregidos a mano",
+    en: "TMDB matches, including manual fixes",
+  },
+  "reset.removesSettings": {
+    es: "La configuración: FTP, claves de API, carpetas y servidores",
+    en: "Settings: FTP, API keys, folders and servers",
+  },
+  "reset.removesWatchlist": {
+    es: "La lista de seguimiento, los perfiles de calidad y los avisos de Telegram",
+    en: "Watchlist, quality profiles and Telegram alerts",
+  },
+  "reset.keepsSettings": { es: "Tu configuración", en: "Your settings" },
+  "reset.keepsWatchlist": {
+    es: "La lista de seguimiento y los perfiles de calidad",
+    en: "Watchlist and quality profiles",
+  },
+  "reset.keepsFtpFiles": {
+    es: "Los archivos del FTP y tus descargas",
+    en: "Files on the FTP and your downloads",
+  },
+  "reset.keepsWebUsers": {
+    es: "Los usuarios web, para que no pierdas el acceso",
+    en: "Web users, so you don't lose access",
+  },
+  "reset.keepsWebAccess": {
+    es: "La configuración de la interfaz web",
+    en: "Web interface settings",
+  },
+  "reset.working": { es: "Borrando…", en: "Deleting…" },
 } as const;
 
 export function t(

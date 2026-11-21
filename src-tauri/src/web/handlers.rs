@@ -522,6 +522,27 @@ pub async fn clear_all_metadata_handler(
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
+/// Admin only: forget the whole library so the next index re-parses it.
+pub async fn reset_library_handler(
+    AdminUser(_admin): AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Value>> {
+    crate::commands::ensure_not_indexing().map_err(|e| ApiError::bad_request(e))?;
+    let removed = state.db.reset_library().map_err(ApiError::from)?;
+    Ok(Json(serde_json::json!({"ok": true, "removed": removed})))
+}
+
+/// Admin only: wipe library + settings. Web users, the bootstrap flag and the
+/// web-GUI config survive, so the admin keeps access (docs/SECURITY.md §9).
+pub async fn factory_reset_handler(
+    AdminUser(_admin): AdminUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Value>> {
+    crate::commands::ensure_not_indexing().map_err(|e| ApiError::bad_request(e))?;
+    state.db.factory_reset().map_err(ApiError::from)?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
 // ── Downloads ────────────────────────────────────────────────────────────────
 
 pub async fn get_downloads(

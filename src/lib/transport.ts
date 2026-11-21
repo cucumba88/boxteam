@@ -70,6 +70,8 @@ const WEB_ROUTES: Record<
   refresh_watch_providers: ["POST", "/indexing/refresh-watch-providers"],
   clear_item_metadata: (a) => ["DELETE", `/media/${a.id}/metadata`],
   clear_all_metadata: ["POST", "/media/clear-all-metadata"],
+  reset_library: ["POST", "/maintenance/reset-library"],
+  factory_reset: ["POST", "/maintenance/factory-reset"],
   check_media_badges: (a) => ["POST", "/media/badges", { items: a.items }],
   apply_tmdb_match: (a) => [
     "PUT",

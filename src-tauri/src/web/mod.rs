@@ -145,6 +145,8 @@ fn build_router(state: AppState) -> Router {
         .route("/media/{id}/match",        put(handlers::apply_tmdb_match))
         .route("/media/{id}/metadata",     delete(handlers::clear_item_metadata_handler))
         .route("/media/clear-all-metadata",post(handlers::clear_all_metadata_handler))
+        .route("/maintenance/reset-library", post(handlers::reset_library_handler))
+        .route("/maintenance/factory-reset", post(handlers::factory_reset_handler))
         .route("/downloads",               get(handlers::get_downloads).post(handlers::queue_download))
         .route("/downloads/clear-completed", post(handlers::clear_completed_handler))
         .route("/downloads/concurrency",   put(handlers::set_concurrency_handler))
