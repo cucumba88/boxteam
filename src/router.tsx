@@ -9,7 +9,7 @@ import { prefetchMedia } from "./lib/mediaCache";
 import { AuthProvider, useAuth } from "./lib/AuthContext";
 import { apiBase } from "./lib/transport";
 import ThemeToggle from "./components/ThemeToggle";
-import oscataMark from "./assets/brand/oscata-mark.svg";
+import boxteamMark from "./assets/brand/boxteam-mark.svg";
 const AccountModal = lazy(() => import("./components/AccountModal"));
 
 // Code-split rarely-mounted routes. None of these are hit on the hot path
@@ -521,7 +521,7 @@ function LoadingScreen() {
     >
       {/* Spinning notched-O mark — the notch acts as the loading head */}
       <img
-        src={oscataMark}
+        src={boxteamMark}
         alt=""
         aria-hidden="true"
         width={64}
@@ -540,7 +540,7 @@ function LoadingScreen() {
           userSelect: "none",
         }}
       >
-        Oscata
+        BoxTeam
       </div>
     </div>
   );

@@ -1106,12 +1106,12 @@ pub async fn send_otp_email(cfg: &crate::db::WebGuiConfig, to: &str, code: &str)
     let to_addr: Mailbox = to.parse().map_err(|e: lettre::address::AddressError| e.to_string())?;
 
     let subject = if code == "TEST-123456" {
-        "Oscata – SMTP test email".to_string()
+        "BoxTeam – SMTP test email".to_string()
     } else {
-        "Oscata – Your login code".to_string()
+        "BoxTeam – Your login code".to_string()
     };
     let body = if code == "TEST-123456" {
-        "This is a test email from Oscata. Your SMTP configuration is working correctly.".to_string()
+        "This is a test email from BoxTeam. Your SMTP configuration is working correctly.".to_string()
     } else {
         format!("Your one-time login code is: {code}\n\nThis code expires in 5 minutes.\nIf you did not request this, ignore this email.")
     };
@@ -1180,7 +1180,7 @@ pub async fn link_telegram_bot_handler(
         .upsert_telegram_sub(user.id, &body.bot_token, &chat_id, true, true)
         .map_err(ApiError::from)?;
 
-    let welcome = "✅ <b>Oscata</b> — Tu bot está vinculado correctamente.\n\nA partir de ahora recibirás avisos personales aquí.";
+    let welcome = "✅ <b>BoxTeam</b> — Tu bot está vinculado correctamente.\n\nA partir de ahora recibirás avisos personales aquí.";
     crate::telegram::send_message(&body.bot_token, &chat_id, welcome)
         .await
         .ok();

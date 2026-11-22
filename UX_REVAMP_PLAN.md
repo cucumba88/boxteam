@@ -1,4 +1,4 @@
-# Oscata — UX/UI Revamp Plan
+# BoxTeam — UX/UI Revamp Plan
 
 Author: independent UX audit, 2026-05-17
 Scope: every screen the user touches today. Not a one-shot rewrite — a sequenced plan with clear "ship in one PR" units.

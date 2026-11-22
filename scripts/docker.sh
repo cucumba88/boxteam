@@ -31,8 +31,8 @@ load_env_file() {
 
 load_env_file "$ENV_FILE"
 
-IMAGE_NAME="${IMAGE_NAME:-oscata:local}"
-CONTAINER_NAME="${CONTAINER_NAME:-oscata}"
+IMAGE_NAME="${IMAGE_NAME:-boxteam:local}"
+CONTAINER_NAME="${CONTAINER_NAME:-boxteam}"
 CONFIG_DIR="${CONFIG_DIR:-${REPO_ROOT}/.docker-data/config}"
 DOWNLOADS_DIR="${DOWNLOADS_DIR:-${REPO_ROOT}/.docker-data/downloads}"
 WEBGUI_HOST_PORT="${WEBGUI_HOST_PORT:-${WEBGUI_PORT:-47860}}"
@@ -69,14 +69,14 @@ ensure_dirs() {
 
 build_image() {
   require_docker
-  echo "[oscata-docker] construyendo imagen ${IMAGE_NAME}"
+  echo "[boxteam-docker] construyendo imagen ${IMAGE_NAME}"
   local extra_args=()
   # Pull registry cache only when REGISTRY_CACHE is explicitly set
   # (e.g. on CI or when logged in to ghcr.io). Omitting it avoids a noisy
   # "ERROR importing cache manifest" warning on self-hosted servers.
   if [[ -n "${REGISTRY_CACHE:-}" ]]; then
     extra_args+=(--cache-from "type=registry,ref=${REGISTRY_CACHE}")
-    echo "[oscata-docker] usando caché de registro: ${REGISTRY_CACHE}"
+    echo "[boxteam-docker] usando caché de registro: ${REGISTRY_CACHE}"
   fi
   docker buildx build \
     --load \
@@ -91,22 +91,22 @@ run_container() {
   ensure_dirs
 
   if docker ps -a --format '{{.Names}}' | grep -Fxq "$CONTAINER_NAME"; then
-    echo "[oscata-docker] eliminando contenedor existente ${CONTAINER_NAME}"
+    echo "[boxteam-docker] eliminando contenedor existente ${CONTAINER_NAME}"
     docker rm -f "$CONTAINER_NAME" >/dev/null
   fi
 
-  echo "[oscata-docker] arrancando contenedor ${CONTAINER_NAME}"
+  echo "[boxteam-docker] arrancando contenedor ${CONTAINER_NAME}"
   docker run -d \
     --name "$CONTAINER_NAME" \
     --restart unless-stopped \
     -p "${WEBGUI_HOST_PORT}:${WEBGUI_CONTAINER_PORT}" \
-    -e "OSCATA_WEBGUI_PORT=${WEBGUI_CONTAINER_PORT}" \
-    -e "OSCATA_WEBGUI_EXPOSED_PORT=${WEBGUI_HOST_PORT}" \
+    -e "BOXTEAM_WEBGUI_PORT=${WEBGUI_CONTAINER_PORT}" \
+    -e "BOXTEAM_WEBGUI_EXPOSED_PORT=${WEBGUI_HOST_PORT}" \
     -v "${CONFIG_DIR}:/config" \
     -v "${DOWNLOADS_DIR}:/downloads" \
     "$IMAGE_NAME"
 
-  echo "[oscata-docker] contenedor arrancado"
+  echo "[boxteam-docker] contenedor arrancado"
   echo "  Web UI → http://localhost:${WEBGUI_HOST_PORT}"
   echo "  Config → ${CONFIG_DIR}"
   echo "  Descargas → ${DOWNLOADS_DIR}"
@@ -115,10 +115,10 @@ run_container() {
 stop_container() {
   require_docker
   if docker ps -a --format '{{.Names}}' | grep -Fxq "$CONTAINER_NAME"; then
-    echo "[oscata-docker] deteniendo ${CONTAINER_NAME}"
+    echo "[boxteam-docker] deteniendo ${CONTAINER_NAME}"
     docker rm -f "$CONTAINER_NAME"
   else
-    echo "[oscata-docker] el contenedor ${CONTAINER_NAME} no existe"
+    echo "[boxteam-docker] el contenedor ${CONTAINER_NAME} no existe"
   fi
 }
 

@@ -1,4 +1,4 @@
-# Oscata – Copilot Agent Guidelines
+# BoxTeam – Copilot Agent Guidelines
 
 > These instructions apply to all AI-assisted work on this repository.
 > Follow them consistently to keep the codebase coherent, maintainable, and scalable.
@@ -11,14 +11,14 @@ All user-facing text written by Copilot — changelog entries, UI strings, error
 
 ## Project Overview
 
-**Oscata** is a Tauri 2.x desktop application (React + Rust) that:
+**BoxTeam** is a Tauri 2.x desktop application (React + Rust) that:
 
 - Connects to an FTP server and indexes media files
 - Enriches metadata via TMDB
 - Presents a dark media-library UI (movies, TV shows, documentaries)
 - Manages a download queue with concurrent transfer support
 
-**Oscata also ships as a web application** (Docker / self-hosted). The same React frontend runs in a browser via a Rust HTTP server. Both surfaces share the same codebase. Use `isTauri()` from `src/lib/transport.ts` to gate Tauri-only features (file pickers, `invoke`, native dialogs). All UI features that don't depend on native OS access **must work in both modes**.
+**BoxTeam also ships as a web application** (Docker / self-hosted). The same React frontend runs in a browser via a Rust HTTP server. Both surfaces share the same codebase. Use `isTauri()` from `src/lib/transport.ts` to gate Tauri-only features (file pickers, `invoke`, native dialogs). All UI features that don't depend on native OS access **must work in both modes**.
 
 **Stack:**
 
@@ -383,7 +383,7 @@ When adding a new feature, work through these in order:
 
 ## Web / Desktop Feature Parity
 
-Oscata runs as both a Tauri desktop app and a browser-based web app. **Every UI feature must work in both surfaces** unless it explicitly requires native OS access (file pickers, native dialogs, direct `invoke` calls).
+BoxTeam runs as both a Tauri desktop app and a browser-based web app. **Every UI feature must work in both surfaces** unless it explicitly requires native OS access (file pickers, native dialogs, direct `invoke` calls).
 
 ### Rules
 

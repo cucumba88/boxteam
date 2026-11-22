@@ -18,10 +18,10 @@ done
 
 cd "$(dirname "$0")/.."
 VERSION=$(node -p "require('./package.json').version")
-ZIP="oscata-windows-portable-${VERSION}.zip"
+ZIP="boxteam-windows-portable-${VERSION}.zip"
 REL="src-tauri/target/${TARGET}/release"
 
-[ -f "$REL/oscata-tauri.exe" ] || { echo "No se ha encontrado $REL/oscata-tauri.exe" >&2; exit 1; }
+[ -f "$REL/boxteam.exe" ] || { echo "No se ha encontrado $REL/boxteam.exe" >&2; exit 1; }
 
 # Tauri copies bundle resources next to the exe; fall back to the sources.
 DIST_SRC="$REL/dist";           [ -d "$DIST_SRC" ] || DIST_SRC="dist"
@@ -29,8 +29,8 @@ RES_SRC="$REL/resources";       [ -d "$RES_SRC" ]  || RES_SRC="src-tauri/resourc
 
 rm -rf "$OUT_DIR" "$ZIP"
 mkdir -p "$OUT_DIR"
-cp "$REL/oscata-tauri.exe" "$OUT_DIR/Oscata.exe"
-: > "$OUT_DIR/.oscata-portable"
+cp "$REL/boxteam.exe" "$OUT_DIR/BoxTeam.exe"
+: > "$OUT_DIR/.boxteam-portable"
 cp -r "$DIST_SRC" "$OUT_DIR/dist"
 cp -r "$RES_SRC" "$OUT_DIR/resources"
 # WebView2Loader is statically linked by tauri; nothing else to ship.

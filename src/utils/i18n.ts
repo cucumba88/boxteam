@@ -535,8 +535,8 @@ const messages = {
     en: "TMDB API key: configured ✓",
   },
   "wizard.welcomeTitle": {
-    es: "Bienvenido a Oscata FTP Client",
-    en: "Welcome to Oscata FTP Client",
+    es: "Bienvenido a BoxTeam",
+    en: "Welcome to BoxTeam",
   },
   "wizard.welcomeDescription": {
     es: "Configura una librería nueva o restaura una base de datos existente para no empezar desde cero.",
@@ -555,8 +555,8 @@ const messages = {
     en: "Restoring backup…",
   },
   "wizard.restoreHelp": {
-    es: "Selecciona un backup SQLite exportado desde otra instalación de Oscata FTP Client.",
-    en: "Choose a SQLite backup exported from another Oscata FTP Client installation.",
+    es: "Selecciona un backup SQLite exportado desde otra instalación de BoxTeam.",
+    en: "Choose a SQLite backup exported from another BoxTeam installation.",
   },
   "wizard.finishSetup": {
     es: "Guardar y abrir biblioteca",
@@ -851,8 +851,8 @@ const messages = {
     en: "Reset to default",
   },
   "settings.portableMode": {
-    es: "Modo portátil activo — la ubicación la fija el archivo .oscata-portable.",
-    en: "Portable mode active — location is set by the .oscata-portable marker file.",
+    es: "Modo portátil activo — la ubicación la fija el archivo .boxteam-portable.",
+    en: "Portable mode active — location is set by the .boxteam-portable marker file.",
   },
   "settings.downloadFolder": {
     es: "Carpeta de descargas",
@@ -1060,8 +1060,8 @@ const messages = {
     en: "Installable App (PWA)",
   },
   "settings.pwaDescription": {
-    es: "Permite instalar Oscata como aplicación nativa en dispositivos móviles y escritorio desde el navegador.",
-    en: "Allow Oscata to be installed as a native app on mobile and desktop from the browser.",
+    es: "Permite instalar BoxTeam como aplicación nativa en dispositivos móviles y escritorio desde el navegador.",
+    en: "Allow BoxTeam to be installed as a native app on mobile and desktop from the browser.",
   },
   "settings.pwaName": { es: "Nombre completo de la app", en: "Full app name" },
   "settings.pwaShortName": { es: "Nombre corto", en: "Short name" },
@@ -1082,8 +1082,8 @@ const messages = {
 
   "settings.appearanceTitle": { es: "Apariencia", en: "Appearance" },
   "settings.appearanceDescription": {
-    es: "Elige cómo se ve Oscata. Sistema sigue la preferencia de tu SO y se actualiza al instante.",
-    en: "Choose how Oscata looks. System follows your OS preference and updates live.",
+    es: "Elige cómo se ve BoxTeam. Sistema sigue la preferencia de tu SO y se actualiza al instante.",
+    en: "Choose how BoxTeam looks. System follows your OS preference and updates live.",
   },
   "settings.themeSystem": { es: "Sistema", en: "System" },
   "settings.themeDark": { es: "Oscuro", en: "Dark" },
@@ -1132,8 +1132,8 @@ const messages = {
     en: "Close to tray",
   },
   "settings.closeToTrayHelp": {
-    es: "Al cerrar la ventana, Oscata se oculta en la bandeja del sistema en lugar de cerrarse.",
-    en: "Closing the window hides Oscata to the system tray instead of quitting.",
+    es: "Al cerrar la ventana, BoxTeam se oculta en la bandeja del sistema en lugar de cerrarse.",
+    en: "Closing the window hides BoxTeam to the system tray instead of quitting.",
   },
 
   "quit.title": { es: "Descargas en curso", en: "Downloads in progress" },
@@ -1358,8 +1358,8 @@ const messages = {
 
   "reset.sectionTitle": { es: "Zona de peligro", en: "Danger zone" },
   "reset.sectionDescription": {
-    es: "Acciones que borran datos de Oscata. Los archivos del FTP nunca se tocan.",
-    en: "Actions that delete Oscata data. Files on the FTP are never touched.",
+    es: "Acciones que borran datos de BoxTeam. Los archivos del FTP nunca se tocan.",
+    en: "Actions that delete BoxTeam data. Files on the FTP are never touched.",
   },
   "reset.libraryTitle": { es: "Reiniciar biblioteca", en: "Reset library" },
   "reset.libraryDescription": {
@@ -1382,8 +1382,8 @@ const messages = {
   },
   "reset.factoryButton": { es: "Restablecer de fábrica", en: "Factory reset" },
   "reset.factoryConfirmTitle": {
-    es: "¿Restablecer Oscata de fábrica?",
-    en: "Factory reset Oscata?",
+    es: "¿Restablecer BoxTeam de fábrica?",
+    en: "Factory reset BoxTeam?",
   },
   "reset.factoryConfirmDescription": {
     es: "No se puede deshacer. Si quieres conservar algo, exporta antes una copia de seguridad.",

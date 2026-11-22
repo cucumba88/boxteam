@@ -1428,7 +1428,7 @@ pub async fn init_db_path(
     }
     std::fs::create_dir_all(path)
         .map_err(|e| format!("Cannot create {}: {}", path.display(), e))?;
-    let probe = path.join(".oscata-write-test");
+    let probe = path.join(".boxteam-write-test");
     std::fs::write(&probe, b"").map_err(|e| {
         format!(
             "Selected data directory {} is not writable: {}",
@@ -1450,7 +1450,7 @@ pub async fn set_db_path(
     state.migrate_to(std::path::Path::new(&dir))
 }
 
-/// Whether the app booted in portable mode (`.oscata-portable` marker found).
+/// Whether the app booted in portable mode (`.boxteam-portable` or legacy `.oscata-portable` marker found).
 #[tauri::command]
 pub async fn is_portable_mode(
     state: tauri::State<'_, crate::db::Db>,
@@ -5116,7 +5116,7 @@ pub async fn test_telegram(token: String, chat_id: String) -> Result<(), String>
     crate::telegram::send_message(
         &token,
         &chat_id,
-        "✅ Oscata — conexión con Telegram correcta",
+        "✅ BoxTeam — conexión con Telegram correcta",
     )
     .await
 }
@@ -5150,7 +5150,7 @@ pub async fn link_telegram_bot(
     db.upsert_telegram_sub(0, &bot_token, &chat_id, true, true)?;
 
     // Send a welcome confirmation via the user's own bot
-    let welcome = "✅ <b>Oscata</b> — Tu bot está vinculado correctamente.\n\nA partir de ahora recibirás avisos personales aquí.";
+    let welcome = "✅ <b>BoxTeam</b> — Tu bot está vinculado correctamente.\n\nA partir de ahora recibirás avisos personales aquí.";
     crate::telegram::send_message(&bot_token, &chat_id, welcome).await.ok();
 
     db.get_telegram_sub(0)?.ok_or_else(|| "Error al guardar la suscripción.".to_string())
@@ -5332,7 +5332,7 @@ mod prune_tests {
     /// Unique temp directory for one test (no external tempfile crate).
     fn scratch(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "oscata-prune-{}-{}",
+            "boxteam-prune-{}-{}",
             std::process::id(),
             tag
         ));

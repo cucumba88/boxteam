@@ -1,7 +1,7 @@
 # WEBGUI Future Implementation Plan
 
 ## Goal
-Add an optional WEBGUI mode for Oscata that can be enabled for LAN access with web-only authentication, while preserving current desktop behavior when WEBGUI is disabled.
+Add an optional WEBGUI mode for BoxTeam that can be enabled for LAN access with web-only authentication, while preserving current desktop behavior when WEBGUI is disabled.
 
 ## Scope (v1)
 - LAN access on same network.

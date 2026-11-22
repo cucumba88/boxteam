@@ -971,7 +971,7 @@ pub struct FtpPermissions {
 }
 
 /// Probe the account's permissions in `root`: LIST, then MKD a temporary
-/// `.oscata-permcheck-<n>` folder, STOR a 16-byte file in it, RETR it back,
+/// `.boxteam-permcheck-<n>` folder, STOR a 16-byte file in it, RETR it back,
 /// DELE it and RMD the folder. Everything it creates is removed (best effort).
 /// Never fails: problems are reported in the returned struct.
 pub async fn probe_permissions(ep: &FtpEndpoint, root: &str) -> FtpPermissions {
@@ -999,13 +999,13 @@ pub async fn probe_permissions(ep: &FtpEndpoint, root: &str) -> FtpPermissions {
     p.can_list = ftp.cwd(root).await.is_ok() && ftp.list(None).await.is_ok();
 
     let nonce = Utc::now().timestamp_millis();
-    let dir = format!("{}/.oscata-permcheck-{nonce}", root.trim_end_matches('/'));
+    let dir = format!("{}/.boxteam-permcheck-{nonce}", root.trim_end_matches('/'));
     p.can_create_dirs = ftp.mkdir(&dir).await.is_ok();
     // If MKD is refused, still try STOR straight into the root: some servers
     // allow uploading files but not creating folders.
     let target_dir = if p.can_create_dirs { dir.clone() } else { root.to_string() };
-    let file = format!("{}/.oscata-permcheck-{nonce}.tmp", target_dir.trim_end_matches('/'));
-    const PAYLOAD: &[u8] = b"oscata permcheck";
+    let file = format!("{}/.boxteam-permcheck-{nonce}.tmp", target_dir.trim_end_matches('/'));
+    const PAYLOAD: &[u8] = b"boxteam permcheck";
 
     if let Ok(mut up) = ftp.put_with_stream(&file).await {
         let wrote = up.write_all(PAYLOAD).await.is_ok();

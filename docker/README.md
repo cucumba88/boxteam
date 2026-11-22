@@ -1,6 +1,6 @@
-# Docker — Oscata sin interfaz gráfica
+# Docker — BoxTeam sin interfaz gráfica
 
-Instala Oscata como contenedor Docker con la interfaz web activa y sin escritorio. El binario arranca en modo headless: la ventana de escritorio está oculta y el acceso es exclusivamente por el navegador.
+Instala BoxTeam como contenedor Docker con la interfaz web activa y sin escritorio. El binario arranca en modo headless: la ventana de escritorio está oculta y el acceso es exclusivamente por el navegador.
 
 ## Inicio rápido — imagen publicada
 
@@ -8,12 +8,12 @@ La forma más sencilla es usar la imagen publicada automáticamente en GitHub Co
 
 ```bash
 docker run -d \
-  --name oscata \
+  --name boxteam \
   --restart unless-stopped \
   -p 47860:47860 \
-  -v oscata-config:/config \
-  -v oscata-downloads:/downloads \
-  ghcr.io/cucumba88/oscata:latest
+  -v boxteam-config:/config \
+  -v boxteam-downloads:/downloads \
+  ghcr.io/cucumba88/boxteam:latest
 ```
 
 La interfaz web queda disponible en `http://localhost:47860`.
@@ -31,7 +31,7 @@ actualizaciones, copias de seguridad y resolución de problemas.
 
 Atajo rápido (Container Manager, sin SSH): sube
 [`docker-compose.synology.yml`](docker-compose.synology.yml) a
-`/volume1/docker/oscata/`, ajusta las dos rutas de `volumes` y créalo como
+`/volume1/docker/boxteam/`, ajusta las dos rutas de `volumes` y créalo como
 *Proyecto* en Container Manager. Abre `http://IP_DEL_NAS:47860`.
 
 ## Construir la imagen localmente
@@ -59,23 +59,23 @@ Solo estas variables se leen del entorno en tiempo de arranque. El resto de la c
 
 | Variable                     | Defecto   | Descripción                                      |
 | ---------------------------- | --------- | ------------------------------------------------ |
-| `OSCATA_WEBGUI_PORT`         | `47860`   | Puerto de escucha interno                        |
-| `OSCATA_WEBGUI_HOST`         | `0.0.0.0` | IP de escucha interna                            |
-| `OSCATA_WEBGUI_EXPOSED_PORT` | `47860`   | Puerto externo (útil detrás de un proxy inverso) |
+| `BOXTEAM_WEBGUI_PORT`         | `47860`   | Puerto de escucha interno                        |
+| `BOXTEAM_WEBGUI_HOST`         | `0.0.0.0` | IP de escucha interna                            |
+| `BOXTEAM_WEBGUI_EXPOSED_PORT` | `47860`   | Puerto externo (útil detrás de un proxy inverso) |
 
-`OSCATA_WEBGUI=1` y `OSCATA_HEADLESS=1` ya están definidos en la imagen; no hace falta pasarlos.
+`BOXTEAM_WEBGUI=1` y `BOXTEAM_HEADLESS=1` ya están definidos en la imagen; no hace falta pasarlos.
 
 ## Proxy inverso (nginx / Caddy / Traefik)
 
-Expón el puerto 47860 internamente y mapea el externo mediante `OSCATA_WEBGUI_EXPOSED_PORT`:
+Expón el puerto 47860 internamente y mapea el externo mediante `BOXTEAM_WEBGUI_EXPOSED_PORT`:
 
 ```yaml
 environment:
-  OSCATA_WEBGUI_PORT: "47860"
-  OSCATA_WEBGUI_EXPOSED_PORT: "80" # o 443
+  BOXTEAM_WEBGUI_PORT: "47860"
+  BOXTEAM_WEBGUI_EXPOSED_PORT: "80" # o 443
 ```
 
-> **Importante:** Oscata usa WebSocket (`/api/ws`) para actualizar la biblioteca en tiempo real. Si usas nginx asegúrate de incluir las cabeceras de upgrade:
+> **Importante:** BoxTeam usa WebSocket (`/api/ws`) para actualizar la biblioteca en tiempo real. Si usas nginx asegúrate de incluir las cabeceras de upgrade:
 >
 > ```nginx
 > proxy_http_version 1.1;

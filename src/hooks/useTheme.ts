@@ -2,7 +2,7 @@ import { useState, useEffect, useContext, createContext } from "react";
 
 export type ThemeMode = "dark" | "light" | "system";
 type ResolvedTheme = "dark" | "light";
-const STORAGE_KEY = "oscata-theme";
+const STORAGE_KEY = "boxteam-theme";
 
 function getSystemTheme(): ResolvedTheme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches

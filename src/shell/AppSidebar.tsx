@@ -5,9 +5,9 @@ import {
   Settings as SettingsIcon,
   type LucideIcon,
 } from "lucide-react";
-import OscataMark from "../components/OscataMark";
+import BoxTeamMark from "../components/BoxTeamMark";
 
-const COLLAPSED_KEY = "oscata.sidebar.collapsed";
+const COLLAPSED_KEY = "boxteam.sidebar.collapsed";
 
 function readCollapsed(): boolean {
   try {
@@ -76,9 +76,9 @@ export default function AppSidebar<TabId extends string>({
     <aside className={`shell-sidebar${collapsed ? " collapsed" : ""}`}>
       <div className="shell-sidebar-header">
         {!collapsed && (
-          <span className="shell-sidebar-wordmark" aria-label="Oscata">
-            <OscataMark size={22} />
-            <span>scata</span>
+          <span className="shell-sidebar-wordmark" aria-label="BoxTeam">
+            <BoxTeamMark size={22} />
+            <span>BoxTeam</span>
           </span>
         )}
         <button

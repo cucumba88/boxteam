@@ -286,7 +286,7 @@ export default function WebUsers({ onBack }: WebUsersProps = {}) {
                 lineHeight: 1.5,
               }}
             >
-              Administra el acceso de las personas que usan Oscata. Crea
+              Administra el acceso de las personas que usan BoxTeam. Crea
               cuentas directamente o envía un enlace de invitación.
             </p>
           </div>
@@ -456,7 +456,7 @@ export default function WebUsers({ onBack }: WebUsersProps = {}) {
               <input
                 style={inputStyle}
                 type="email"
-                placeholder="email@oscata.app"
+                placeholder="email@ejemplo.com"
                 required
                 value={form.email}
                 onChange={(e) =>

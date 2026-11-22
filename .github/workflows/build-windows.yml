@@ -129,10 +129,10 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
-          name: oscata-windows
+          name: boxteam-windows
           path: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-            oscata-windows-portable-*.zip
+            boxteam-windows-portable-*.zip
           retention-days: 30
 
       - name: Create GitHub Release
@@ -142,4 +142,4 @@ jobs:
           tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-            oscata-windows-portable-*.zip
+            boxteam-windows-portable-*.zip

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Oscata FTP Client",
+  "productName": "BoxTeam",
   "version": "../package.json",
-  "identifier": "com.oscata.media",
+  "identifier": "com.boxteam.media",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Oscata FTP Client",
+        "title": "BoxTeam",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "backgroundColor": "#0d0d0f",

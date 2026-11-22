@@ -5,7 +5,7 @@
 //! we need the actual originating client.
 //!
 //! Trust model: `X-Forwarded-For` / `X-Real-IP` are only honoured when the
-//! immediate peer is listed in `OSCATA_TRUSTED_PROXIES` (comma-separated env
+//! immediate peer is listed in `BOXTEAM_TRUSTED_PROXIES` (comma-separated env
 //! var, defaults to `127.0.0.1,::1`). Otherwise we trust the peer address.
 //! This prevents a directly-connecting attacker from spoofing their IP by
 //! injecting `X-Forwarded-For` into their own request.
@@ -16,7 +16,7 @@ use std::net::IpAddr;
 use axum::http::HeaderMap;
 
 fn trusted_proxies() -> HashSet<IpAddr> {
-    let raw = std::env::var("OSCATA_TRUSTED_PROXIES")
+    let raw = crate::env_compat::var("TRUSTED_PROXIES")
         .unwrap_or_else(|_| "127.0.0.1,::1".to_string());
     raw.split(',')
         .filter_map(|s| s.trim().parse().ok())

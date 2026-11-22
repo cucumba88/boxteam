@@ -1,4 +1,4 @@
-# Novedades de Oscata
+# Novedades de BoxTeam (antes Oscata)
 
 ## Versión 0.11.5 — 20 de mayo de 2026
 

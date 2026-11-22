@@ -42,7 +42,7 @@ export interface WatchlistCoverageItem {
   filename: string;
   resolution?: string;
   ftp_path: string;
-  /** `true` only if explicitly downloaded via the Oscata download queue; `false` for FTP-indexed files. */
+  /** `true` only if explicitly downloaded via the BoxTeam download queue; `false` for FTP-indexed files. */
   downloaded: boolean;
 }
 

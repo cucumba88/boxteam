@@ -28,7 +28,7 @@ export const DEFAULT_PREFS: UserPrefs = {
   defaultTvView: "shows",
 };
 
-const STORAGE_KEY = "oscata.prefs.v1";
+const STORAGE_KEY = "boxteam.prefs.v1";
 
 const VALID_TABS: TabId[] = [
   "all",
@@ -116,7 +116,7 @@ export function writePrefs(patch: Partial<UserPrefs>): UserPrefs {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     // Notify same-tab listeners — the `storage` event only fires cross-tab.
-    window.dispatchEvent(new Event("oscata-prefs-changed"));
+    window.dispatchEvent(new Event("boxteam-prefs-changed"));
   } catch {
     // ignore quota / unavailable storage
   }
@@ -126,7 +126,7 @@ export function writePrefs(patch: Partial<UserPrefs>): UserPrefs {
 export function resetPrefs(): UserPrefs {
   try {
     localStorage.removeItem(STORAGE_KEY);
-    window.dispatchEvent(new Event("oscata-prefs-changed"));
+    window.dispatchEvent(new Event("boxteam-prefs-changed"));
   } catch {
     // ignore
   }
@@ -140,10 +140,10 @@ export function usePrefs(): UserPrefs {
     const onStorage = (event: StorageEvent) => {
       if (event.key === STORAGE_KEY) setPrefs(readPrefs());
     };
-    window.addEventListener("oscata-prefs-changed", onChange);
+    window.addEventListener("boxteam-prefs-changed", onChange);
     window.addEventListener("storage", onStorage);
     return () => {
-      window.removeEventListener("oscata-prefs-changed", onChange);
+      window.removeEventListener("boxteam-prefs-changed", onChange);
       window.removeEventListener("storage", onStorage);
     };
   }, []);

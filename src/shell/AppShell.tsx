@@ -28,7 +28,7 @@ export default function AppShell({
   sidebar,
   statusBar,
   children,
-  title = "Oscata FTP Client",
+  title = "BoxTeam",
   onOpenCommandPalette,
 }: Props) {
   const platform = usePlatform();

@@ -200,6 +200,14 @@ const PRESERVED_ON_FACTORY_RESET_SQL: &str =
     "key IN ('bootstrap_complete', 'last_app_version', 'last_update_backup_path') \
      OR key LIKE 'webgui\\_%' ESCAPE '\\'";
 
+/// Data folder name under the OS data dir (was `oscata-tauri` before the
+/// BoxTeam rename — see `Db::migrate_legacy_dir`).
+pub const DATA_DIR_NAME: &str = "boxteam";
+const LEGACY_DATA_DIR_NAME: &str = "oscata-tauri";
+/// Marker file that enables portable mode next to the executable.
+pub const PORTABLE_MARKER: &str = ".boxteam-portable";
+const LEGACY_PORTABLE_MARKER: &str = ".oscata-portable";
+
 #[derive(Clone)]
 pub struct Db {
     conn: Arc<Mutex<Connection>>,
@@ -294,7 +302,7 @@ pub struct WatchlistCoverageItem {
     pub resolution: Option<String>,
     pub ftp_path: String,
     /// `true` only when this file was explicitly transferred via the download queue (status = Done).
-    /// `false` for files that were discovered via FTP index scan but not downloaded through Oscata.
+    /// `false` for files that were discovered via FTP index scan but not downloaded through BoxTeam.
     pub downloaded: bool,
 }
 
@@ -405,7 +413,8 @@ impl Db {
     /// of any custom location configured there.
     ///
     /// On a normal Linux desktop session this resolves to
-    /// `$XDG_DATA_HOME/oscata-tauri` or `~/.local/share/oscata-tauri`. The
+    /// `$XDG_DATA_HOME/boxteam` or `~/.local/share/boxteam` (migrated from the
+    /// legacy `oscata-tauri` folder on first boot after the rename). The
     /// previous code silently fell back to the current working directory if
     /// `dirs_next` couldn't resolve a data dir (e.g., `$HOME` unset, which can
     /// happen under systemd services, some AppImage launchers, or Snap/Flatpak
@@ -418,17 +427,53 @@ impl Db {
     /// in the terminal / journald.
     fn default_data_dir() -> std::path::PathBuf {
         if let Some(d) = dirs_next::data_dir() {
-            return d.join("oscata-tauri");
+            return Self::migrate_legacy_dir(&d.join(LEGACY_DATA_DIR_NAME), d.join(DATA_DIR_NAME));
         }
         eprintln!(
-            "[oscata] WARNING: could not resolve a user data directory \
+            "[boxteam] WARNING: could not resolve a user data directory \
              (dirs_next::data_dir() returned None — is $HOME set?). \
-             Falling back to ./oscata-tauri-data which may not be writable."
+             Falling back to ./boxteam-data which may not be writable."
         );
-        std::path::PathBuf::from("./oscata-tauri-data")
+        std::path::PathBuf::from("./boxteam-data")
     }
 
-    /// Detect portable mode: look for `.oscata-portable` next to the executable.
+    /// One-shot migration from the pre-rename ("Oscata") data folder.
+    ///
+    /// If `new` doesn't exist yet but `legacy` does, rename `legacy` → `new`
+    /// so the library, bootstrap.json and backups carry over untouched. If
+    /// the rename fails (cross-device, permissions…) keep using `legacy` so
+    /// the user never boots into an empty library.
+    fn migrate_legacy_dir(
+        legacy: &std::path::Path,
+        new: std::path::PathBuf,
+    ) -> std::path::PathBuf {
+        if new.exists() || !legacy.exists() {
+            return new;
+        }
+        match std::fs::rename(legacy, &new) {
+            Ok(()) => {
+                println!(
+                    "[boxteam] migrated data dir {} -> {}",
+                    legacy.display(),
+                    new.display()
+                );
+                new
+            }
+            Err(e) => {
+                eprintln!(
+                    "[boxteam] WARNING: could not rename legacy data dir {} -> {}: {}. \
+                     Keeping the legacy location.",
+                    legacy.display(),
+                    new.display(),
+                    e
+                );
+                legacy.to_path_buf()
+            }
+        }
+    }
+
+    /// Detect portable mode: look for `.boxteam-portable` (or the legacy
+    /// `.oscata-portable`) next to the executable.
     /// On macOS the binary lives inside `Foo.app/Contents/MacOS/` so we walk up
     /// three levels to reach the folder that contains the `.app` bundle.
     fn detect_portable() -> Option<std::path::PathBuf> {
@@ -448,8 +493,13 @@ impl Db {
         };
 
         for candidate in candidates {
-            if candidate.join(".oscata-portable").exists() {
-                return Some(candidate.join("oscata-data"));
+            if candidate.join(PORTABLE_MARKER).exists()
+                || candidate.join(LEGACY_PORTABLE_MARKER).exists()
+            {
+                return Some(Self::migrate_legacy_dir(
+                    &candidate.join("oscata-data"),
+                    candidate.join("boxteam-data"),
+                ));
             }
         }
         None
@@ -855,7 +905,7 @@ impl Db {
 
     pub fn new() -> SqlResult<Self> {
         let (data_dir, is_portable) = Self::resolve_data_dir();
-        println!("[oscata] data dir: {}", data_dir.display());
+        println!("[boxteam] data dir: {}", data_dir.display());
 
         // Loudly surface dir-creation failures. Previously this was `.ok()`
         // which meant a Linux user with an unwritable `~/.local/share/`
@@ -874,7 +924,7 @@ impl Db {
         // Writability probe — write + delete a 0-byte test file. Catches the
         // case where create_dir_all succeeded (dir already existed) but the
         // process can't actually write into it.
-        let probe = data_dir.join(".oscata-write-test");
+        let probe = data_dir.join(".boxteam-write-test");
         if let Err(e) = std::fs::write(&probe, b"") {
             return Err(rusqlite::Error::InvalidPath(format!(
                 "Data directory {} is not writable by this process: {}",
@@ -1972,8 +2022,8 @@ impl Db {
             smtp_user:    str_val("webgui_smtp_user"),
             smtp_pass:    str_val("webgui_smtp_pass"),
             smtp_from:    str_val("webgui_smtp_from"),
-            pwa_name:     { let v = str_val("webgui_pwa_name"); if v.is_empty() { "Oscata".into() } else { v } },
-            pwa_short_name: { let v = str_val("webgui_pwa_short_name"); if v.is_empty() { "Oscata".into() } else { v } },
+            pwa_name:     { let v = str_val("webgui_pwa_name"); if v.is_empty() { "BoxTeam".into() } else { v } },
+            pwa_short_name: { let v = str_val("webgui_pwa_short_name"); if v.is_empty() { "BoxTeam".into() } else { v } },
             pwa_enabled:  bool_val("webgui_pwa_enabled"),
         })
     }
@@ -3507,13 +3557,35 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
 
+    #[test]
+    fn migrate_legacy_dir_renames_once_and_keeps_existing_new_dir() {
+        let root = std::env::temp_dir().join(format!("boxteam-migrate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let legacy = root.join("oscata-tauri");
+        let new = root.join("boxteam");
+        std::fs::create_dir_all(&legacy).expect("create legacy");
+        std::fs::write(legacy.join("library.db"), b"db").expect("write db");
+
+        // First boot after the rename: legacy folder is moved.
+        assert_eq!(Db::migrate_legacy_dir(&legacy, new.clone()), new);
+        assert!(new.join("library.db").exists());
+        assert!(!legacy.exists());
+
+        // A later stray legacy folder never overwrites the new one.
+        std::fs::create_dir_all(&legacy).expect("recreate legacy");
+        assert_eq!(Db::migrate_legacy_dir(&legacy, new.clone()), new);
+        assert!(legacy.exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Helper: open an in-memory Db for testing (bypasses file I/O).
     fn in_memory_db() -> Db {
         let conn = Connection::open_in_memory().expect("in-memory db");
         Db::apply_migrations(&conn).expect("migrations");
         Db {
             conn: Arc::new(Mutex::new(conn)),
-            data_dir: std::path::PathBuf::from("/tmp/oscata-test"),
+            data_dir: std::path::PathBuf::from("/tmp/boxteam-test"),
             is_portable: false,
         }
     }
@@ -3920,7 +3992,7 @@ mod tests {
     /// Build a throwaway seed DB on disk containing a single media row at
     /// `ghost_path`, returning (dir, seed_path). Caller removes the dir.
     fn make_seed_with_row(tag: &str, ghost_path: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("oscata-seed-{}-{}", tag, std::process::id()));
+        let dir = std::env::temp_dir().join(format!("boxteam-seed-{}-{}", tag, std::process::id()));
         std::fs::create_dir_all(&dir).expect("seed dir");
         let seed_path = dir.join("library.seed.db");
         let seed_conn = Connection::open(&seed_path).expect("seed db");

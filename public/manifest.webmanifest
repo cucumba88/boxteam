@@ -1,6 +1,6 @@
 {
-    "name": "Oscata",
-    "short_name": "Oscata",
+    "name": "BoxTeam",
+    "short_name": "BoxTeam",
     "description": "Gestiona tu biblioteca de medios FTP con enriquecimiento TMDB y cola de descargas.",
     "start_url": "/",
     "scope": "/",

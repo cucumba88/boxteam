@@ -2,6 +2,7 @@ mod analysis;
 mod commands;
 mod db;
 mod downloads;
+mod env_compat;
 mod ftp;
 mod omdb;
 mod parser;
@@ -250,7 +251,7 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            let show = MenuItem::with_id(app, "tray_show", "Open Oscata", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "tray_show", "Open BoxTeam", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "tray_quit", "Quit", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&show, &quit])?;
 

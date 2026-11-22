@@ -1,30 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Oscata">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="BoxTeam">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1d1d26"/>
-      <stop offset="1" stop-color="#0d0d0f"/>
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f4f4f6"/>
     </linearGradient>
     <linearGradient id="ring" x1="200" y1="200" x2="824" y2="824" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#c4baff"/>
-      <stop offset="0.45" stop-color="#7c6ef7"/>
-      <stop offset="1" stop-color="#4a3fd4"/>
+      <stop offset="0" stop-color="#9585ff"/>
+      <stop offset="0.45" stop-color="#5b4ee8"/>
+      <stop offset="1" stop-color="#3a2fb8"/>
     </linearGradient>
     <radialGradient id="haze" cx="380" cy="360" r="600" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7c6ef7" stop-opacity="0.28"/>
+      <stop offset="0" stop-color="#7c6ef7" stop-opacity="0.08"/>
       <stop offset="1" stop-color="#7c6ef7" stop-opacity="0"/>
     </radialGradient>
   </defs>
 
-  <!-- Shrink visible content into 824×824 inner safe area per Apple's macOS icon spec
-       (100px transparent margin on every side). This is what makes the dock icon
-       display at the same size as system icons. -->
+  <!-- Apple safe-area: 100px transparent margin around the inner 824×824 squircle. -->
   <g transform="translate(100 100) scale(0.8047)">
     <rect width="1024" height="1024" rx="225" fill="url(#bg)"/>
     <rect width="1024" height="1024" rx="225" fill="url(#haze)"/>
-    <!-- Inset highlight stroke — gives the squircle definition against the dock,
-         standard on macOS Big Sur+ system icons. -->
+    <!-- Inset highlight stroke — dark variant for light tile -->
     <rect x="5" y="5" width="1014" height="1014" rx="220"
-          fill="none" stroke="#ffffff" stroke-opacity="0.32" stroke-width="10"/>
+          fill="none" stroke="#000000" stroke-opacity="0.22" stroke-width="10"/>
     <path d="M 606 185 A 340 340 0 1 0 748 267"
           fill="none"
           stroke="url(#ring)"

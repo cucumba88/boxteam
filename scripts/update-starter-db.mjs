@@ -19,19 +19,19 @@ function defaultAppDbPath() {
         os.homedir(),
         "Library",
         "Application Support",
-        "oscata-tauri",
+        "boxteam",
         "library.db",
       );
     case "win32":
       return path.join(
         process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"),
-        "oscata-tauri",
+        "boxteam",
         "library.db",
       );
     default: {
       const dataHome =
         process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share");
-      return path.join(dataHome, "oscata-tauri", "library.db");
+      return path.join(dataHome, "boxteam", "library.db");
     }
   }
 }

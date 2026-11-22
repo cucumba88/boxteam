@@ -166,7 +166,7 @@ function StepFTP({
           Servidor FTP
         </h2>
         <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-muted)" }}>
-          Oscata se conecta a tu servidor FTP para indexar y descargar archivos.
+          BoxTeam se conecta a tu servidor FTP para indexar y descargar archivos.
         </p>
       </div>
 

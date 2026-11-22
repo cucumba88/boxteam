@@ -270,7 +270,7 @@ function StatusPill({ state, text }: { state: ConnectionState; text: string }) {
   );
 }
 
-const SECTION_OPEN_EVENT = "oscata:settings-open-section";
+const SECTION_OPEN_EVENT = "boxteam:settings-open-section";
 
 function SectionCard({
   icon: Icon,
@@ -1376,7 +1376,7 @@ export default function Settings({
         multiple: false,
       });
       if (typeof selectedFolder !== "string") return;
-      const destination = `${selectedFolder.replace(/[\\/]$/, "")}/oscata-library-backup.db`;
+      const destination = `${selectedFolder.replace(/[\\/]$/, "")}/boxteam-library-backup.db`;
       await invoke("export_library_backup", { destinationPath: destination });
       setBackupMessage(t(language, "settings.backupExportSuccess"));
     } catch (error: unknown) {
@@ -3506,7 +3506,7 @@ export default function Settings({
                               style={inputStyle}
                               type="email"
                               value={webGuiConfig.smtp_from}
-                              placeholder="oscata@yourdomain.com"
+                              placeholder="boxteam@tudominio.com"
                               onChange={(e) =>
                                 setWebGuiConfig((c) =>
                                   c ? { ...c, smtp_from: e.target.value } : c,
@@ -3618,7 +3618,7 @@ export default function Settings({
                                 c ? { ...c, pwa_name: e.target.value } : c,
                               )
                             }
-                            placeholder="Oscata"
+                            placeholder="BoxTeam"
                           />
                         </div>
                         <div style={fieldStyle}>
@@ -3636,7 +3636,7 @@ export default function Settings({
                                   : c,
                               )
                             }
-                            placeholder="Oscata"
+                            placeholder="BoxTeam"
                             maxLength={12}
                           />
                           <span style={subtextStyle}>

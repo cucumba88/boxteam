@@ -21,7 +21,7 @@ export interface FtpPermissions {
 
 /** Fired by Settings after the config is saved, so the Library can re-run its
  * upload-permission gate and this panel can re-probe. */
-export const FTP_CONFIG_SAVED_EVENT = "oscata:ftp-config-saved";
+export const FTP_CONFIG_SAVED_EVENT = "boxteam:ftp-config-saved";
 
 type MessageKey = Parameters<typeof t>[1];
 

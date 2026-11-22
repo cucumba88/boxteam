@@ -17,10 +17,10 @@ $packageJson = Get-Content "package.json" -Raw | ConvertFrom-Json
 $version = [string]$packageJson.version
 
 if ([string]::IsNullOrWhiteSpace($ZipPath)) {
-    $ZipPath = "oscata-windows-portable-$version.zip"
+    $ZipPath = "boxteam-windows-portable-$version.zip"
 }
 
-$exePath = Join-Path $repoRoot "src-tauri\target\release\oscata-tauri.exe"
+$exePath = Join-Path $repoRoot "src-tauri\target\release\boxteam.exe"
 $distPath = Join-Path $repoRoot "src-tauri\target\release\dist"
 $resourcesPath = Join-Path $repoRoot "src-tauri\target\release\resources"
 $resolvedOutputDir = Join-Path $repoRoot $OutputDir
@@ -53,8 +53,8 @@ if (Test-Path $resolvedZipPath) {
 }
 
 New-Item -ItemType Directory -Path $resolvedOutputDir | Out-Null
-Copy-Item $exePath (Join-Path $resolvedOutputDir "Oscata.exe")
-New-Item -ItemType File -Path (Join-Path $resolvedOutputDir ".oscata-portable") | Out-Null
+Copy-Item $exePath (Join-Path $resolvedOutputDir "BoxTeam.exe")
+New-Item -ItemType File -Path (Join-Path $resolvedOutputDir ".boxteam-portable") | Out-Null
 Copy-Item $distPath (Join-Path $resolvedOutputDir "dist") -Recurse
 
 if (Test-Path $resourcesPath) {

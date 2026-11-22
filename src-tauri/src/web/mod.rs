@@ -35,14 +35,14 @@ pub struct AppState {
     pub db: crate::db::Db,
     pub queue: crate::downloads::SharedQueue,
     pub app_handle: tauri::AppHandle,
-    /// Overrides the DB-stored exposed_port when OSCATA_WEBGUI_EXPOSED_PORT is set.
+    /// Overrides the DB-stored exposed_port when BOXTEAM_WEBGUI_EXPOSED_PORT is set.
     pub exposed_port_override: Option<u16>,
 }
 
 pub fn spawn_if_enabled(db: crate::db::Db, queue: crate::downloads::SharedQueue, app_handle: tauri::AppHandle) {
-    // OSCATA_WEBGUI=1 forces the web server on regardless of the database setting,
+    // BOXTEAM_WEBGUI=1 forces the web server on regardless of the database setting,
     // allowing headless / server installs without touching the DB first.
-    let force_enabled = std::env::var("OSCATA_WEBGUI").as_deref() == Ok("1");
+    let force_enabled = crate::env_compat::var("WEBGUI").as_deref() == Ok("1");
 
     let cfg = match db.load_webgui_config() {
         Ok(c) => c,
@@ -65,22 +65,22 @@ pub fn spawn_if_enabled(db: crate::db::Db, queue: crate::downloads::SharedQueue,
     // Exposed port override: used by server_info and invite links so clients
     // see the correct external port when behind a reverse proxy.
     let exposed_port_override: Option<u16> = if force_enabled {
-        std::env::var("OSCATA_WEBGUI_EXPOSED_PORT")
+        crate::env_compat::var("WEBGUI_EXPOSED_PORT")
             .ok()
             .and_then(|v| v.parse::<u16>().ok())
     } else {
         None
     };
 
-    // Env vars override DB config when OSCATA_WEBGUI=1 is set.
+    // Env vars override DB config when BOXTEAM_WEBGUI=1 is set.
     #[cfg_attr(debug_assertions, allow(unused_variables))]
     let host = if force_enabled {
-        std::env::var("OSCATA_WEBGUI_HOST").unwrap_or_else(|_| cfg.host.clone())
+        crate::env_compat::var("WEBGUI_HOST").unwrap_or_else(|_| cfg.host.clone())
     } else {
         cfg.host.clone()
     };
     let port = if force_enabled {
-        std::env::var("OSCATA_WEBGUI_PORT")
+        crate::env_compat::var("WEBGUI_PORT")
             .ok()
             .and_then(|v| v.parse::<u16>().ok())
             .unwrap_or(cfg.port)
@@ -220,7 +220,7 @@ fn build_router(state: AppState) -> Router {
 }
 
 /// Build the CORS layer. Allowed origins come from (in priority order):
-///   1. `OSCATA_WEBGUI_ALLOWED_ORIGINS` env (comma-separated)
+///   1. `BOXTEAM_WEBGUI_ALLOWED_ORIGINS` env (comma-separated)
 ///   2. `webgui_app_url` from DB config (the canonical external URL)
 ///   3. dev fallback: `http://localhost:1420` (Vite dev server)
 ///
@@ -231,7 +231,7 @@ fn build_router(state: AppState) -> Router {
 fn build_cors_layer(state: &AppState) -> CorsLayer {
     use axum::http::HeaderValue;
 
-    let from_env: Vec<String> = std::env::var("OSCATA_WEBGUI_ALLOWED_ORIGINS")
+    let from_env: Vec<String> = crate::env_compat::var("WEBGUI_ALLOWED_ORIGINS")
         .ok()
         .map(|s| {
             s.split(',')
@@ -259,7 +259,7 @@ fn build_cors_layer(state: &AppState) -> CorsLayer {
     if origins.is_empty() {
         eprintln!(
             "[webgui] WARNING: no allowed origins configured (set \
-             OSCATA_WEBGUI_ALLOWED_ORIGINS or webgui app_url). \
+             BOXTEAM_WEBGUI_ALLOWED_ORIGINS or webgui app_url). \
              CORS is wide open — do not expose to the public internet."
         );
         return CorsLayer::permissive();
@@ -413,7 +413,7 @@ async fn dev_root_page() -> Html<&'static str> {
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Oscata WebGUI</title>
+        <title>BoxTeam WebGUI</title>
         <style>
             :root { color-scheme: dark; }
             body {

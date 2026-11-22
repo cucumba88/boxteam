@@ -1,15 +1,15 @@
 import { useId, useState, useEffect } from "react";
 
 /**
- * Inline SVG of the Oscata brand mark — the notched ring used in the sidebar
- * wordmark and the mobile header. Mirrors `src/assets/brand/oscata-mark.svg`
+ * Inline SVG of the BoxTeam brand mark — the notched ring used in the sidebar
+ * wordmark and the mobile header. Mirrors `src/assets/brand/boxteam-mark.svg`
  * but exposes the ring as a real `<path>` so we can animate stroke properties.
  *
  * Two design constraints:
  *
- * 1. **Unique gradient id per instance.** Multiple `<OscataMark>` can mount on
+ * 1. **Unique gradient id per instance.** Multiple `<BoxTeamMark>` can mount on
  *    the same page (e.g. the desktop sidebar is `display:none` on mobile but
- *    still rendered, so its OscataMark coexists with the mobile header's).
+ *    still rendered, so its BoxTeamMark coexists with the mobile header's).
  *    Sharing a hard-coded `<linearGradient id="…">` causes one or both rings
  *    to fail to render their fill in some browsers (id collision is undefined
  *    behavior in SVG). `useId()` gives each instance its own deterministic id.
@@ -24,10 +24,10 @@ import { useId, useState, useEffect } from "react";
  *    logo.
  *
  * During indexing the same draw gesture loops continuously, driven by
- * `body[data-oscata-indexing="true"]` — see shell.css.
+ * `body[data-boxteam-indexing="true"]` — see shell.css.
  */
-export default function OscataMark({ size = 22 }: { size?: number }) {
-  const gradientId = `oscata-mark-ring-${useId()}`;
+export default function BoxTeamMark({ size = 22 }: { size?: number }) {
+  const gradientId = `boxteam-mark-ring-${useId()}`;
 
   // Trigger the entrance animation only after the component has mounted —
   // ensures the ring is always visible by default and only animates in on
@@ -46,13 +46,13 @@ export default function OscataMark({ size = 22 }: { size?: number }) {
 
   return (
     <svg
-      className="oscata-mark"
+      className="boxteam-mark"
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 1024 1024"
       width={size}
       height={size}
       role="img"
-      aria-label="Oscata"
+      aria-label="BoxTeam"
       data-animate-in={animateIn ? "true" : "false"}
     >
       <defs>
@@ -71,7 +71,7 @@ export default function OscataMark({ size = 22 }: { size?: number }) {
       </defs>
 
       <path
-        className="oscata-mark-ring"
+        className="boxteam-mark-ring"
         d="M 606 185 A 340 340 0 1 0 748 267"
         fill="none"
         stroke={`url(#${gradientId})`}

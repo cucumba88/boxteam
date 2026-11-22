@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    oscata_tauri_lib::run()
+    boxteam_lib::run()
 }

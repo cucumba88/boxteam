@@ -1,6 +1,6 @@
-# FTP de desarrollo — Oscata
+# FTP de desarrollo — BoxTeam
 
-Servidor FTP local con Docker para probar Oscata sin necesidad de un servidor real.
+Servidor FTP local con Docker para probar BoxTeam sin necesidad de un servidor real.
 
 ## Arrancar
 
@@ -15,8 +15,8 @@ docker compose up -d
 | -------- | ------------- |
 | Host     | `localhost`   |
 | Puerto   | `21`          |
-| Usuario  | `oscata`      |
-| Password | `oscata123`   |
+| Usuario  | `boxteam`      |
+| Password | `boxteam123`   |
 | Raíz FTP | `/Compartida` |
 
 ## Estructura de carpetas de ejemplo
@@ -51,16 +51,16 @@ docker compose up -d
     └── Cosmos.A.Spacetime.Odyssey.S01E01.2014.1080p.BluRay.HEVC.DTS.SPA.ENG.mkv
 ```
 
-> Los archivos `.mkv` son stubs vacíos — sirven para que el indexador de Oscata los detecte y parsee.
+> Los archivos `.mkv` son stubs vacíos — sirven para que el indexador de BoxTeam los detecte y parsee.
 
-## Configuración en Oscata
+## Configuración en BoxTeam
 
 En **Ajustes → Conexión FTP**:
 
 - Host: `localhost`
 - Puerto: `21`
-- Usuario: `oscata`
-- Contraseña: `oscata123`
+- Usuario: `boxteam`
+- Contraseña: `boxteam123`
 - Raíz FTP: `/Compartida`
 
 > Estos valores coinciden con los valores por defecto que ya trae la app configurados.

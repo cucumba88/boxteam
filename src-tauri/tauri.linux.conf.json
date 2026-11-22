@@ -3,7 +3,7 @@
   "app": {
     "windows": [
       {
-        "title": "Oscata FTP Client",
+        "title": "BoxTeam",
         "decorations": false,
         "backgroundColor": "#0d0d0f",
         "width": 1440,

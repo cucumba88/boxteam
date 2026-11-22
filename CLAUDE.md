@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The same React frontend runs in **two surfaces**:
 
 - **Desktop** (Tauri 2.x): native window, IPC via `invoke()`, file pickers, dialogs.
-- **Web** (`OSCATA_WEBGUI=1`): Axum HTTP server on port 47860 (see `src-tauri/src/web/`), token-auth (`Authorization: Bearer …` from `localStorage`).
+- **Web** (`BOXTEAM_WEBGUI=1`): Axum HTTP server on port 47860 (see `src-tauri/src/web/`), token-auth (`Authorization: Bearer …` from `localStorage`).
 
 Gate desktop-only features with `isTauri()` from `src/lib/transport.ts`. The web router lives in `src/router.tsx` as `WebRouter`; only the desktop router knows about the Wizard. Every UI feature should work in both unless it explicitly requires native OS access — and even then, gate cleanly rather than break web mode.
 
@@ -110,21 +110,21 @@ gh run watch <id> --interval 30 --exit-status
 The user's media server runs on Unraid at SSH alias `unraid`. Standard deploy after CI completes:
 
 ```bash
-ssh unraid 'docker pull ghcr.io/cucumba88/oscata:0.X.Y \
-  && docker stop oscata && docker rm oscata \
-  && docker run -d --name=oscata --restart=unless-stopped --network=bridge \
+ssh unraid 'docker pull ghcr.io/cucumba88/boxteam:0.X.Y \
+  && docker stop boxteam && docker rm boxteam \
+  && docker run -d --name=boxteam --restart=unless-stopped --network=bridge \
        -p 47860:47860 \
        -v /mnt/user/media:/downloads \
-       -v /mnt/cache/appdata/oscata-tauri:/config \
-       -e OSCATA_WEBGUI_PORT=47860 \
-       -e OSCATA_WEBGUI_EXPOSED_PORT=47860 \
-       -e OSCATA_WEBGUI_ALLOWED_ORIGINS=https://boxteam.example.com \
-       ghcr.io/cucumba88/oscata:0.X.Y \
-  && sleep 4 && docker ps --filter name=oscata --format "{{.Names}} {{.Image}} {{.Status}}" \
-  && docker logs --tail 8 oscata'
+       -v /mnt/cache/appdata/boxteam:/config \
+       -e BOXTEAM_WEBGUI_PORT=47860 \
+       -e BOXTEAM_WEBGUI_EXPOSED_PORT=47860 \
+       -e BOXTEAM_WEBGUI_ALLOWED_ORIGINS=https://boxteam.example.com \
+       ghcr.io/cucumba88/boxteam:0.X.Y \
+  && sleep 4 && docker ps --filter name=boxteam --format "{{.Names}} {{.Image}} {{.Status}}" \
+  && docker logs --tail 8 boxteam'
 ```
 
-The container creates an automatic `library-<old>-to-<new>-<timestamp>.sqlite3` backup under `/config/share/oscata-tauri/backups/` on every version transition.
+The container creates an automatic `library-<old>-to-<new>-<timestamp>.sqlite3` backup under `/config/share/boxteam/backups/` on every version transition.
 
 ## Browser-based QA after deploy
 
@@ -135,11 +135,11 @@ The site is at `https://boxteam.example.com`. The user's login is in their own b
 ## SQLite data-dir resolution
 
 `Db::new()` resolves the data dir via:
-1. **Portable**: `.oscata-portable` marker file next to the executable → uses `oscata-data/` adjacent to it.
+1. **Portable**: `.boxteam-portable` marker file next to the executable → uses `boxteam-data/` adjacent to it.
 2. **Custom**: `bootstrap.json` in the default location → uses the path inside it.
-3. **Default**: `dirs_next::data_dir().join("oscata-tauri")` (macOS `~/Library/Application Support/oscata-tauri`, Linux `$XDG_DATA_HOME/oscata-tauri` or `~/.local/share/oscata-tauri`).
+3. **Default**: `dirs_next::data_dir().join("boxteam")` (macOS `~/Library/Application Support/boxteam`, Linux `$XDG_DATA_HOME/boxteam` or `~/.local/share/boxteam`).
 
-In docker the entrypoint forces `XDG_DATA_HOME=/config/share`, so the path becomes `/config/share/oscata-tauri/library.db`. All paths now propagate `create_dir_all` errors with the offending path + OS error code (was silently `.ok()`'d before v0.11.3).
+In docker the entrypoint forces `XDG_DATA_HOME=/config/share`, so the path becomes `/config/share/boxteam/library.db`. All paths now propagate `create_dir_all` errors with the offending path + OS error code (was silently `.ok()`'d before v0.11.3).
 
 ## Common gotchas
 

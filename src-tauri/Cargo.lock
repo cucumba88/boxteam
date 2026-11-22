@@ -407,6 +407,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "boxteam"
+version = "0.17.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bcrypt",
+ "chrono",
+ "dirs-next",
+ "jiff 1.0.2",
+ "lettre",
+ "once_cell",
+ "rand 0.8.8",
+ "regex",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "rustls",
+ "serde",
+ "serde_json",
+ "socket2 0.5.10",
+ "suppaftp",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "tokio",
+ "tokio-rustls",
+ "tower-http",
+ "urlencoding",
+ "uuid",
+ "webpki-roots",
+]
+
+[[package]]
 name = "brotli"
 version = "9.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3021,40 +3055,6 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
-]
-
-[[package]]
-name = "oscata-tauri"
-version = "0.17.0"
-dependencies = [
- "async-trait",
- "axum",
- "bcrypt",
- "chrono",
- "dirs-next",
- "jiff 1.0.2",
- "lettre",
- "once_cell",
- "rand 0.8.8",
- "regex",
- "reqwest 0.12.28",
- "rusqlite",
- "rustls",
- "serde",
- "serde_json",
- "socket2 0.5.10",
- "suppaftp",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "tokio",
- "tokio-rustls",
- "tower-http",
- "urlencoding",
- "uuid",
- "webpki-roots",
 ]
 
 [[package]]

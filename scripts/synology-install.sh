@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Oscata — instalador para Synology DSM (Container Manager / Docker).
+# BoxTeam — instalador para Synology DSM (Container Manager / Docker).
 #
 # Pensado para ejecutarse por SSH directamente en el NAS:
 #
@@ -11,16 +11,16 @@
 # carpetas de datos y arranca el contenedor con restart automático.
 #
 # Personaliza con variables de entorno, por ejemplo:
-#   sudo CONFIG_DIR=/volume1/docker/oscata/config \
+#   sudo CONFIG_DIR=/volume1/docker/boxteam/config \
 #        DOWNLOADS_DIR=/volume1/media \
 #        WEBGUI_HOST_PORT=47860 \
-#        IMAGE=ghcr.io/cucumba88/oscata:latest \
+#        IMAGE=ghcr.io/cucumba88/boxteam:latest \
 #        bash synology-install.sh
 set -Eeuo pipefail
 
-IMAGE="${IMAGE:-ghcr.io/cucumba88/oscata:latest}"
-CONTAINER_NAME="${CONTAINER_NAME:-oscata}"
-CONFIG_DIR="${CONFIG_DIR:-/volume1/docker/oscata/config}"
+IMAGE="${IMAGE:-ghcr.io/cucumba88/boxteam:latest}"
+CONTAINER_NAME="${CONTAINER_NAME:-boxteam}"
+CONFIG_DIR="${CONFIG_DIR:-/volume1/docker/boxteam/config}"
 DOWNLOADS_DIR="${DOWNLOADS_DIR:-/volume1/media}"
 WEBGUI_HOST_PORT="${WEBGUI_HOST_PORT:-47860}"
 WEBGUI_CONTAINER_PORT="${WEBGUI_CONTAINER_PORT:-47860}"
@@ -60,8 +60,8 @@ echo "[synology] Arrancando ${CONTAINER_NAME}…"
   --name "${CONTAINER_NAME}" \
   --restart unless-stopped \
   -p "${WEBGUI_HOST_PORT}:${WEBGUI_CONTAINER_PORT}" \
-  -e "OSCATA_WEBGUI_PORT=${WEBGUI_CONTAINER_PORT}" \
-  -e "OSCATA_WEBGUI_EXPOSED_PORT=${WEBGUI_HOST_PORT}" \
+  -e "BOXTEAM_WEBGUI_PORT=${WEBGUI_CONTAINER_PORT}" \
+  -e "BOXTEAM_WEBGUI_EXPOSED_PORT=${WEBGUI_HOST_PORT}" \
   -v "${CONFIG_DIR}:/config" \
   -v "${DOWNLOADS_DIR}:/downloads" \
   "${IMAGE}"

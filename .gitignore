@@ -13,7 +13,7 @@ node_modules
 dist
 dist-ssr
 portable-dist
-oscata-windows-portable-*.zip
+boxteam-windows-portable-*.zip
 *.local
 
 # Editor directories and files

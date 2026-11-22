@@ -90,11 +90,11 @@ ENV XDG_CACHE_HOME=/config/cache
 ENV XDG_DATA_HOME=/config/share
 # Headless web-UI mode: force-enable the built-in web server and hide
 # the Tauri desktop window. Override these in docker-compose or docker run.
-ENV OSCATA_WEBGUI=1
-ENV OSCATA_HEADLESS=1
-ENV OSCATA_WEBGUI_HOST=0.0.0.0
-ENV OSCATA_WEBGUI_PORT=47860
-ENV OSCATA_WEBGUI_EXPOSED_PORT=47860
+ENV BOXTEAM_WEBGUI=1
+ENV BOXTEAM_HEADLESS=1
+ENV BOXTEAM_WEBGUI_HOST=0.0.0.0
+ENV BOXTEAM_WEBGUI_PORT=47860
+ENV BOXTEAM_WEBGUI_EXPOSED_PORT=47860
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -115,17 +115,17 @@ RUN apt-get update \
         xvfb \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /opt/oscata
+WORKDIR /opt/boxteam
 
-COPY --from=build /app/src-tauri/target/release/oscata-tauri /opt/oscata/oscata-tauri
-COPY --from=build /app/dist /opt/oscata/dist
-COPY --from=build /app/src-tauri/resources /opt/oscata/resources
-COPY docker/entrypoint.sh /usr/local/bin/oscata-entrypoint
+COPY --from=build /app/src-tauri/target/release/boxteam /opt/boxteam/boxteam
+COPY --from=build /app/dist /opt/boxteam/dist
+COPY --from=build /app/src-tauri/resources /opt/boxteam/resources
+COPY docker/entrypoint.sh /usr/local/bin/boxteam-entrypoint
 
-RUN chmod +x /usr/local/bin/oscata-entrypoint /opt/oscata/oscata-tauri \
+RUN chmod +x /usr/local/bin/boxteam-entrypoint /opt/boxteam/boxteam \
     && mkdir -p /config/home /config/config /config/cache /config/share /downloads
 
 EXPOSE 47860
 VOLUME ["/config", "/downloads"]
 
-ENTRYPOINT ["/usr/local/bin/oscata-entrypoint"]
+ENTRYPOINT ["/usr/local/bin/boxteam-entrypoint"]

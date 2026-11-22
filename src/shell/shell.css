@@ -141,16 +141,16 @@
 }
 
 .shell-sidebar-wordmark {
-  /* Composed of the mark SVG (purple from its own gradient) + "scata" text
+  /* Composed of the mark SVG (purple from its own gradient) + "BoxTeam" text
      in the theme-aware text color. Composing in JSX lets the text inherit
      --color-text so the wordmark works in both light and dark themes. */
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 7px;
   user-select: none;
 }
 
-.shell-sidebar-wordmark > .oscata-mark {
+.shell-sidebar-wordmark > .boxteam-mark {
   height: 22px;
   width: 22px;
   display: block;
@@ -160,7 +160,7 @@
 /* Brand mark — default state is fully drawn. `pathLength="2000"` on the
    path normalizes the dash math regardless of SVG scale, so the values
    below are stable in any render size. */
-.shell-sidebar-wordmark > .oscata-mark .oscata-mark-ring {
+.shell-sidebar-wordmark > .boxteam-mark .boxteam-mark-ring {
   stroke-dasharray: 2000;
   stroke-dashoffset: 0;
 }
@@ -169,27 +169,27 @@
    `data-animate-in` attribute flips to "true". Defaulting the path to fully
    drawn (above) means even if this animation never fires, the user still
    sees a complete logo instead of a blank space. */
-.shell-sidebar-wordmark > .oscata-mark[data-animate-in="true"] .oscata-mark-ring {
-  animation: oscata-mark-draw 1100ms cubic-bezier(0.65, 0.05, 0.36, 1)
+.shell-sidebar-wordmark > .boxteam-mark[data-animate-in="true"] .boxteam-mark-ring {
+  animation: boxteam-mark-draw 1100ms cubic-bezier(0.65, 0.05, 0.36, 1)
     forwards;
 }
 
 /* Loop during indexing — the same gesture used for the entrance becomes the
    loading indicator, so the visual language stays coherent. */
-body[data-oscata-indexing="true"]
+body[data-boxteam-indexing="true"]
   .shell-sidebar-wordmark
-  > .oscata-mark
-  .oscata-mark-ring {
-  animation: oscata-mark-loop 2200ms cubic-bezier(0.65, 0.05, 0.36, 1)
+  > .boxteam-mark
+  .boxteam-mark-ring {
+  animation: boxteam-mark-loop 2200ms cubic-bezier(0.65, 0.05, 0.36, 1)
     infinite;
 }
 
-@keyframes oscata-mark-draw {
+@keyframes boxteam-mark-draw {
   from { stroke-dashoffset: 2000; }
   to   { stroke-dashoffset: 0; }
 }
 
-@keyframes oscata-mark-loop {
+@keyframes boxteam-mark-loop {
   0%   { stroke-dashoffset: 2000; }
   45%  { stroke-dashoffset: 0; }
   55%  { stroke-dashoffset: 0; }
@@ -197,11 +197,11 @@ body[data-oscata-indexing="true"]
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shell-sidebar-wordmark > .oscata-mark[data-animate-in="true"] .oscata-mark-ring,
-  body[data-oscata-indexing="true"]
+  .shell-sidebar-wordmark > .boxteam-mark[data-animate-in="true"] .boxteam-mark-ring,
+  body[data-boxteam-indexing="true"]
     .shell-sidebar-wordmark
-    > .oscata-mark
-    .oscata-mark-ring {
+    > .boxteam-mark
+    .boxteam-mark-ring {
     animation: none;
     stroke-dashoffset: 0;
   }
@@ -443,11 +443,11 @@ body[data-oscata-indexing="true"]
     transparent 100%
   );
   background-size: 200% 100%;
-  animation: oscata-statusbar-shimmer 2.4s linear infinite;
+  animation: boxteam-statusbar-shimmer 2.4s linear infinite;
   pointer-events: none;
 }
 
-@keyframes oscata-statusbar-shimmer {
+@keyframes boxteam-statusbar-shimmer {
   from { background-position: 200% 0; }
   to   { background-position: -200% 0; }
 }
@@ -565,10 +565,10 @@ body[data-oscata-indexing="true"]
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--color-success) 14%, transparent),
     0 4px 14px color-mix(in srgb, var(--color-success) 28%, transparent);
-  animation: oscata-flash-in 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  animation: boxteam-flash-in 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
-@keyframes oscata-flash-in {
+@keyframes boxteam-flash-in {
   from {
     opacity: 0;
     transform: translateY(3px) scale(0.96);

@@ -99,7 +99,7 @@ export default function Login() {
               letterSpacing: "-0.03em",
             }}
           >
-            Oscata
+            BoxTeam
           </div>
           <div
             style={{

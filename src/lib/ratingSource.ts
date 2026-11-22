@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import type { MediaItem } from "../hooks/useIndexing";
 
 /**
- * Identifiers for the rating sources Oscata surfaces in the UI. TVDB is
+ * Identifiers for the rating sources BoxTeam surfaces in the UI. TVDB is
  * intentionally not part of this union — its `score` field is popularity-
  * weighted (not a 0-10 user rating) so we don't display it as a rating,
  * but the backend still fetches `tvdb_id` for use as a metadata source.
@@ -105,7 +105,7 @@ export function formatRating(value: number): string {
 // rather than threading the value through every prop chain — same approach
 // as `mediaCache.ts` for the prefetched library snapshot.
 
-const STORAGE_KEY = "oscata_rating_source_order";
+const STORAGE_KEY = "boxteam_rating_source_order";
 const listeners = new Set<() => void>();
 let current: RatingSource[] = parseRatingOrder(
   typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null,

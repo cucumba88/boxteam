@@ -11,7 +11,7 @@ export function isTauri(): boolean {
 export const apiBase = "/api";
 
 /** Bearer token key in localStorage (web mode only). */
-const TOKEN_KEY = "oscata_web_token";
+const TOKEN_KEY = "boxteam_web_token";
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);

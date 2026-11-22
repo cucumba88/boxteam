@@ -74,7 +74,7 @@ import SkeletonGrid from "../components/SkeletonGrid";
 import AlphaJumpRail from "../components/AlphaJumpRail";
 import { buildAlphaIndex, titleSortKey } from "../utils/alphaJump";
 import ThemeToggle from "../components/ThemeToggle";
-import OscataMark from "../components/OscataMark";
+import BoxTeamMark from "../components/BoxTeamMark";
 import MobileProgressStrip from "../components/MobileProgressStrip";
 import { AppLanguage, getLocalizedTitle } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
@@ -411,16 +411,16 @@ export default function Library({
 
   // Drive the brand-mark animation from a body data-attribute so both the
   // sidebar wordmark and the mobile header logo react without prop drilling.
-  // CSS in shell.css listens for `body[data-oscata-indexing="true"]` and
+  // CSS in shell.css listens for `body[data-boxteam-indexing="true"]` and
   // accelerates the ring rotation.
   useEffect(() => {
     if (isIndexing) {
-      document.body.setAttribute("data-oscata-indexing", "true");
+      document.body.setAttribute("data-boxteam-indexing", "true");
     } else {
-      document.body.removeAttribute("data-oscata-indexing");
+      document.body.removeAttribute("data-boxteam-indexing");
     }
     return () => {
-      document.body.removeAttribute("data-oscata-indexing");
+      document.body.removeAttribute("data-boxteam-indexing");
     };
   }, [isIndexing]);
   const { quitDialogVisible, activeCount, confirmQuit, cancelQuit } =
@@ -538,7 +538,7 @@ export default function Library({
   // ten new episodes no longer fills the first rows with the same poster.
   const [allView, setAllView] = useState<"grouped" | "files">(() => {
     try {
-      const v = localStorage.getItem("oscata-all-view");
+      const v = localStorage.getItem("boxteam-all-view");
       return v === "files" ? "files" : "grouped";
     } catch {
       return "grouped";
@@ -546,7 +546,7 @@ export default function Library({
   });
   useEffect(() => {
     try {
-      localStorage.setItem("oscata-all-view", allView);
+      localStorage.setItem("boxteam-all-view", allView);
     } catch {
       /* storage unavailable — view just won't persist */
     }
@@ -2224,18 +2224,18 @@ export default function Library({
           isolation: "isolate",
         }}
       >
-        {/* Logo — mirrors the desktop sidebar wordmark (`oscata-mark` + "scata"
+        {/* Logo — mirrors the desktop sidebar wordmark (`boxteam-mark` + "BoxTeam"
             text). Sharing the same `.shell-sidebar-wordmark` class keeps the
             sizing, gap, gradient, and animation consistent across surfaces.
             Rotation speed reacts to the indexing state via
-            body[data-oscata-indexing="true"] — see shell.css. */}
+            body[data-boxteam-indexing="true"] — see shell.css. */}
         <span
           className="shell-sidebar-wordmark"
-          aria-label="Oscata"
+          aria-label="BoxTeam"
           style={{ marginRight: 8 }}
         >
-          <OscataMark size={22} />
-          <span>scata</span>
+          <BoxTeamMark size={22} />
+          <span>BoxTeam</span>
         </span>
 
         {/* Nav pills — hidden on mobile (tabs move to bottom bar) */}

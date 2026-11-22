@@ -1,4 +1,4 @@
-# Security guidelines — oscata-tauri
+# Security guidelines — boxteam
 
 These rules exist because the v0.10.14 audit found embarrassingly basic
 mistakes (e.g. `GET /api/settings` returning every API key in plaintext;
@@ -36,7 +36,7 @@ fields so the sentinel appears as dots, indistinguishable from a real value.
 **The audit caught:** `ftp_pass`, `tmdb_api_key`, `emby_api_key`,
 `plex_token`, `smtp_pass`, `telegram_bot_token`.
 
-**Test it:** in browser devtools, `fetch('/api/<endpoint>', {headers: {Authorization: 'Bearer ' + localStorage.oscata_web_token}}).then(r => r.json())`.
+**Test it:** in browser devtools, `fetch('/api/<endpoint>', {headers: {Authorization: 'Bearer ' + localStorage.boxteam_web_token}}).then(r => r.json())`.
 Inspect the response. No secrets allowed.
 
 ---
@@ -45,13 +45,13 @@ Inspect the response. No secrets allowed.
 
 **Rule:** never use [`CorsLayer::permissive()`](https://docs.rs/tower-http/latest/tower_http/cors/struct.CorsLayer.html#method.permissive)
 in a build that can be exposed to the internet. The build_cors_layer fn in
-[`web/mod.rs`](../src-tauri/src/web/mod.rs) reads `OSCATA_WEBGUI_ALLOWED_ORIGINS`
+[`web/mod.rs`](../src-tauri/src/web/mod.rs) reads `BOXTEAM_WEBGUI_ALLOWED_ORIGINS`
 from env, falls back to the DB-stored `app_url`, and only as a last resort
 falls back to permissive with a loud warning.
 
 When you add a new origin (e.g. a mobile app, a dev tool, a webhook target):
 
-1. Add it to `OSCATA_WEBGUI_ALLOWED_ORIGINS` in the docker-compose / Unraid
+1. Add it to `BOXTEAM_WEBGUI_ALLOWED_ORIGINS` in the docker-compose / Unraid
    template — not in code.
 2. Never add `*` to that env. Never. The bearer token model means CORS is
    the only thing stopping a malicious page from reading `/api/settings`.
@@ -76,7 +76,7 @@ real origin should include the header.
    [`client_ip::client_ip(&headers, peer.ip())`](../src-tauri/src/web/client_ip.rs).
    `peer_addr` from Axum's `ConnectInfo` is the reverse-proxy IP (`127.0.0.1`)
    in production — useless for rate-limiting or auditing. `X-Forwarded-For`
-   is trusted ONLY when peer is in `OSCATA_TRUSTED_PROXIES`.
+   is trusted ONLY when peer is in `BOXTEAM_TRUSTED_PROXIES`.
 
 3. **Constant-time comparison for secret material.** Never compare tokens /
    hashes with `==`, `String::eq`, or any short-circuiting equality. Pass
@@ -274,7 +274,7 @@ When the diff touches `web/` or anything storing credentials:
 
 Internal-only thoughts on why v0.10.14 shipped with these holes:
 
-1. **Velocity-over-care defaults in a desktop-first app.** Oscata started
+1. **Velocity-over-care defaults in a desktop-first app.** BoxTeam started
    as a Tauri desktop tool where the only user is the human at the
    keyboard. When the web GUI was bolted on, the auth model was added but
    the data model — which assumed a single trusted user — wasn't

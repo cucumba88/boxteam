@@ -1,12 +1,12 @@
-# Oscata FTP Client
+# BoxTeam
 
-Oscata FTP Client is a desktop media-library browser built with Tauri, React, TypeScript, and Rust.
+BoxTeam (formerly Oscata) is a desktop media-library browser built with Tauri, React, TypeScript, and Rust.
 
 It connects to an FTP media source, indexes movie and TV files, enriches them with TMDB metadata, and presents everything in a polished desktop UI with downloads, badges, filters, bilingual metadata, and grouped browsing.
 
 ## What the app does
 
-Oscata FTP Client is designed for people who keep a remote FTP-based media library and want a desktop app that feels closer to a modern streaming/browser experience instead of a raw file listing.
+BoxTeam is designed for people who keep a remote FTP-based media library and want a desktop app that feels closer to a modern streaming/browser experience instead of a raw file listing.
 
 Today the app can:
 
@@ -30,7 +30,7 @@ The backend scans the configured FTP root, parses media filenames, and stores re
 
 ### Metadata enrichment
 
-Oscata FTP Client uses TMDB to match titles and store posters, overviews, ratings, dates, genres, and localized metadata. Manual fixes are preserved and bulk refresh actions avoid overwriting manual matches.
+BoxTeam uses TMDB to match titles and store posters, overviews, ratings, dates, genres, and localized metadata. Manual fixes are preserved and bulk refresh actions avoid overwriting manual matches.
 
 ### Downloads
 
@@ -124,10 +124,10 @@ Key settings include:
 
 ## Data storage
 
-Oscata FTP Client stores its local database in the user data directory under:
+BoxTeam stores its local database in the user data directory under:
 
 ```text
-oscata-tauri/library.db
+boxteam/library.db
 ```
 
 That database includes:
@@ -144,18 +144,18 @@ You can also export the database from Settings and later import it into a fresh 
 
 ## Self-hosting with Docker (NAS / Synology / Unraid)
 
-Besides the desktop app, Oscata ships a headless Docker image that exposes the
-web UI on port `47860`. The official image (`ghcr.io/cucumba88/oscata:latest`)
+Besides the desktop app, BoxTeam ships a headless Docker image that exposes the
+web UI on port `47860`. The official image (`ghcr.io/cucumba88/boxteam:latest`)
 is built for `linux/amd64`.
 
 Quick start:
 
 ```bash
-docker run -d --name oscata --restart unless-stopped \
+docker run -d --name boxteam --restart unless-stopped \
   -p 47860:47860 \
-  -v oscata-config:/config \
-  -v oscata-downloads:/downloads \
-  ghcr.io/cucumba88/oscata:latest
+  -v boxteam-config:/config \
+  -v boxteam-downloads:/downloads \
+  ghcr.io/cucumba88/boxteam:latest
 ```
 
 - **Full Docker guide:** [`docker/README.md`](docker/README.md) — env vars, reverse proxy, persistent volumes.
@@ -179,7 +179,7 @@ npm run build
 
 ## Release / versioning workflow
 
-Oscata FTP Client now uses `package.json` as the main app version source, and the local release script keeps Rust metadata in sync.
+BoxTeam now uses `package.json` as the main app version source, and the local release script keeps Rust metadata in sync.
 
 Available commands:
 
@@ -288,7 +288,7 @@ The runtime updater is currently disabled/removed. Versioning and release prepar
 
 - The app currently uses scheduled indexing and cached metadata to avoid unnecessary full refreshes.
 - Downloads and library state are designed to persist locally between sessions.
-- The current desktop bundle identifier is `com.oscata.media`.
+- The current desktop bundle identifier is `com.boxteam.media`.
 
 ## License
 

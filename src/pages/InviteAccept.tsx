@@ -104,7 +104,7 @@ export default function InviteAccept({ token, onAccepted }: InviteAcceptProps) {
             Accept Invitation
           </div>
           <div style={{ fontSize: 14, color: "var(--color-text-muted)", marginTop: 4 }}>
-            Complete your account setup to join Oscata.
+            Complete your account setup to join BoxTeam.
           </div>
         </div>
 
