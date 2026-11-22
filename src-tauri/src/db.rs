@@ -324,6 +324,49 @@ pub struct WatchlistAutoItem {
     pub season: Option<i64>,
     pub episode: Option<i64>,
     pub ftp_relative_path: Option<String>,
+    /// `watchlist.scope`: "all" or "latest".
+    pub scope: String,
+    /// `watchlist.latest_season` as stored when the title was added.
+    pub latest_season: Option<i64>,
+}
+
+/// SQL predicate (aliases `m` = media_items, `w` = watchlist) that keeps a
+/// media row only when its TMDB type agrees with the watchlist entry. TMDB
+/// movie and TV ids are separate namespaces, so joining on `tmdb_id` alone
+/// let a watched show match (and auto-download) a movie sharing its id.
+/// Rows whose type is unknown or not movie/tv (e.g. legacy "documentary")
+/// still match, as before.
+const WATCHLIST_TYPE_MATCH: &str = "(COALESCE(NULLIF(m.tmdb_type, ''), m.media_type) IS NULL
+        OR COALESCE(NULLIF(m.tmdb_type, ''), m.media_type) NOT IN ('movie', 'tv')
+        OR COALESCE(NULLIF(m.tmdb_type, ''), m.media_type) = w.tmdb_type)";
+
+/// For watchlist entries with `scope = "latest"`, drops candidates from any
+/// season older than the newest one known (the larger of the season stored
+/// on the watchlist row and the newest season indexed for that title).
+/// Candidates without a season number (movies, unparsed packs) are kept.
+pub fn retain_latest_season_candidates(items: Vec<WatchlistAutoItem>) -> Vec<WatchlistAutoItem> {
+    let mut newest: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for it in items.iter().filter(|i| i.scope == "latest") {
+        let best = it.season.max(it.latest_season);
+        if let Some(b) = best {
+            let e = newest.entry(it.tmdb_id).or_insert(b);
+            if b > *e {
+                *e = b;
+            }
+        }
+    }
+    items
+        .into_iter()
+        .filter(|it| {
+            if it.scope != "latest" {
+                return true;
+            }
+            match (it.season, newest.get(&it.tmdb_id)) {
+                (Some(s), Some(&n)) => s >= n,
+                _ => true,
+            }
+        })
+        .collect()
 }
 
 
@@ -766,12 +809,15 @@ impl Db {
         ).ok();
 
         // Add profile_id to watchlist (references quality_profiles; default=1=Any)
-        conn.execute_batch(
-            "ALTER TABLE watchlist ADD COLUMN profile_id INTEGER NOT NULL DEFAULT 1;",
-        ).ok();
+        let profile_id_column_added = conn
+            .execute_batch("ALTER TABLE watchlist ADD COLUMN profile_id INTEGER NOT NULL DEFAULT 1;")
+            .is_ok();
 
-        // Migrate old quality_tier values to profile_id (runs once; safe if profile_id already set)
-        conn.execute_batch(
+        // Migrate old quality_tier values to profile_id. Only right after the
+        // column is created: running it on every start silently reverted any
+        // item the user had set back to profile 1 ("Any") to its legacy tier.
+        if profile_id_column_added {
+            conn.execute_batch(
             "UPDATE watchlist SET profile_id =
                CASE quality_tier
                  WHEN 'hd'  THEN 2
@@ -780,7 +826,8 @@ impl Db {
                  ELSE 1
                END
              WHERE profile_id = 1;",
-        ).ok();
+            ).ok();
+        }
 
         // Globalize the watchlist onto the shared house account (user_id=0).
         //
@@ -3077,17 +3124,17 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT w.id, w.user_id, w.tmdb_id, w.tmdb_type, w.title, w.title_en,
+                &format!("SELECT w.id, w.user_id, w.tmdb_id, w.tmdb_type, w.title, w.title_en,
                         w.poster, w.overview, w.overview_en, w.status, w.release_date,
                         w.year, w.latest_season, w.next_episode_date, w.scope, w.auto_download,
                         w.profile_id, w.added_at,
                         COUNT(m.id) AS library_count,
                         CASE WHEN COUNT(m.id) > 0 THEN 'available' ELSE 'pending' END AS library_status
                  FROM watchlist w
-                 LEFT JOIN media_items m ON m.tmdb_id = w.tmdb_id
+                 LEFT JOIN media_items m ON m.tmdb_id = w.tmdb_id AND {WATCHLIST_TYPE_MATCH}
                  WHERE w.user_id = ?1
                  GROUP BY w.id
-                 ORDER BY w.added_at DESC",
+                 ORDER BY w.added_at DESC"),
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -3157,16 +3204,16 @@ impl Db {
     ) -> Result<Option<WatchlistItem>, String> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT w.id, w.user_id, w.tmdb_id, w.tmdb_type, w.title, w.title_en,
+            &format!("SELECT w.id, w.user_id, w.tmdb_id, w.tmdb_type, w.title, w.title_en,
                     w.poster, w.overview, w.overview_en, w.status, w.release_date,
                     w.year, w.latest_season, w.next_episode_date, w.scope, w.auto_download,
                     w.profile_id, w.added_at,
                     COUNT(m.id) AS library_count,
                     CASE WHEN COUNT(m.id) > 0 THEN 'available' ELSE 'pending' END AS library_status
              FROM watchlist w
-             LEFT JOIN media_items m ON m.tmdb_id = w.tmdb_id
+             LEFT JOIN media_items m ON m.tmdb_id = w.tmdb_id AND {WATCHLIST_TYPE_MATCH}
              WHERE w.tmdb_id=?1 AND w.user_id=?2
-             GROUP BY w.id",
+             GROUP BY w.id"),
             params![tmdb_id, user_id],
             |row| {
                 Ok(WatchlistItem {
@@ -3249,13 +3296,15 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT m.ftp_path, m.filename, m.tmdb_id,
+                &format!("SELECT m.ftp_path, m.filename, m.tmdb_id,
                         m.media_type, m.tmdb_genres, COALESCE(m.tmdb_title, m.title),
                         m.resolution, m.release_type, m.hdr, m.codec, m.audio_codec,
-                        m.size_bytes, w.profile_id, m.season, m.episode, m.ftp_relative_path
+                        m.size_bytes, w.profile_id, m.season, m.episode, m.ftp_relative_path,
+                        w.scope, w.latest_season
                  FROM media_items m
                  INNER JOIN watchlist w
-                    ON w.tmdb_id = m.tmdb_id AND w.auto_download = 1 AND w.user_id = 0",
+                    ON w.tmdb_id = m.tmdb_id AND w.auto_download = 1 AND w.user_id = 0
+                   AND {WATCHLIST_TYPE_MATCH}"),
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -3277,6 +3326,8 @@ impl Db {
                     season: row.get(13)?,
                     episode: row.get(14)?,
                     ftp_relative_path: row.get(15)?,
+                    scope: row.get(16)?,
+                    latest_season: row.get(17)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -4116,5 +4167,81 @@ mod tests {
 
         // One-shot: a second run is a no-op.
         assert_eq!(db.clear_leading_year_mismatches().expect("migration 2"), 0);
+    }
+
+    // ── watchlist QA (type-aware join, latest-season scope, profile migration) ──
+
+    #[test]
+    fn watchlist_does_not_match_media_of_the_other_tmdb_type() {
+        let db = in_memory_db();
+        {
+            let conn = db.conn.lock().unwrap();
+            // A MOVIE and a TV episode that happen to share TMDB id 1399.
+            conn.execute(
+                "INSERT INTO media_items (ftp_path, filename, tmdb_id, tmdb_type, media_type)
+                 VALUES ('/F/Movies/m.mkv', 'm.mkv', 1399, 'movie', 'movie')",
+                [],
+            ).expect("insert movie");
+            conn.execute(
+                "INSERT INTO media_items (ftp_path, filename, tmdb_id, tmdb_type, media_type, season, episode)
+                 VALUES ('/F/TV/s01e01.mkv', 's01e01.mkv', 1399, 'tv', 'tv', 1, 1)",
+                [],
+            ).expect("insert episode");
+        }
+        db.add_watchlist_item(0, 1399, "tv", "Show", None, None, None, None, None, None,
+            None, Some(1), "all", true, 1).expect("add");
+
+        let list = db.get_watchlist(0).expect("list");
+        assert_eq!(list[0].library_count, 1, "only the TV file counts");
+        let c = db.get_watchlist_auto_download_candidates().expect("candidates");
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].filename, "s01e01.mkv", "the movie must never be auto-downloaded");
+    }
+
+    #[test]
+    fn latest_scope_keeps_only_the_newest_season() {
+        let db = in_memory_db();
+        {
+            let conn = db.conn.lock().unwrap();
+            for (s, e) in [(1, 1), (1, 2), (2, 1), (3, 1), (3, 2)] {
+                conn.execute(
+                    "INSERT INTO media_items (ftp_path, filename, tmdb_id, tmdb_type, media_type, season, episode)
+                     VALUES (?1, ?1, 77, 'tv', 'tv', ?2, ?3)",
+                    params![format!("/F/TV/s{s}e{e}.mkv"), s, e],
+                ).expect("insert");
+            }
+        }
+        // Stored latest_season is stale (2); the library already has season 3.
+        db.add_watchlist_item(0, 77, "tv", "Show", None, None, None, None, None, None,
+            None, Some(2), "latest", true, 1).expect("add");
+        let kept = retain_latest_season_candidates(
+            db.get_watchlist_auto_download_candidates().expect("candidates"));
+        let mut seasons: Vec<i64> = kept.iter().filter_map(|c| c.season).collect();
+        seasons.sort();
+        assert_eq!(seasons, vec![3, 3]);
+
+        // Scope "all" keeps everything.
+        db.update_watchlist_item(1, 0, "all", true, 1).expect("update");
+        let all = retain_latest_season_candidates(
+            db.get_watchlist_auto_download_candidates().expect("candidates"));
+        assert_eq!(all.len(), 5);
+    }
+
+    #[test]
+    fn profile_choice_any_survives_restart_migrations() {
+        let db = in_memory_db();
+        db.add_watchlist_item(0, 9, "movie", "M", None, None, None, None, None, None,
+            None, None, "all", false, 4).expect("add");
+        {
+            let conn = db.conn.lock().unwrap();
+            // Legacy tier left over from an old install.
+            conn.execute("UPDATE watchlist SET quality_tier = '4k'", []).expect("tier");
+        }
+        db.update_watchlist_item(1, 0, "all", false, 1).expect("set Any");
+        {
+            let conn = db.conn.lock().unwrap();
+            Db::apply_migrations(&conn).expect("re-run migrations");
+        }
+        assert_eq!(db.get_watchlist(0).expect("list")[0].profile_id, 1);
     }
 }

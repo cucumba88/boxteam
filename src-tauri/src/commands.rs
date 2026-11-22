@@ -3266,6 +3266,9 @@ pub async fn trigger_watchlist_auto_downloads(
         }
     };
     println!("[watchlist] auto-download: {} candidate file(s) matched watchlist entries", candidates.len());
+    // Honour "Latest season" scope: without this, a show followed with
+    // scope=latest auto-downloaded its whole back catalogue.
+    let candidates = crate::db::retain_latest_season_candidates(candidates);
 
     // Group candidates by (tmdb_id, season, episode) so we pick the best
     // quality version for each distinct piece of content.
@@ -3302,16 +3305,25 @@ pub async fn trigger_watchlist_auto_downloads(
         let item = &group[scored[0].1];
 
         // Stable, root-independent identity for grab-history dedup.
-        let rel = item.ftp_relative_path.clone().unwrap_or_else(|| {
-            crate::db::Db::compute_relative_path(&item.ftp_path, &config.ftp_root)
-        });
+        let rel_of = |c: &crate::db::WatchlistAutoItem| {
+            c.ftp_relative_path.clone().unwrap_or_else(|| {
+                crate::db::Db::compute_relative_path(&c.ftp_path, &config.ftp_root)
+            })
+        };
+        let rel = rel_of(item);
 
-        // Skip if this release was already auto-grabbed in a previous run.
-        // This is the primary guard against re-downloading the whole watchlist
-        // after a version upgrade (when recomputed paths or moved files would
-        // otherwise defeat the `local_path.exists()` check below).
-        if db.is_watchlist_grabbed(&rel).unwrap_or(false) {
-            println!("[watchlist] auto-download: '{}' already grabbed previously, skipping", item.filename);
+        // Skip if this piece of content (any release of this movie/episode)
+        // was already auto-grabbed in a previous run. This is the primary
+        // guard against re-downloading the whole watchlist after a version
+        // upgrade, and it also stops a second release of an episode that was
+        // already grabbed (e.g. a new 1080p after the 720p) from being
+        // downloaded again as a duplicate.
+        if let Some(prev) = group
+            .iter()
+            .find(|c| db.is_watchlist_grabbed(&rel_of(c)).unwrap_or(false))
+        {
+            println!("[watchlist] auto-download: '{}' already grabbed previously ('{}'), skipping",
+                item.filename, prev.filename);
             continue;
         }
 

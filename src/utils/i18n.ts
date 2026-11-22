@@ -1248,6 +1248,27 @@ const messages = {
     en: "Remove from watchlist",
   },
   "watchlist.alreadyAdded": { es: "Ya añadido", en: "Already added" },
+  "watchlist.files": { es: "archivos", en: "files" },
+  "watchlist.typeTv": { es: "Serie", en: "TV show" },
+  "watchlist.clearFilters": { es: "Limpiar filtros", en: "Clear filters" },
+  "watchlist.clearSearch": { es: "Borrar búsqueda", en: "Clear search" },
+  "watchlist.confirmRemove": { es: "¿Quitar?", en: "Remove?" },
+  "watchlist.confirmRemoveLong": {
+    es: "Sí, quitar",
+    en: "Yes, remove",
+  },
+  "watchlist.saveError": {
+    es: "No se han podido guardar los cambios. Inténtalo de nuevo.",
+    en: "Couldn't save the changes. Please try again.",
+  },
+  "watchlist.removeError": {
+    es: "No se ha podido quitar del seguimiento.",
+    en: "Couldn't remove it from the watchlist.",
+  },
+  "watchlist.onServerCount": {
+    es: "{count}/{total} en el servidor",
+    en: "{count}/{total} on the server",
+  },
 
   // Quality Profiles (Settings section)
   "qualityProfile.title": { es: "Perfiles de calidad", en: "Quality Profiles" },

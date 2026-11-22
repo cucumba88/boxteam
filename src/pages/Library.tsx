@@ -501,6 +501,19 @@ export default function Library({
   // "fix match". Lifted here so the Library toolbar can render the
   // controls in the same place as the Movies/TV tabs.
   const [watchlistSelecting, setWatchlistSelecting] = useState(false);
+  // Ids the Watchlist tab currently shows (after its search/filters). "Select
+  // all" must only pick these — selecting hidden rows made "Remove (N)"
+  // silently delete titles the user couldn't see.
+  const [watchlistVisibleIds, setWatchlistVisibleIds] = useState<number[]>([]);
+  const handleWatchlistVisibleIds = useCallback((ids: number[]) => {
+    setWatchlistVisibleIds(ids);
+    // Drop checks on rows a filter just hid, for the same reason.
+    const visible = new Set(ids);
+    setWatchlistCheckedIds((prev) => {
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, []);
   const [watchlistShowAdd, setWatchlistShowAdd] = useState(false);
   const [watchlistCheckedIds, setWatchlistCheckedIds] = useState<Set<number>>(
     new Set(),
@@ -3142,18 +3155,16 @@ export default function Library({
                     )}
                     <button
                       onClick={() =>
-                        setWatchlistCheckedIds(
-                          new Set(watchlist.items.map((item) => item.id)),
-                        )
+                        setWatchlistCheckedIds(new Set(watchlistVisibleIds))
                       }
-                      disabled={watchlist.items.length === 0}
+                      disabled={watchlistVisibleIds.length === 0}
                       title={t(language, "library.selectAll")}
                       aria-label={t(language, "library.selectAll")}
                       style={{
                         ...ghostBtn,
-                        opacity: watchlist.items.length === 0 ? 0.5 : 1,
+                        opacity: watchlistVisibleIds.length === 0 ? 0.5 : 1,
                         cursor:
-                          watchlist.items.length === 0 ? "default" : "pointer",
+                          watchlistVisibleIds.length === 0 ? "default" : "pointer",
                       }}
                     >
                       <CheckSquare
@@ -3173,10 +3184,23 @@ export default function Library({
                             ? `¿Quitar ${count} título${count === 1 ? "" : "s"} del seguimiento?`
                             : `Remove ${count} title${count === 1 ? "" : "s"} from the watchlist?`;
                         if (!confirm(msg)) return;
-                        for (const id of watchlistCheckedIds) {
-                          void watchlist.remove(id);
-                        }
+                        const ids = [...watchlistCheckedIds];
                         exitWatchlistSelect();
+                        void (async () => {
+                          let failed = 0;
+                          for (const id of ids) {
+                            try {
+                              await watchlist.remove(id);
+                            } catch (e) {
+                              failed += 1;
+                              console.error("[watchlist] bulk remove failed:", e);
+                            }
+                          }
+                          if (failed > 0) {
+                            await watchlist.refresh();
+                            window.alert(t(language, "watchlist.removeError"));
+                          }
+                        })();
                       }}
                       disabled={watchlistCheckedIds.size === 0}
                       title={language === "es" ? "Quitar" : "Remove"}
@@ -3868,6 +3892,7 @@ export default function Library({
                 checkedIds={watchlistCheckedIds}
                 onToggleCheck={toggleWatchlistCheck}
                 onOpenAdd={() => setWatchlistShowAdd(true)}
+                onVisibleIdsChange={handleWatchlistVisibleIds}
               />
             ) : (
               <>

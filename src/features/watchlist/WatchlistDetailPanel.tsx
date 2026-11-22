@@ -68,6 +68,9 @@ export default function WatchlistDetailPanel({
   const [autoDownload, setAutoDownload] = useState(item.auto_download === 1);
   const [profileId, setProfileId] = useState<number>(item.profile_id ?? 1);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Two-step remove: the first click arms the button, the second confirms.
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const { profiles } = useQualityProfiles();
   const isMobile = useIsMobile();
   const [coverage, setCoverage] = useState<WatchlistCoverageItem[]>([]);
@@ -105,8 +108,12 @@ export default function WatchlistDetailPanel({
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveError(null);
     try {
       await onUpdate(item.id, scope, autoDownload, profileId);
+    } catch (e) {
+      console.error("[watchlist] save failed:", e);
+      setSaveError(t(language, "watchlist.saveError"));
     } finally {
       setSaving(false);
     }
@@ -407,7 +414,9 @@ export default function WatchlistDetailPanel({
                     } 36%, transparent)`,
                   }}
                 >
-                  {item.tmdb_type === "tv" ? "TV" : "Película"}
+                  {item.tmdb_type === "tv"
+                    ? t(language, "watchlist.typeTv")
+                    : t(language, "watchlist.movie")}
                 </span>
                 <span
                   style={{
@@ -726,6 +735,17 @@ export default function WatchlistDetailPanel({
                   onChange={(e) => setProfileId(Number(e.target.value))}
                   style={selectStyle}
                 >
+                  {profiles.length > 0 &&
+                    !profiles.some((p) => p.id === profileId) && (
+                      // The item's profile was deleted (profile_id reset to
+                      // 0). Show what auto-download actually uses instead of
+                      // silently displaying the first profile in the list.
+                      <option value={profileId}>
+                        {language === "es"
+                          ? "Cualquiera (perfil eliminado)"
+                          : "Any (deleted profile)"}
+                      </option>
+                    )}
                   {profiles.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
@@ -734,6 +754,14 @@ export default function WatchlistDetailPanel({
                 </select>
               </div>
 
+              {saveError && (
+                <div
+                  role="alert"
+                  style={{ fontSize: 12, color: "var(--color-danger)" }}
+                >
+                  {saveError}
+                </div>
+              )}
               {isDirty && (
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
                   <button
@@ -811,9 +839,10 @@ export default function WatchlistDetailPanel({
                     overflow: "hidden",
                   }}
                 >
-                  {seasons.map((season) => (
+                  {seasons.map((season, idx) => (
                     <SeasonSection
                       key={season.season_number}
+                      defaultOpen={idx === seasons.length - 1}
                       season={season}
                       coverageByEp={coverageByEp}
                       onNavigateToItem={onNavigateToItem}
@@ -868,9 +897,35 @@ export default function WatchlistDetailPanel({
                     : "Stop tracking this title and remove its configuration."}
                 </div>
               </div>
+              {confirmingRemove && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingRemove(false)}
+                  style={{
+                    background: "transparent",
+                    border: "1px solid var(--color-border)",
+                    color: "var(--color-text)",
+                    borderRadius: 999,
+                    padding: "9px 16px",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    fontFamily: "inherit",
+                    flexShrink: 0,
+                  }}
+                >
+                  {t(language, "watchlist.cancel")}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => onRemove(item.id)}
+                onClick={() => {
+                  if (!confirmingRemove) {
+                    setConfirmingRemove(true);
+                    return;
+                  }
+                  onRemove(item.id);
+                }}
                 style={{
                   background: "var(--color-danger)",
                   border: "none",
@@ -884,7 +939,11 @@ export default function WatchlistDetailPanel({
                   flexShrink: 0,
                 }}
               >
-                {language === "es" ? "Eliminar" : "Remove"}
+                {confirmingRemove
+                  ? t(language, "watchlist.confirmRemoveLong")
+                  : language === "es"
+                    ? "Eliminar"
+                    : "Remove"}
               </button>
             </div>
           </Section>
@@ -947,9 +1006,13 @@ interface SeasonSectionProps {
   tmdbId: number;
   mediaType: string;
   language: AppLanguage;
+  /** Only the newest season starts expanded so long-running shows don't
+   *  open as a wall of hundreds of episode rows. */
+  defaultOpen?: boolean;
 }
 
 function SeasonSection({
+  defaultOpen = true,
   season,
   coverageByEp,
   onNavigateToItem,
@@ -957,7 +1020,7 @@ function SeasonSection({
   mediaType,
   language,
 }: SeasonSectionProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   const today = new Date().toISOString().slice(0, 10);
 
   const downloadedCount = season.episodes.filter((ep) => {
@@ -965,12 +1028,28 @@ function SeasonSection({
       coverageByEp.get(`${season.season_number},${ep.episode_number}`) ?? [];
     return files.some((c) => c.downloaded);
   }).length;
+  // Episodes with at least one file indexed on the FTP (downloaded or not).
+  const onServerCount = season.episodes.filter(
+    (ep) =>
+      (coverageByEp.get(`${season.season_number},${ep.episode_number}`) ?? [])
+        .length > 0,
+  ).length;
+  // TMDB names seasons "Season N" in English and "Temporada N" in Spanish;
+  // both just repeat our own "Temporada N" label.
+  const genericName = new RegExp(
+    `^(season|temporada)\\s+${season.season_number}$`,
+    "i",
+  );
+  const showSeasonName =
+    !!season.name && !genericName.test(season.name.trim());
 
   return (
     <div>
       {/* Season header */}
       <button
+        type="button"
         onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
         style={{
           display: "flex",
           alignItems: "center",
@@ -989,7 +1068,7 @@ function SeasonSection({
       >
         <span>
           {language === "es" ? "Temporada" : "Season"} {season.season_number}
-          {season.name && season.name !== `Season ${season.season_number}` && (
+          {showSeasonName && (
             <span
               style={{
                 fontWeight: 400,
@@ -1008,9 +1087,16 @@ function SeasonSection({
             gap: 8,
           }}
         >
-          {downloadedCount > 0 && (
+          {downloadedCount > 0 ? (
             <span style={{ color: "var(--color-success)", fontSize: 11 }}>
-              {downloadedCount}/{season.episodes.length}
+              ✓ {downloadedCount}/{season.episodes.length}
+            </span>
+          ) : (
+            <span style={{ color: "var(--color-teal)", fontSize: 11 }}>
+              {t(language, "watchlist.onServerCount", {
+                count: onServerCount,
+                total: season.episodes.length,
+              })}
             </span>
           )}
           <span style={{ fontSize: 10 }}>{open ? "▲" : "▼"}</span>

@@ -35,6 +35,9 @@ interface WatchlistTabProps {
    *  the outer toolbar (same row as the Select / bulk controls). The empty
    *  state's "Add a title" CTA invokes this too. */
   onOpenAdd?: () => void;
+  /** Reports the ids currently visible after search/filters so "Select all"
+   *  in Library's toolbar only selects what the user can see. */
+  onVisibleIdsChange?: (ids: number[]) => void;
 }
 
 type TypeFilter = "all" | "movie" | "tv";
@@ -48,6 +51,7 @@ export default function WatchlistTab({
   checkedIds,
   onToggleCheck,
   onOpenAdd,
+  onVisibleIdsChange,
 }: WatchlistTabProps) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -98,10 +102,15 @@ export default function WatchlistTab({
 
   const filtered = useMemo(() => {
     return watchlist.items.filter((item) => {
-      const title =
-        language === "es" ? item.title : (item.title_en ?? item.title);
-      if (search && !foldForSearch(title).includes(foldForSearch(search)))
-        return false;
+      // Match either language's title: the card may show the Spanish one
+      // while the user types the original/English name (or vice versa).
+      if (search) {
+        const q = foldForSearch(search);
+        const hit = [item.title, item.title_en].some(
+          (title) => !!title && foldForSearch(title).includes(q),
+        );
+        if (!hit) return false;
+      }
       if (typeFilter !== "all" && item.tmdb_type !== typeFilter) return false;
       if (statusFilter !== "all" && item.library_status !== statusFilter)
         return false;
@@ -109,9 +118,26 @@ export default function WatchlistTab({
     });
   }, [watchlist.items, search, typeFilter, statusFilter, language]);
 
+  useEffect(() => {
+    onVisibleIdsChange?.(filtered.map((item) => item.id));
+  }, [filtered, onVisibleIdsChange]);
+
+  const hasActiveFilters =
+    search !== "" || typeFilter !== "all" || statusFilter !== "all";
+  const clearFilters = () => {
+    setSearch("");
+    setTypeFilter("all");
+    setStatusFilter("all");
+  };
+
   const handleRemove = (id: number) => {
-    void watchlist.remove(id);
-    if (selected?.id === id) setSelected(null);
+    watchlist.remove(id).catch((e) => {
+      console.error("[watchlist] remove failed:", e);
+      window.alert(t(language, "watchlist.removeError"));
+    });
+    // closeDetail (not just setSelected) so the web URL leaves
+    // /watchlist/<id>; otherwise Back reopened a title that no longer exists.
+    if (selected?.id === id) closeDetail();
   };
 
   const handleUpdate = async (
@@ -242,7 +268,7 @@ export default function WatchlistTab({
               <button
                 type="button"
                 onClick={() => setSearch("")}
-                aria-label="Clear"
+                aria-label={t(language, "watchlist.clearSearch")}
                 style={{
                   flexShrink: 0,
                   background: "none",
@@ -372,6 +398,11 @@ export default function WatchlistTab({
                 {t(language, "watchlist.addTitleCta")}
               </Button>
             )}
+            {watchlist.items.length > 0 && hasActiveFilters && (
+              <Button variant="secondary" icon={X} onClick={clearFilters}>
+                {t(language, "watchlist.clearFilters")}
+              </Button>
+            )}
           </div>
         ) : (
           <div
@@ -381,7 +412,7 @@ export default function WatchlistTab({
               // legible across the breakpoint instead of being crammed
               // into 3 narrow columns on phones.
               gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-              gap: 14,
+              gap: "18px 14px",
             }}
           >
             {filtered.map((item) => (
@@ -426,6 +457,7 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       style={{
         display: "inline-flex",
         alignItems: "center",

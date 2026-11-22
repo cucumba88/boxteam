@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, Clapperboard, Download, Tv, X } from "lucide-react";
 import type { WatchlistItem } from "./types";
 import { AppLanguage } from "../../utils/mediaLanguage";
 import { useIsMobile } from "../../hooks/useIsMobile";
+import { t } from "../../utils/i18n";
 
 interface WatchlistCardProps {
   item: WatchlistItem;
@@ -28,11 +29,17 @@ export default function WatchlistCard({
   onToggleCheck,
 }: WatchlistCardProps) {
   const [hovered, setHovered] = useState(false);
+  // Two-step remove: the first click on the X arms it, the second removes.
+  // A single stray click used to drop the title and its settings at once.
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const isMobile = useIsMobile();
 
   // Hide the per-card remove button while in select mode — bulk actions
-  // happen via the toolbar.
-  const showRemove = !selecting && (isMobile || hovered);
+  // happen via the toolbar. On touch screens there is no hover, so the X
+  // was permanently drawn over every poster (and hid the auto-download /
+  // next-episode markers); mobile removes from the detail page or via
+  // Select instead.
+  const showRemove = !selecting && !isMobile && (hovered || confirmingRemove);
 
   const poster = item.poster
     ? item.poster.startsWith("http")
@@ -43,8 +50,15 @@ export default function WatchlistCard({
   const displayTitle =
     language === "es" ? item.title : (item.title_en ?? item.title);
 
+  // Compare calendar days: TMDB gives a bare date ("2026-12-04"), which
+  // `new Date()` parses as UTC midnight, so an episode airing *today* used
+  // to vanish from the card in timezones east of UTC.
+  const todayIso = new Date().toLocaleDateString("sv-SE");
   const nextEpSoon =
-    item.next_episode_date && new Date(item.next_episode_date) > new Date();
+    !!item.next_episode_date && item.next_episode_date.slice(0, 10) >= todayIso;
+  const nextEpDate = item.next_episode_date
+    ? new Date(`${item.next_episode_date.slice(0, 10)}T12:00:00`)
+    : null;
 
   const activeBorder = checked
     ? "var(--color-primary)"
@@ -52,20 +66,44 @@ export default function WatchlistCard({
       ? "var(--color-primary)"
       : "var(--color-border)";
 
+  const activate = () => {
+    if (selecting) {
+      onToggleCheck?.(item.id);
+    } else {
+      onOpen(item);
+    }
+  };
+
   return (
     <div
-      onClick={() => {
-        if (selecting) {
-          onToggleCheck?.(item.id);
-        } else {
-          onOpen(item);
+      role="button"
+      tabIndex={0}
+      aria-label={displayTitle}
+      aria-pressed={selecting ? checked : undefined}
+      onClick={activate}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          activate();
         }
       }}
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setConfirmingRemove(false);
+      }}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        cursor: "pointer",
+        minWidth: 0,
+      }}
+    >
+    <div
       style={{
         position: "relative",
-        cursor: "pointer",
         borderRadius: "var(--radius-lg)",
         overflow: "hidden",
         background: "var(--color-surface)",
@@ -133,12 +171,13 @@ export default function WatchlistCard({
             justifyContent: "center",
             background: "var(--color-surface-2)",
             color: "var(--color-text-muted)",
-            fontSize: 12,
-            padding: 8,
-            textAlign: "center",
           }}
         >
-          {displayTitle}
+          {item.tmdb_type === "tv" ? (
+            <Tv size={30} strokeWidth={1.6} aria-hidden="true" />
+          ) : (
+            <Clapperboard size={30} strokeWidth={1.6} aria-hidden="true" />
+          )}
         </div>
       )}
 
@@ -175,10 +214,11 @@ export default function WatchlistCard({
               item.library_status === "available"
                 ? "var(--color-success)"
                 : "rgba(0,0,0,0.7)",
+            // Muted grey on a near-black pill was barely legible.
             color:
               item.library_status === "available"
                 ? "#fff"
-                : "var(--color-text-muted)",
+                : "rgba(255,255,255,0.85)",
             fontSize: 10,
             fontWeight: 700,
             borderRadius: "var(--radius-full)",
@@ -210,7 +250,8 @@ export default function WatchlistCard({
               whiteSpace: "nowrap",
             }}
           >
-            {item.library_count} {item.tmdb_type === "tv" ? "ep" : "files"}
+            {item.library_count}{" "}
+            {item.tmdb_type === "tv" ? "ep" : t(language, "watchlist.files")}
           </span>
         )}
       </div>
@@ -235,22 +276,28 @@ export default function WatchlistCard({
               title={
                 language === "es" ? "Descarga automática" : "Auto-download"
               }
+              aria-label={
+                language === "es" ? "Descarga automática" : "Auto-download"
+              }
               style={{
                 background: "rgba(0,0,0,0.65)",
                 color: "var(--color-warning)",
-                fontSize: 10,
-                fontWeight: 700,
                 borderRadius: "var(--radius-full)",
-                padding: "2px 6px",
-                whiteSpace: "nowrap",
+                padding: 4,
+                lineHeight: 0,
               }}
             >
-              ↓
+              <Download size={11} strokeWidth={2.6} aria-hidden="true" />
             </span>
           )}
           {nextEpSoon && (
             <span
-              title={new Date(item.next_episode_date!).toLocaleDateString()}
+              title={
+                (language === "es" ? "Próximo episodio: " : "Next episode: ") +
+                nextEpDate!.toLocaleDateString(
+                  language === "es" ? "es-ES" : "en-US",
+                )
+              }
               style={{
                 background: "rgba(0,0,0,0.65)",
                 color: "var(--color-warning)",
@@ -262,7 +309,7 @@ export default function WatchlistCard({
               }}
             >
               ▷{" "}
-              {new Date(item.next_episode_date!).toLocaleDateString(
+              {nextEpDate!.toLocaleDateString(
                 language === "es" ? "es-ES" : "en-US",
                 { day: "numeric", month: "short" },
               )}
@@ -271,34 +318,85 @@ export default function WatchlistCard({
         </div>
       )}
 
-      {/* Remove button — always visible on mobile, hover-only on desktop */}
+      {/* Remove button — desktop hover only; first click asks to confirm */}
       {showRemove && (
         <button
+          type="button"
           onClick={(e) => {
             e.stopPropagation();
+            if (!confirmingRemove) {
+              setConfirmingRemove(true);
+              return;
+            }
             onRemove(item.id);
           }}
           style={{
             position: "absolute",
             top: 6,
             right: 6,
-            background: isMobile ? "rgba(0,0,0,0.65)" : "rgba(0,0,0,0.75)",
+            background: confirmingRemove
+              ? "var(--color-danger)"
+              : "rgba(0,0,0,0.75)",
             border: "none",
-            borderRadius: "50%",
-            width: isMobile ? 24 : 28,
-            height: isMobile ? 24 : 28,
+            borderRadius: 999,
+            minWidth: 28,
+            height: 28,
+            padding: confirmingRemove ? "0 10px" : 0,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            gap: 4,
             cursor: "pointer",
-            color: "var(--color-danger)",
-            padding: 0,
+            color: confirmingRemove ? "#fff" : "var(--color-danger)",
+            fontSize: 12,
+            fontWeight: 700,
+            fontFamily: "inherit",
           }}
-          title="Quitar del watchlist"
+          title={t(language, "watchlist.removeFromWatchlist")}
+          aria-label={t(language, "watchlist.removeFromWatchlist")}
         >
-          <X size={isMobile ? 12 : 14} strokeWidth={2.5} aria-hidden="true" />
+          <X size={14} strokeWidth={2.5} aria-hidden="true" />
+          {confirmingRemove && t(language, "watchlist.confirmRemove")}
         </button>
       )}
+    </div>
+
+      {/* Title + meta under the poster, same as the library cards. Posters
+          alone made titles unreadable when the artwork has no text or is
+          in another language. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, padding: "0 2px" }}>
+        <span
+          title={displayTitle}
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--color-text)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {displayTitle}
+        </span>
+        <span
+          style={{
+            fontSize: 12,
+            color: "var(--color-text-muted)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {[
+            item.year,
+            item.tmdb_type === "tv"
+              ? t(language, "watchlist.typeTv")
+              : t(language, "watchlist.movie"),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      </div>
     </div>
   );
 }
