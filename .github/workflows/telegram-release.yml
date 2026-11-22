@@ -14,6 +14,12 @@ on:
   workflow_run:
     workflows: [Build Linux, Build Windows, Build Docker]
     types: [completed]
+    # Only builds of release tags (head_branch is the tag name). Filtering
+    # here instead of in the job's `if` means main/PR builds don't create
+    # a skipped "Telegram release" run each. A manual Windows re-run for a
+    # release builds from main, so it doesn't trigger this: run this
+    # workflow by hand afterwards if needed.
+    branches: ["v*"]
   # Manual run: re-post a release, or preview the message (dry run).
   workflow_dispatch:
     inputs:
@@ -29,6 +35,10 @@ on:
         description: "Publicar aunque ya se hubiera publicado o falte algún build"
         type: boolean
         default: false
+      edit_message_id:
+        description: "Id de un anuncio ya publicado para reescribirlo con el formato actual (no publica otro)"
+        required: false
+        default: ""
 
 # Serialise runs per release so two builds finishing together can't both post.
 concurrency:
@@ -37,13 +47,9 @@ concurrency:
 
 jobs:
   announce:
-    # Tag builds (push of v*) and manual Windows re-runs for a release tag;
-    # never main-branch or PR builds.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       ((github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v')) ||
-        github.event.workflow_run.event == 'workflow_dispatch'))
+      github.event.workflow_run.conclusion == 'success'
     # Override with the repo variable LINUX_RUNNER_LABELS (JSON array).
     runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["self-hosted", "linux", "x64", "unraid"]') }}
     timeout-minutes: 30
@@ -52,12 +58,14 @@ jobs:
       actions: read # check the Docker build of the tag
 
     steps:
+      # Into its own folder: a sparse checkout of the shared runner workspace
+      # left the next build on the self-hosted runner without package-lock.json.
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          path: _telegram
           sparse-checkout: |
             scripts/telegram-release.mjs
-            .github/workflows/build-docker.yml
           sparse-checkout-cone-mode: false
 
       - name: Setup Node
@@ -66,7 +74,7 @@ jobs:
           node-version: 22
 
       - name: Post to Telegram
-        run: node scripts/telegram-release.mjs
+        run: node _telegram/scripts/telegram-release.mjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -77,3 +85,4 @@ jobs:
           APP_NAME: BoxTeam
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
           FORCE: ${{ inputs.force || 'false' }}
+          EDIT_MESSAGE_ID: ${{ inputs.edit_message_id }}

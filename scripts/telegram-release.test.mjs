@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import {
   MESSAGE_LIMIT,
   buildReleaseMessage,
-  dockerImageFromWorkflow,
   extractTelegramOverride,
   inlineMarkdownToHtml,
   missingAssets,
+  normalizeChatId,
   notesToBlocks,
   uploadCaption,
   visibleLength,
@@ -45,19 +45,18 @@ test("notes become headings, items and paragraphs; version title is dropped", ()
   assert.match(blocks[3].html, /^• Series con &lt;remake&gt;\.$/);
 });
 
-test("message has header, notes, upload hint and no GitHub link when private", () => {
+test("message has header, notes and upload hint, and no links or Docker image", () => {
   const msg = buildReleaseMessage({
     appName: "BoxTeam",
     tag: "v0.18.0",
     notes: NOTES,
     uploads: [{ label: "el instalador de Windows" }],
-    dockerImage: "ghcr.io/cucumba88/boxteam",
   });
   assert.ok(msg.startsWith("🚀 <b>BoxTeam 0.18.0 ya disponible</b>\n\n"));
   assert.ok(msg.includes("<b>🎬 Detección</b>\n• 🐛 <b>Nombres</b>"));
   assert.ok(msg.includes("📥 <b>El instalador de Windows</b>: aquí abajo 👇"));
-  assert.ok(msg.includes("<code>ghcr.io/cucumba88/boxteam:0.18.0</code>"));
-  assert.ok(!msg.includes("github.com"));
+  // Nothing that reveals the owner's account: no GitHub links, no Docker image.
+  assert.ok(!/github\.com|ghcr\.io|cucumba88|docker/i.test(msg));
   assert.ok(!msg.includes("Versión 0.18.0"));
 });
 
@@ -65,10 +64,10 @@ test("long notes are cut at whole blocks and stay under the limit", () => {
   const long = Array.from({ length: 30 }, (_, s) =>
     `### Sección ${s}\n\n` + Array.from({ length: 10 }, (_, i) => `- Cambio ${s}.${i} ${"x".repeat(40)}`).join("\n"),
   ).join("\n\n");
-  const msg = buildReleaseMessage({ appName: "BoxTeam", tag: "v1.0.0", notes: long, releaseUrl: "https://github.com/o/r/releases/tag/v1.0.0" });
+  const msg = buildReleaseMessage({ appName: "BoxTeam", tag: "v1.0.0", notes: long, uploads: [{ label: "el instalador de Windows" }] });
   assert.ok(visibleLength(msg) <= MESSAGE_LIMIT);
-  assert.ok(msg.includes("…y más cambios en las notas completas."));
-  assert.ok(msg.trimEnd().endsWith('Notas completas en GitHub</a>'));
+  assert.ok(msg.includes("…y más cambios."));
+  assert.ok(msg.trimEnd().endsWith("aquí abajo 👇"));
   // Never ends a section on a bare heading.
   assert.ok(!/<b>Sección \d+<\/b>\n\n<i>…y más/.test(msg));
 });
@@ -90,15 +89,18 @@ test("release is complete only with Windows and Linux files", () => {
   );
 });
 
-test("docker image name is read from build-docker.yml", () => {
-  const yaml = "env:\n  IMAGE: ghcr.io/${{ github.repository_owner }}/boxteam\n";
-  assert.equal(dockerImageFromWorkflow(yaml, "cucumba88"), "ghcr.io/cucumba88/boxteam");
-  assert.equal(dockerImageFromWorkflow("", "x"), null);
-});
 
 test("exe caption", () => {
   assert.equal(
     uploadCaption({ appName: "BoxTeam", tag: "v0.18.0", name: "BoxTeam_0.18.0_x64-setup.exe" }),
     "🪟 BoxTeam 0.18.0 para Windows (instalador)",
   );
+});
+
+test("chat id pasted with extras is cleaned up", () => {
+  assert.equal(normalizeChatId(" -4490499603 "), "-4490499603");
+  assert.equal(normalizeChatId('"-4490499603"'), "-4490499603");
+  assert.equal(normalizeChatId("#-4490499603"), "-4490499603");
+  assert.equal(normalizeChatId("https://web.telegram.org/k/#-4490499603"), "-4490499603");
+  assert.equal(normalizeChatId("@boxteam_canal"), "@boxteam_canal");
 });

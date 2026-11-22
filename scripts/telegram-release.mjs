@@ -17,6 +17,8 @@
 //   UPLOAD_PATTERN   regex of assets uploaded to Telegram (default \.exe$)
 //   FORCE=true       post even if already posted or builds are missing
 //   DRY_RUN=true     send nothing; print the message to the log and job summary
+//   EDIT_MESSAGE_ID  rewrite an already posted announcement (that message id)
+//                    with the current format instead of posting a new one
 //   NOTES_WAIT_SECONDS   how long to wait for the release notes (default 900)
 
 import fs from "node:fs";
@@ -167,8 +169,6 @@ export function buildReleaseMessage({
   appName,
   tag,
   notes,
-  releaseUrl = null,
-  dockerImage = null,
   uploads = [],
   limit = MESSAGE_LIMIT,
 }) {
@@ -180,8 +180,6 @@ export function buildReleaseMessage({
     const names = uploads.map((u) => u.label).join(" y ");
     footer.push(`📥 <b>${escapeHtml(names[0].toUpperCase() + names.slice(1))}</b>: aquí abajo 👇`);
   }
-  if (dockerImage) footer.push(`🐳 Docker: <code>${escapeHtml(`${dockerImage}:${version}`)}</code>`);
-  if (releaseUrl) footer.push(`📄 <a href="${releaseUrl}">Notas completas en GitHub</a>`);
   const footerHtml = footer.join("\n");
 
   const override = extractTelegramOverride(notes);
@@ -190,7 +188,7 @@ export function buildReleaseMessage({
     : notesToBlocks(notes ?? "");
 
   const compose = (bs, truncated) =>
-    [header, joinBlocks(bs) + (truncated ? "\n\n<i>…y más cambios en las notas completas.</i>" : ""), footerHtml]
+    [header, joinBlocks(bs) + (truncated ? "\n\n<i>…y más cambios.</i>" : ""), footerHtml]
       .filter((s) => s.trim())
       .join("\n\n");
 
@@ -233,10 +231,15 @@ export function missingAssets(assets) {
   return missing;
 }
 
-/** Docker image name as configured in build-docker.yml (oscata or boxteam). */
-export function dockerImageFromWorkflow(yaml, owner) {
-  const match = /IMAGE:\s*ghcr\.io\/\$\{\{\s*github\.repository_owner\s*\}\}\/([\w.-]+)/.exec(yaml ?? "");
-  return match ? `ghcr.io/${owner.toLowerCase()}/${match[1]}` : null;
+/**
+ * Cleans up a chat id pasted into the secret: surrounding quotes/spaces, a
+ * leading "#", or a whole Telegram Web URL (https://web.telegram.org/k/#-123).
+ */
+export function normalizeChatId(raw) {
+  let id = String(raw ?? "").trim().replace(/^["']|["']$/g, "").trim();
+  const hash = id.lastIndexOf("#");
+  if (hash >= 0) id = id.slice(hash + 1);
+  return id.trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +280,7 @@ async function telegram(method, payload) {
   if (!data.ok) {
     const err = new Error(`Telegram ${method}: ${data.description ?? res.status}`);
     err.description = data.description ?? "";
+    err.parameters = data.parameters ?? {};
     throw err;
   }
   return data.result;
@@ -301,6 +305,27 @@ async function dockerBuildState(repo, tag) {
 function writeSummary(markdown) {
   const file = env("GITHUB_STEP_SUMMARY");
   if (file) fs.appendFileSync(file, `${markdown}\n`);
+}
+
+/**
+ * On "chat not found": log which bot the token belongs to and the chats it
+ * has seen recently, so the right TELEGRAM_CHAT_ID is visible in the log.
+ */
+async function explainChatError(chatId) {
+  const me = await telegram("getMe", {});
+  log(`token belongs to bot @${me.username} ("${me.first_name}")`);
+  log(`TELEGRAM_CHAT_ID has ${chatId.length} chars, starts with "${chatId.slice(0, 4)}"`);
+  const updates = await telegram("getUpdates", { allowed_updates: ["message", "my_chat_member", "channel_post"] }).catch(() => []);
+  const chats = new Map();
+  for (const u of updates) {
+    const chat = (u.message ?? u.my_chat_member ?? u.channel_post)?.chat;
+    if (chat && chat.type !== "private") chats.set(chat.id, `${chat.id} (${chat.type}) ${chat.title ?? ""}`);
+  }
+  if (chats.size) {
+    log(`chats this bot has seen recently:\n  ${[...chats.values()].join("\n  ")}`);
+  } else {
+    log("this bot has no recent group activity; if it is not in the group, add it, then write any message in the group and re-run");
+  }
 }
 
 export async function main() {
@@ -340,7 +365,8 @@ export async function main() {
       return;
     }
   }
-  if ((release.body ?? "").includes(SENT_MARKER) && !force && !dryRun) {
+  const editMessageId = Number(env("EDIT_MESSAGE_ID")) || null;
+  if ((release.body ?? "").includes(SENT_MARKER) && !force && !dryRun && !editMessageId) {
     notice(`${tag} was already posted to Telegram.`);
     return;
   }
@@ -370,15 +396,6 @@ export async function main() {
     );
   }
 
-  const repoInfo = await github(`/repos/${repo}`);
-  const isPublic = repoInfo && !repoInfo.private;
-  const dockerYaml = (() => {
-    try {
-      return fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".github/workflows/build-docker.yml"), "utf8");
-    } catch {
-      return "";
-    }
-  })();
 
   const uploads = (release.assets ?? [])
     .filter((a) => uploadPattern.test(a.name))
@@ -395,9 +412,8 @@ export async function main() {
     appName,
     tag,
     notes: release.body ?? "",
-    // Private repo: GitHub links are useless to channel members.
-    releaseUrl: isPublic ? release.html_url : null,
-    dockerImage: docker === "success" ? dockerImageFromWorkflow(dockerYaml, owner) : null,
+    // No GitHub links or Docker image: both would show the owner's account
+    // name, which must not appear in the group.
     uploads,
   });
 
@@ -413,16 +429,40 @@ export async function main() {
     return;
   }
 
-  const chatId = env("TELEGRAM_CHAT_ID");
+  let chatId = normalizeChatId(env("TELEGRAM_CHAT_ID"));
   let sent;
   try {
-    sent = await telegram("sendMessage", {
-      chat_id: chatId,
-      text: message,
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-    });
+    try {
+      sent = await telegram(editMessageId ? "editMessageText" : "sendMessage", {
+        chat_id: chatId,
+        ...(editMessageId ? { message_id: editMessageId } : {}),
+        text: message,
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+      });
+    } catch (e) {
+      // A basic group that became a supergroup gets a new -100… id; and
+      // Telegram Web K shows supergroups as #-N, while the Bot API wants -100N.
+      const migrated = e.parameters?.migrate_to_chat_id;
+      const supergroupId = /chat not found/i.test(e.description ?? "") && /^-\d+$/.test(chatId) && !chatId.startsWith("-100")
+        ? `-100${chatId.slice(1)}`
+        : null;
+      if (!migrated && !supergroupId) throw e;
+      chatId = String(migrated ?? supergroupId);
+      log(`retrying with chat id ${chatId}`);
+      sent = await telegram(editMessageId ? "editMessageText" : "sendMessage", {
+        chat_id: chatId,
+        ...(editMessageId ? { message_id: editMessageId } : {}),
+        text: message,
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+      });
+    }
   } catch (e) {
+    if (/chat not found|bot was kicked|not a member|forbidden/i.test(e.description ?? "")) {
+      await explainChatError(chatId).catch((d) => log(`diagnostics failed: ${d.message}`));
+      throw e;
+    }
     if (!/parse entities|can't parse/i.test(e.description ?? "")) throw e;
     // If Telegram rejects the HTML, plain text beats no post at all.
     log(`HTML rejected (${e.description}); sending plain text`);
@@ -432,7 +472,15 @@ export async function main() {
       link_preview_options: { is_disabled: true },
     });
   }
-  log(`message sent (id ${sent.message_id})`);
+  log(`message ${editMessageId ? "edited" : "sent"} (id ${sent.message_id})`);
+  if (chatId !== normalizeChatId(env("TELEGRAM_CHAT_ID"))) {
+    notice(`Posted using chat id ${chatId}: set the TELEGRAM_CHAT_ID secret to that value.`);
+  }
+
+  if (editMessageId) {
+    notice(`${tag}: announcement ${editMessageId} rewritten.`);
+    return;
+  }
 
   for (const asset of uploads) {
     log(`downloading ${asset.name}…`);
