@@ -766,14 +766,21 @@ pub async fn put_settings(
 ) -> ApiResult<Json<Value>> {
     // If the client echoed back the REDACTED sentinel (i.e. the user opened
     // Settings but didn't touch this field), preserve the existing value.
-    let current = state.db.load_config().map_err(ApiError::from)?;
-    config.ftp_pass = redact::preserve(&config.ftp_pass, &current.ftp_pass);
-    config.tmdb_api_key = redact::preserve(&config.tmdb_api_key, &current.tmdb_api_key);
-    config.emby_api_key = redact::preserve(&config.emby_api_key, &current.emby_api_key);
-    config.plex_token = redact::preserve(&config.plex_token, &current.plex_token);
-    config.telegram_bot_token = redact::preserve(&config.telegram_bot_token, &current.telegram_bot_token);
-    config.omdb_api_key = redact::preserve(&config.omdb_api_key, &current.omdb_api_key);
-    config.tvdb_api_key = redact::preserve(&config.tvdb_api_key, &current.tvdb_api_key);
+    // On first run there is no stored config yet (load_config fails on the
+    // missing keys, which used to make the web setup wizard fail with
+    // "Missing config key 'ftp_host'"): nothing to preserve then, and a stray
+    // sentinel becomes an empty value instead of being stored.
+    let current = state.db.load_config().ok();
+    let keep = |provided: &str, stored: fn(&crate::db::AppConfig) -> &String| {
+        redact::preserve(provided, current.as_ref().map(stored).map_or("", String::as_str))
+    };
+    config.ftp_pass = keep(&config.ftp_pass, |c| &c.ftp_pass);
+    config.tmdb_api_key = keep(&config.tmdb_api_key, |c| &c.tmdb_api_key);
+    config.emby_api_key = keep(&config.emby_api_key, |c| &c.emby_api_key);
+    config.plex_token = keep(&config.plex_token, |c| &c.plex_token);
+    config.telegram_bot_token = keep(&config.telegram_bot_token, |c| &c.telegram_bot_token);
+    config.omdb_api_key = keep(&config.omdb_api_key, |c| &c.omdb_api_key);
+    config.tvdb_api_key = keep(&config.tvdb_api_key, |c| &c.tvdb_api_key);
 
     state.db.save_config(&config).map_err(ApiError::from)?;
     // Invalidate badge cache so stale "not-configured" entries are evicted on config changes.
