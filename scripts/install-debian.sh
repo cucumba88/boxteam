@@ -17,7 +17,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -Eeuo pipefail
 
-REPO="cucumba88/oscata-tauri"           # ajusta si el repo cambia de nombre
+REPO="cucumba88/boxteam"                # ajusta si el repo cambia de nombre
 BIN_NAME="boxteam"
 SERVICE_NAME="boxteam"
 INSTALL_DIR="/opt/boxteam"
