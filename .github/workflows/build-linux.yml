@@ -1,11 +1,18 @@
 name: Build Linux
 
+# Builds only on release tags (v*), not on every push to main: each merge
+# used to queue three full builds on the single Unraid runner. Run it by hand
+# (workflow_dispatch) to get the artifacts for a branch.
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
+  workflow_dispatch:
+
+# A newer manual or PR run for the same ref replaces an older one; release tag builds are never cancelled.
+concurrency:
+  group: build-linux-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build-linux:
@@ -73,8 +80,8 @@ jobs:
           tar -czf "${STAGE}.tar.gz" "$STAGE"
           ls -lh "${STAGE}.tar.gz"
 
-      - name: Upload artifacts (main branch)
-        if: github.ref == 'refs/heads/main'
+      - name: Upload artifacts (manual runs)
+        if: "!startsWith(github.ref, 'refs/tags/v')"
         uses: actions/upload-artifact@v4
         with:
           name: boxteam-linux-amd64

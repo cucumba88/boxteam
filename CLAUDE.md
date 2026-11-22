@@ -41,7 +41,7 @@ cd src-tauri && cargo test                                     # parser unit tes
 
 ## Release & deploy workflow
 
-This repo uses a per-fix branch + `--no-ff` merge-into-main + tag-on-merge pattern. **Always follow it** — the GHCR docker build action only fires on `v*` tag push and `main` push, and the GitHub Release is auto-created with assets by Build Linux (softprops/action-gh-release).
+This repo uses a per-fix branch + `--no-ff` merge-into-main + tag-on-merge pattern. **Always follow it** — Build Linux, Build Windows and Build Docker only fire on `v*` tag push (or a manual workflow_dispatch), not on pushes to `main`; Docker `latest` moves with each release tag, and the GitHub Release is auto-created with assets by Build Linux (softprops/action-gh-release).
 
 ### Standard release sequence
 
