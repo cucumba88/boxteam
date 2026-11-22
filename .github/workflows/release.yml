@@ -1,0 +1,106 @@
+name: Release
+
+# The only workflow that runs on a release tag (v*). A release is published
+# only when everything passes, in this order:
+#
+#   1. prepare  tag matches package.json / Cargo.toml; creates the release as a draft
+#   2. checks   the full CI (ci.yml): frontend build, script tests, cargo test, audits
+#   3. linux, windows  installers, attached to the draft
+#   4. docker   image (vX.Y.Z, X.Y, latest); after the installers, so `latest`
+#               never moves to a release that failed
+#   5. publish  draft → published release (latest)
+#
+# If any step fails the release stays a draft (invisible to users), nothing is
+# announced on Telegram (telegram-release.yml runs only after a successful
+# Release), and re-running the failed jobs from the Actions page resumes it.
+on:
+  push:
+    tags:
+      - "v*"
+
+# One run per tag, never cancelled.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["self-hosted", "linux", "x64", "unraid"]') }}
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the release draft
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: _release
+          sparse-checkout: |
+            scripts/release-assets.mjs
+            package.json
+            src-tauri/Cargo.toml
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tag matches the app version
+        run: node _release/scripts/release-assets.mjs check-version "${{ github.ref_name }}"
+
+      - name: Create the release draft
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node _release/scripts/release-assets.mjs ensure-draft "${{ github.ref_name }}"
+
+  checks:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  linux:
+    needs: checks
+    uses: ./.github/workflows/build-linux.yml
+    permissions:
+      contents: write
+
+  windows:
+    needs: checks
+    uses: ./.github/workflows/build-windows.yml
+    permissions:
+      contents: write
+
+  docker:
+    needs: [linux, windows]
+    uses: ./.github/workflows/build-docker.yml
+    permissions:
+      contents: read
+      packages: write
+
+  publish:
+    needs: [linux, windows, docker]
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["self-hosted", "linux", "x64", "unraid"]') }}
+    timeout-minutes: 10
+    permissions:
+      contents: write # publish the draft
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: _release
+          sparse-checkout: scripts/release-assets.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Publish the release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node _release/scripts/release-assets.mjs publish "${{ github.ref_name }}"

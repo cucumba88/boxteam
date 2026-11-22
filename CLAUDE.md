@@ -41,7 +41,9 @@ cd src-tauri && cargo test                                     # parser unit tes
 
 ## Release & deploy workflow
 
-This repo uses a per-fix branch + `--no-ff` merge-into-main + tag-on-merge pattern. **Always follow it** — Build Linux, Build Windows and Build Docker only fire on `v*` tag push (or a manual workflow_dispatch), not on pushes to `main`; Docker `latest` moves with each release tag, and the GitHub Release is auto-created with assets by Build Linux (softprops/action-gh-release).
+This repo uses a per-fix branch + `--no-ff` merge-into-main + tag-on-merge pattern. **Always follow it.**
+
+A `v*` tag push runs **`.github/workflows/release.yml`**, the only workflow that fires on tags. It gates the release: version check (tag = package.json = Cargo.toml) → creates the GitHub Release as a **draft** → full CI (`ci.yml`) → Build Linux + Build Windows (attach installers to the draft) → Build Docker (`latest` moves only now) → publishes the draft. If any job fails the release stays a draft, nothing is announced on Telegram, and "Re-run failed jobs" resumes it. Build Linux/Windows/Docker are `workflow_call` workflows (also runnable by hand with workflow_dispatch); CI also runs on every PR and every push to `main`. Assets are uploaded by `scripts/release-assets.mjs` (not softprops, which can't find drafts).
 
 ### Standard release sequence
 
@@ -55,7 +57,7 @@ git checkout -b v0.X.Y
 #    "perf(library): …", "fix(detail): …", "sec: …", etc.
 git add <files> && git commit -m "<conventional commit>"
 
-# 4. Version bump + verify (this script runs the full build + cargo check):
+# 4. Version bump + verify (this script runs the full build, cargo check, script tests and cargo test):
 source ~/.nvm/nvm.sh && nvm use 22 --silent && npm run release:patch  # or :minor / :major
 
 # 5. Commit the version bump
@@ -82,7 +84,7 @@ git branch -d v0.X.Y
 
 **Every `v*` tag MUST get release notes** written via `gh release edit` before the release task is considered complete. The auto-created release ships with just the tag name as title and an empty body — that is **not acceptable as a finished release**. If you forget this step, the release is incomplete.
 
-GitHub releases are auto-created by Build Linux (`softprops/action-gh-release`) with installer assets attached. After the release exists, edit it:
+The Release workflow creates the release as a draft within a minute of the tag push; write the notes on the draft right away (`gh release view/edit` work on drafts) so they are there when it gets published and announced on Telegram:
 
 ```bash
 until gh release view v0.X.Y >/dev/null 2>&1; do sleep 20; done
@@ -98,10 +100,10 @@ EOF
 
 Release notes language is **Spain Spanish, informal "tú"**. Existing v0.10.x / v0.11.x releases set the tone and emoji conventions (🐛 fix, ⚡ perf, 🔴 critical security, 🟠 high, 🟡 medium).
 
-Watching docker build (the gating job for unraid deploy):
+Watching the release (checks, builds, docker and publish are all jobs of one run):
 
 ```bash
-gh run list --workflow=build-docker.yml --limit 1 --json databaseId --jq '.[0].databaseId'
+gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId'
 gh run watch <id> --interval 30 --exit-status
 ```
 

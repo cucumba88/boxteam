@@ -3,22 +3,21 @@ name: Telegram release
 # Announces each release on Telegram: a message with the highlights from the
 # release notes, followed by the Windows installer (.exe) uploaded as a file.
 #
-# Runs after every build of a v* tag. Each run checks whether the release is
-# complete (.exe + Linux packages attached, Docker build finished); only the
-# run that sees it complete posts, once per release (scripts/telegram-release.mjs
-# leaves a hidden marker in the release notes).
+# Runs after a successful Release run (release.yml) of a v* tag: by then every
+# check and build has passed and the release has been published. The script
+# still checks the release is complete (.exe + Linux packages attached) and
+# posts once per release (scripts/telegram-release.mjs leaves a hidden marker
+# in the release notes).
 #
 # Needs the repo secrets TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID. Without them
 # it does nothing.
 on:
   workflow_run:
-    workflows: [Build Linux, Build Windows, Build Docker]
+    workflows: [Release]
     types: [completed]
-    # Only builds of release tags (head_branch is the tag name). Filtering
-    # here instead of in the job's `if` means main/PR builds don't create
-    # a skipped "Telegram release" run each. A manual Windows re-run for a
-    # release builds from main, so it doesn't trigger this: run this
-    # workflow by hand afterwards if needed.
+    # Only release tags (head_branch is the tag name). A manual Windows
+    # re-run for a release builds from main, so it doesn't trigger this:
+    # run this workflow by hand afterwards if needed.
     branches: ["v*"]
   # Manual run: re-post a release, or preview the message (dry run).
   workflow_dispatch:

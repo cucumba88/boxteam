@@ -1,14 +1,21 @@
 name: CI
 
-# Checks for pull requests: type-check, build the frontend, Rust check + tests
-# and a dependency audit. Runs on the Unraid self-hosted runner.
+# Checks: type-check, build the frontend, script tests, Rust check + tests and
+# a dependency audit. Runs on the Unraid self-hosted runner for every pull
+# request and every push to main (so the merged result is tested too), and is
+# called by release.yml: a release is only built and published if this passes.
 on:
   pull_request:
+  push:
+    branches: [main]
+  workflow_call:
   workflow_dispatch:
 
+# A newer run for the same PR or branch replaces the older one; release tag
+# runs (called from release.yml) are never cancelled.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   checks:
@@ -57,8 +64,8 @@ jobs:
       - name: Frontend build (seed check + tsc + vite)
         run: npm run build
 
-      - name: Script tests (Telegram release)
-        run: node --test scripts/telegram-release.test.mjs
+      - name: Script tests (Telegram release, release assets)
+        run: node --test scripts/*.test.mjs
 
       - name: Cargo check
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked

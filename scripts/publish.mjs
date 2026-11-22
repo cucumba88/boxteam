@@ -124,6 +124,10 @@ function main() {
   if (!skipChecks) {
     run("source ~/.nvm/nvm.sh && nvm use 22 --silent && npm run build");
     run("cargo check --manifest-path src-tauri/Cargo.toml");
+    // Same gates as the Release workflow, so a broken tag fails here and
+    // not 15 minutes later on the runner.
+    run("node --test scripts/*.test.mjs");
+    run("cargo test --manifest-path src-tauri/Cargo.toml");
   }
 
   if (build) {

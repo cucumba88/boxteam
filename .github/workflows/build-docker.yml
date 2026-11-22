@@ -1,12 +1,10 @@
 name: Build Docker
 
-# Builds only on release tags (v*), not on every push to main: each merge
-# used to queue three full builds on the single Unraid runner. Run it by hand
-# (workflow_dispatch) to get the artifacts for a branch.
+# Called by release.yml for release tags (v*), only after the CI checks and the
+# Linux and Windows builds pass, so `latest` never moves to a broken release.
+# Run it by hand (workflow_dispatch) to get an image for a branch.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
   workflow_dispatch:
 
 # A newer manual or PR run for the same ref replaces an older one; release tag builds are never cancelled.
