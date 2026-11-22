@@ -284,3 +284,163 @@ impl UploadQueue {
 }
 
 pub type SharedUploadQueue = Arc<Mutex<UploadQueue>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    fn add(q: &mut UploadQueue, name: &str, size: u64, group: Option<&str>) -> u64 {
+        q.add(
+            format!("/local/{name}"),
+            format!("/ftp/{name}"),
+            name.to_string(),
+            None,
+            None,
+            size,
+            None,
+            None,
+            vec![],
+            None,
+            None,
+            None,
+            vec![],
+            vec![],
+            vec![],
+            group.map(String::from),
+        )
+        .0
+    }
+
+    fn item(q: &UploadQueue, id: u64) -> &UploadItem {
+        q.items.iter().find(|i| i.id == id).expect("item")
+    }
+
+    #[test]
+    fn new_items_are_queued_with_three_attempts() {
+        let mut q = UploadQueue::new(1);
+        let id = add(&mut q, "a.mkv", 100, None);
+        let it = item(&q, id);
+        assert_eq!(it.status, UploadStatus::Queued);
+        assert_eq!((it.attempt, it.max_attempts), (0, 3));
+        assert_eq!(it.bytes_total, 100);
+    }
+
+    #[test]
+    fn progress_only_counts_while_uploading_and_done_fills_the_bar() {
+        let mut q = UploadQueue::new(1);
+        let id = add(&mut q, "a.mkv", 100, None);
+        q.set_progress(id, 50);
+        assert_eq!(item(&q, id).bytes_done, 0, "queued items don't move");
+        q.mark_started(id);
+        q.set_progress(id, 50);
+        assert_eq!(item(&q, id).bytes_done, 50);
+        q.mark_done(id);
+        assert_eq!(item(&q, id).bytes_done, 100);
+        assert_eq!(item(&q, id).status, UploadStatus::Done);
+    }
+
+    #[test]
+    fn retry_after_error_resumes_but_after_cancel_starts_over() {
+        let mut q = UploadQueue::new(1);
+        let failed = add(&mut q, "a.mkv", 100, None);
+        let cancelled = add(&mut q, "b.mkv", 100, None);
+        for id in [failed, cancelled] {
+            q.mark_started(id);
+            q.set_progress(id, 40);
+            q.mark_attempt(id, 2);
+        }
+        q.mark_error(failed, "timeout".into());
+        q.cancel(cancelled);
+
+        let (a, _, flag) = q.retry(failed).expect("retry");
+        assert_eq!(a.bytes_done, 40, "resume from what the server has");
+        assert_eq!(a.status, UploadStatus::Queued);
+        assert_eq!(a.attempt, 0);
+        assert!(a.error.is_none());
+        assert!(!flag.load(Ordering::SeqCst));
+
+        let (b, _, _) = q.retry(cancelled).expect("retry");
+        assert_eq!(b.bytes_done, 0, "the remote file was removed on cancel");
+        assert!(q.retry(99).is_err());
+    }
+
+    #[test]
+    fn cancel_sets_the_flag_and_leaves_finished_items_alone() {
+        let mut q = UploadQueue::new(1);
+        let a = add(&mut q, "a.mkv", 1, None);
+        let b = add(&mut q, "b.mkv", 1, None);
+        let flag = q.cancel_flags.get(&a).cloned().expect("flag");
+        q.cancel(a);
+        assert!(flag.load(Ordering::SeqCst));
+        assert_eq!(item(&q, a).status, UploadStatus::Cancelled);
+        q.mark_done(b);
+        q.cancel(b);
+        assert_eq!(item(&q, b).status, UploadStatus::Done);
+    }
+
+    #[test]
+    fn group_status_and_bytes() {
+        let mut q = UploadQueue::new(2);
+        let e1 = add(&mut q, "S01E01.mkv", 100, Some("g1"));
+        let e2 = add(&mut q, "S01E02.mkv", 200, Some("g1"));
+        let e3 = add(&mut q, "S01E03.mkv", 300, Some("g1"));
+        add(&mut q, "movie.mkv", 999, None);
+
+        assert_eq!(q.group_total_bytes("g1"), 600);
+        assert_eq!(q.group_status("g1"), (0, 3, false));
+        q.mark_done(e1);
+        q.mark_error(e2, "x".into());
+        assert_eq!(q.group_status("g1"), (1, 3, false));
+        q.mark_done(e3);
+        // Errors count as finished, not as done.
+        assert_eq!(q.group_status("g1"), (2, 3, true));
+    }
+
+    #[test]
+    fn restore_requeues_interrupted_uploads_from_zero() {
+        let mut old = UploadQueue::new(1);
+        let a = add(&mut old, "a.mkv", 100, None);
+        let b = add(&mut old, "b.mkv", 100, None);
+        old.mark_started(a);
+        old.set_progress(a, 70);
+        old.mark_done(b);
+        let saved = old.items.clone();
+
+        let mut q = UploadQueue::new(1);
+        q.restore(saved);
+        assert_eq!(item(&q, a).status, UploadStatus::Queued);
+        assert_eq!(item(&q, a).bytes_done, 0);
+        assert!(item(&q, a).started_at_ms.is_none());
+        assert_eq!(item(&q, b).status, UploadStatus::Done);
+        assert_eq!(q.next_id, 3);
+        assert_eq!(q.cancel_flags.len(), 2);
+    }
+
+    #[test]
+    fn clear_completed_and_delete() {
+        let mut q = UploadQueue::new(1);
+        let a = add(&mut q, "a.mkv", 1, None);
+        let b = add(&mut q, "b.mkv", 1, None);
+        let c = add(&mut q, "c.mkv", 1, None);
+        q.mark_done(a);
+        q.clear_completed();
+        assert_eq!(q.items.iter().map(|i| i.id).collect::<Vec<_>>(), vec![b, c]);
+        assert!(!q.cancel_flags.contains_key(&a));
+        q.delete(b);
+        assert_eq!(q.items.iter().map(|i| i.id).collect::<Vec<_>>(), vec![c]);
+    }
+
+    #[test]
+    fn items_saved_by_older_versions_still_load() {
+        let json = r#"{"id":3,"local_path":"/l/a.mkv","ftp_dest_path":"/f/a.mkv","filename":"a.mkv",
+            "media_title":null,"tmdb_id":null,"status":"error","bytes_total":5,"bytes_done":2,
+            "error":"x","added_at_ms":1,"started_at_ms":null,"completed_at_ms":null,
+            "resolution":null,"hdr":null,"languages":[],"codec":null,"video_bitrate_kbps":null,
+            "audio_codec":null,"group_id":null}"#;
+        let it: UploadItem = serde_json::from_str(json).expect("legacy item");
+        assert_eq!(it.max_attempts, 3);
+        assert_eq!(it.attempt, 0);
+        assert!(it.subtitle_langs.is_empty() && it.media_type.is_none());
+    }
+}

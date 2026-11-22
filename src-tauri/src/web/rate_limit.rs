@@ -80,3 +80,51 @@ pub fn clear(email: &str, ip: IpAddr) {
     let mut map = FAILED_LOGINS.lock().unwrap();
     map.remove(&(email.to_lowercase(), ip));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    // The failure map is process-global, so each test uses its own email.
+    fn ip(last: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, last))
+    }
+
+    #[test]
+    fn locks_after_the_fifth_failure() {
+        let email = "lock@test.local";
+        for _ in 0..MAX_FAILURES_PER_WINDOW - 1 {
+            record_failure(email, ip(1));
+            assert!(check_login_allowed(email, ip(1)).is_ok());
+        }
+        record_failure(email, ip(1));
+        let retry = check_login_allowed(email, ip(1)).expect_err("should be locked");
+        assert!(retry <= LOCKOUT_DURATION && retry > LOCKOUT_DURATION - Duration::from_secs(60));
+    }
+
+    #[test]
+    fn lock_is_per_email_and_ip_and_ignores_email_case() {
+        let email = "Case@Test.local";
+        for _ in 0..MAX_FAILURES_PER_WINDOW {
+            record_failure(email, ip(2));
+        }
+        assert!(check_login_allowed("case@test.local", ip(2)).is_err());
+        assert!(check_login_allowed(email, ip(3)).is_ok(), "another IP is not locked");
+        assert!(check_login_allowed("other@test.local", ip(2)).is_ok(), "another email is not locked");
+    }
+
+    #[test]
+    fn successful_login_clears_the_counter() {
+        let email = "clear@test.local";
+        for _ in 0..MAX_FAILURES_PER_WINDOW {
+            record_failure(email, ip(4));
+        }
+        assert!(check_login_allowed(email, ip(4)).is_err());
+        clear(email, ip(4));
+        assert!(check_login_allowed(email, ip(4)).is_ok());
+        // Counting starts again from zero.
+        record_failure(email, ip(4));
+        assert!(check_login_allowed(email, ip(4)).is_ok());
+    }
+}

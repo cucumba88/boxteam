@@ -26,7 +26,7 @@ export function clearToken(): void {
 }
 
 // Command-name → [HTTP method, URL path] mapping for web mode
-const WEB_ROUTES: Record<
+export const WEB_ROUTES: Record<
   string,
   | [string, string]
   | ((args: Record<string, unknown>) => [string, string, unknown?])

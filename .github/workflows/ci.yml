@@ -1,7 +1,7 @@
 name: CI
 
-# Checks: type-check, build the frontend, script tests, Rust check + tests and
-# a dependency audit. Runs on the Unraid self-hosted runner for every pull
+# Checks: type-check, build the frontend, frontend unit tests (Vitest), script
+# tests, Rust check + tests and a dependency audit. Runs on the Unraid self-hosted runner for every pull
 # request and every push to main (so the merged result is tested too), and is
 # called by release.yml: a release is only built and published if this passes.
 on:
@@ -63,6 +63,9 @@ jobs:
 
       - name: Frontend build (seed check + tsc + vite)
         run: npm run build
+
+      - name: Frontend unit tests (Vitest)
+        run: npm test
 
       - name: Script tests (Telegram release, release assets)
         run: node --test scripts/*.test.mjs

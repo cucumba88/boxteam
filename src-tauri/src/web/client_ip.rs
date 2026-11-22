@@ -49,3 +49,45 @@ pub fn client_ip(headers: &HeaderMap, peer: IpAddr) -> IpAddr {
 
     peer
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    // Uses the default trusted proxies (127.0.0.1, ::1); the env var is not
+    // set in tests.
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(*k, HeaderValue::from_str(v).expect("header"));
+        }
+        h
+    }
+
+    #[test]
+    fn untrusted_peer_cannot_spoof_its_ip() {
+        let peer: IpAddr = "203.0.113.9".parse().expect("ip");
+        let h = headers(&[("x-forwarded-for", "1.2.3.4"), ("x-real-ip", "5.6.7.8")]);
+        assert_eq!(client_ip(&h, peer), peer);
+    }
+
+    #[test]
+    fn trusted_proxy_forwards_the_client_ip() {
+        let proxy: IpAddr = "127.0.0.1".parse().expect("ip");
+        let h = headers(&[("x-forwarded-for", "198.51.100.7, 10.0.0.1")]);
+        assert_eq!(client_ip(&h, proxy), "198.51.100.7".parse::<IpAddr>().expect("ip"));
+        let h = headers(&[("x-real-ip", " 198.51.100.8 ")]);
+        assert_eq!(client_ip(&h, proxy), "198.51.100.8".parse::<IpAddr>().expect("ip"));
+        let v6: IpAddr = "::1".parse().expect("ip");
+        assert_eq!(client_ip(&h, v6), "198.51.100.8".parse::<IpAddr>().expect("ip"));
+    }
+
+    #[test]
+    fn garbage_headers_fall_back_to_the_peer() {
+        let proxy: IpAddr = "127.0.0.1".parse().expect("ip");
+        let h = headers(&[("x-forwarded-for", "not-an-ip"), ("x-real-ip", "nope")]);
+        assert_eq!(client_ip(&h, proxy), proxy);
+        assert_eq!(client_ip(&HeaderMap::new(), proxy), proxy);
+    }
+}

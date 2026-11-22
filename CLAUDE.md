@@ -36,8 +36,12 @@ Run these after a batch of changes — they're what `npm run release:patch` runs
 ```bash
 source ~/.nvm/nvm.sh && nvm use 22 --silent && npm run build   # tsc + vite + chunk warnings
 cargo check --manifest-path src-tauri/Cargo.toml               # rust check (no clippy by convention)
-cd src-tauri && cargo test                                     # parser unit tests
+cd src-tauri && cargo test                                     # Rust unit tests
+npm test                                                       # frontend unit tests (Vitest, src/**/*.test.ts)
+node --test scripts/*.test.mjs                                 # release / Telegram script tests
 ```
+
+Frontend tests live next to the code (`src/utils/techTags.test.ts`). `src/lib/transport.test.ts` checks that every `WEB_ROUTES` entry exists in the Axum router (`src-tauri/src/web/mod.rs`) and that every `call("…")` in the frontend has a web route or is listed in its `DESKTOP_ONLY` set — add a route or, for a desktop-only command gated with `isTauri()`, add it there.
 
 ## Release & deploy workflow
 
@@ -57,7 +61,7 @@ git checkout -b v0.X.Y
 #    "perf(library): …", "fix(detail): …", "sec: …", etc.
 git add <files> && git commit -m "<conventional commit>"
 
-# 4. Version bump + verify (this script runs the full build, cargo check, script tests and cargo test):
+# 4. Version bump + verify (this script runs the full build, cargo check, Vitest, script tests and cargo test):
 source ~/.nvm/nvm.sh && nvm use 22 --silent && npm run release:patch  # or :minor / :major
 
 # 5. Commit the version bump

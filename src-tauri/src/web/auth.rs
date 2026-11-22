@@ -194,3 +194,87 @@ pub fn generate_otp() -> String {
     let mut rng = rand::thread_rng();
     format!("{:06}", rng.gen_range(0..1_000_000u32))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::Request;
+
+    fn user(role: &str) -> crate::db::WebUser {
+        crate::db::WebUser {
+            id: 1,
+            email: "a@test.local".into(),
+            role: role.into(),
+            is_active: true,
+            created_at: String::new(),
+        }
+    }
+
+    fn parts_with(user: Option<crate::db::WebUser>) -> Parts {
+        let (mut parts, _) = Request::new(()).into_parts();
+        if let Some(u) = user {
+            parts.extensions.insert(u);
+        }
+        parts
+    }
+
+    #[tokio::test]
+    async fn auth_user_requires_a_session() {
+        let mut parts = parts_with(None);
+        let err = AuthUser::from_request_parts(&mut parts, &()).await.err().expect("401");
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+
+        let mut parts = parts_with(Some(user("user")));
+        assert!(AuthUser::from_request_parts(&mut parts, &()).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn admin_user_rejects_non_admins() {
+        let mut parts = parts_with(None);
+        let err = AdminUser::from_request_parts(&mut parts, &()).await.err().expect("401");
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+
+        let mut parts = parts_with(Some(user("user")));
+        let err = AdminUser::from_request_parts(&mut parts, &()).await.err().expect("403");
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+
+        let mut parts = parts_with(Some(user("admin")));
+        assert!(AdminUser::from_request_parts(&mut parts, &()).await.is_ok());
+    }
+
+    #[test]
+    fn session_cache_hit_and_invalidate() {
+        let token = "test-token-session-cache";
+        assert!(lookup_session_cache(token).is_none());
+        store_session_cache(token, &user("admin"));
+        assert_eq!(lookup_session_cache(token).map(|u| u.role), Some("admin".to_string()));
+        invalidate_session_cache(token);
+        assert!(lookup_session_cache(token).is_none());
+    }
+
+    #[test]
+    fn session_tokens_are_256_bit_hex_and_unique() {
+        let a = new_session_token();
+        let b = new_session_token();
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn otp_is_six_digits() {
+        for _ in 0..200 {
+            let otp = generate_otp();
+            assert_eq!(otp.len(), 6);
+            assert!(otp.chars().all(|c| c.is_ascii_digit()));
+        }
+    }
+
+    #[test]
+    fn passwords_use_the_pinned_bcrypt_cost() {
+        let hash = hash_password("correct horse").expect("hash");
+        assert!(hash.starts_with("$2b$13$"), "cost changed: {hash}");
+        assert_eq!(verify_password("correct horse", &hash), Ok(true));
+        assert_eq!(verify_password("wrong", &hash), Ok(false));
+    }
+}

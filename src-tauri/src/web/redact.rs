@@ -40,3 +40,32 @@ pub fn preserve(provided: &str, current: &str) -> String {
         provided.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mask_hides_any_secret_and_keeps_empty_empty() {
+        assert_eq!(mask("hunter2"), REDACTED);
+        assert_eq!(mask(" "), REDACTED);
+        assert_eq!(mask(""), "");
+    }
+
+    #[test]
+    fn preserve_keeps_current_only_for_the_sentinel() {
+        assert_eq!(preserve(REDACTED, "old"), "old");
+        assert_eq!(preserve("new", "old"), "new");
+        // Empty string clears the secret.
+        assert_eq!(preserve("", "old"), "");
+        // Something that merely looks like the sentinel is a new value.
+        assert_eq!(preserve("***REDACTED*** ", "old"), "***REDACTED*** ");
+    }
+
+    #[test]
+    fn get_then_put_round_trip_never_changes_the_secret() {
+        for secret in ["", "abc", "tok-123"] {
+            assert_eq!(preserve(&mask(secret), secret), secret);
+        }
+    }
+}

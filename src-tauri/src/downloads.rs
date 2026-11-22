@@ -197,3 +197,129 @@ impl DownloadQueue {
 }
 
 pub type SharedQueue = Arc<Mutex<DownloadQueue>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    fn queue_with(paths: &[&str]) -> DownloadQueue {
+        let mut q = DownloadQueue::new(2);
+        for p in paths {
+            q.add(p.to_string(), format!("{p}.mkv"), format!("/nonexistent/boxteam-test/{p}.mkv"), None);
+        }
+        q
+    }
+
+    fn status(q: &DownloadQueue, id: u64) -> DownloadStatus {
+        q.items.iter().find(|i| i.id == id).map(|i| i.status.clone()).expect("item")
+    }
+
+    #[test]
+    fn ids_are_sequential_and_items_start_queued() {
+        let q = queue_with(&["a", "b"]);
+        assert_eq!(q.items.iter().map(|i| i.id).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(q.next_id, 3);
+        assert!(q.items.iter().all(|i| i.status == DownloadStatus::Queued));
+        assert_eq!(q.cancel_flags.len(), 2);
+    }
+
+    #[test]
+    fn lifecycle_sets_status_and_timestamps() {
+        let mut q = queue_with(&["a", "b"]);
+        q.mark_started(1);
+        assert_eq!(status(&q, 1), DownloadStatus::Downloading);
+        assert!(q.items[0].started_at_ms.is_some());
+        q.mark_done(1);
+        assert_eq!(status(&q, 1), DownloadStatus::Done);
+        assert!(q.items[0].completed_at_ms.is_some());
+        q.mark_error(2, "530 Login incorrect".into());
+        assert_eq!(status(&q, 2), DownloadStatus::Error);
+        assert_eq!(q.items[1].error.as_deref(), Some("530 Login incorrect"));
+    }
+
+    #[test]
+    fn cancel_sets_the_flag_and_only_cancels_active_items() {
+        let mut q = queue_with(&["a", "b"]);
+        let flag = q.cancel_flags.get(&1).cloned().expect("flag");
+        q.cancel(1);
+        assert!(flag.load(Ordering::SeqCst));
+        assert_eq!(status(&q, 1), DownloadStatus::Cancelled);
+
+        q.mark_done(2);
+        q.cancel(2);
+        assert_eq!(status(&q, 2), DownloadStatus::Done, "a finished download stays done");
+    }
+
+    #[test]
+    fn retry_resets_the_item_with_a_fresh_cancel_flag() {
+        let mut q = queue_with(&["a"]);
+        q.cancel(1);
+        let old = q.cancel_flags.get(&1).cloned().expect("flag");
+        let (item, _, flag) = q.retry(1).expect("retry");
+        assert_eq!(item.status, DownloadStatus::Queued);
+        assert!(item.error.is_none() && item.started_at_ms.is_none() && item.completed_at_ms.is_none());
+        assert!(!flag.load(Ordering::SeqCst), "new flag is not cancelled");
+        assert!(old.load(Ordering::SeqCst));
+        assert!(q.retry(99).is_err());
+    }
+
+    #[test]
+    fn clear_completed_keeps_active_items_and_their_flags() {
+        let mut q = queue_with(&["a", "b", "c", "d"]);
+        q.mark_done(1);
+        q.mark_error(2, "x".into());
+        q.cancel(3);
+        q.clear_completed();
+        assert_eq!(q.items.iter().map(|i| i.id).collect::<Vec<_>>(), vec![4]);
+        assert_eq!(q.cancel_flags.keys().copied().collect::<Vec<_>>(), vec![4]);
+    }
+
+    #[test]
+    fn find_active_by_ftp_path_ignores_finished_items() {
+        let mut q = queue_with(&["a", "b"]);
+        assert_eq!(q.find_active_by_ftp_path("a"), Some(1));
+        q.mark_done(1);
+        assert_eq!(q.find_active_by_ftp_path("a"), None);
+        assert_eq!(q.find_active_by_ftp_path("zzz"), None);
+    }
+
+    #[test]
+    fn restore_requeues_interrupted_items_and_continues_ids() {
+        let mut old = queue_with(&["a", "b", "c"]);
+        old.mark_started(1);
+        old.mark_done(2);
+        let saved = old.items.clone();
+
+        let mut q = DownloadQueue::new(2);
+        q.restore(saved);
+        assert_eq!(status(&q, 1), DownloadStatus::Queued);
+        assert!(q.items[0].started_at_ms.is_none());
+        assert_eq!(q.items[0].bytes_done, 0, "no partial file on disk");
+        assert_eq!(status(&q, 2), DownloadStatus::Done);
+        assert_eq!(q.next_id, 4);
+        assert!(q.cancel_flags.contains_key(&1) && q.cancel_flags.contains_key(&3));
+        assert!(!q.cancel_flags.contains_key(&2));
+    }
+
+    #[test]
+    fn delete_and_concurrency() {
+        let mut q = queue_with(&["a", "b"]);
+        q.delete(1);
+        assert_eq!(q.items.len(), 1);
+        assert!(!q.cancel_flags.contains_key(&1));
+        q.update_concurrent(5);
+        assert_eq!(q.max_concurrent, 5);
+        assert_eq!(q.semaphore.available_permits(), 5);
+    }
+
+    #[test]
+    fn old_saved_items_without_requested_by_still_load() {
+        let json = r#"{"id":7,"ftp_path":"/a","filename":"a.mkv","local_path":"/x/a.mkv","media_title":null,
+            "status":"done","bytes_total":10,"bytes_done":10,"error":null,"added_at_ms":1,
+            "started_at_ms":null,"completed_at_ms":null}"#;
+        let item: DownloadItem = serde_json::from_str(json).expect("legacy item");
+        assert_eq!(item.status, DownloadStatus::Done);
+        assert_eq!(item.requested_by, None);
+    }
+}

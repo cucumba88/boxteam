@@ -22,7 +22,8 @@
     "release": "node ./scripts/publish.mjs",
     "release:patch": "node ./scripts/publish.mjs patch",
     "release:minor": "node ./scripts/publish.mjs minor",
-    "release:major": "node ./scripts/publish.mjs major"
+    "release:major": "node ./scripts/publish.mjs major",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",
@@ -40,6 +41,7 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^4.1.12"
   }
 }
