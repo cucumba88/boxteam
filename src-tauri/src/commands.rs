@@ -3151,123 +3151,7 @@ pub async fn trigger_watchlist_auto_downloads(
     queue: crate::downloads::SharedQueue,
     window: Option<tauri::WebviewWindow>,
 ) {
-    // ── Quality helpers ────────────────────────────────────────────────────
-    fn resolution_score(res: Option<&str>) -> u32 {
-        let r = res.unwrap_or("").to_lowercase();
-        if r.contains("2160") || r.contains("4k") || r.contains("uhd") { 4 }
-        else if r.contains("1080") { 3 }
-        else if r.contains("720") { 2 }
-        else if !r.is_empty() { 1 }
-        else { 0 }
-    }
-
-    fn base_release_score(rt: Option<&str>) -> u32 {
-        let r = rt.unwrap_or("");
-        if r.contains("REMUX") || r.contains("BDREMUX") { 5 }
-        else if r.contains("BluRay") || r.contains("Blu-ray") { 4 }
-        else if r.contains("WEB-DL") { 3 }
-        else if r.contains("WEBRip") { 2 }
-        else if r.contains("HDTV") { 1 }
-        else { 0 }
-    }
-
-    fn meets_min_resolution(res: Option<&str>, min: Option<&str>) -> bool {
-        match min {
-            None | Some("") => true,
-            // Unknown resolution → give benefit of the doubt rather than hard-reject.
-            Some(_) if res.map(|r| r.is_empty()).unwrap_or(true) => true,
-            Some(min_res) => resolution_score(res) >= resolution_score(Some(min_res)),
-        }
-    }
-
-    fn score_candidate(
-        item: &crate::db::WatchlistAutoItem,
-        profile: &crate::db::QualityProfile,
-    ) -> Option<u32> {
-        // Hard filter: minimum resolution
-        if !meets_min_resolution(item.resolution.as_deref(), profile.min_resolution.as_deref()) {
-            return None;
-        }
-        // Hard filter: min file size
-        if let (Some(min_gb), Some(bytes)) = (profile.min_size_gb, item.size_bytes) {
-            if bytes < (min_gb * 1024.0 * 1024.0 * 1024.0) as i64 {
-                return None;
-            }
-        }
-        // Hard filter: max file size
-        if let (Some(max_gb), Some(bytes)) = (profile.max_size_gb, item.size_bytes) {
-            if bytes > (max_gb * 1024.0 * 1024.0 * 1024.0) as i64 {
-                return None;
-            }
-        }
-
-        let mut score: u32 = 0;
-
-        // Resolution scoring
-        if let Some(ref pref) = profile.preferred_resolution {
-            if item.resolution.as_deref()
-                .map(|r| r.eq_ignore_ascii_case(pref))
-                .unwrap_or(false)
-            {
-                score += 1000;
-            } else {
-                score += resolution_score(item.resolution.as_deref()) * 100;
-            }
-        } else {
-            score += resolution_score(item.resolution.as_deref()) * 100;
-        }
-
-        // HDR preference
-        if profile.prefer_hdr && item.hdr.is_some() {
-            score += 200;
-        }
-
-        // Preferred release types (ordered list — earlier = better)
-        let rel_types: Vec<String> =
-            serde_json::from_str(&profile.preferred_release_types).unwrap_or_default();
-        if !rel_types.is_empty() {
-            if let Some(pos) = rel_types.iter().position(|t| {
-                item.release_type
-                    .as_deref()
-                    .map(|r| r.contains(t.as_str()))
-                    .unwrap_or(false)
-            }) {
-                score += (rel_types.len() - pos) as u32 * 50;
-            }
-        } else {
-            score += base_release_score(item.release_type.as_deref()) * 50;
-        }
-
-        // Preferred codecs
-        let codecs: Vec<String> =
-            serde_json::from_str(&profile.preferred_codecs).unwrap_or_default();
-        if !codecs.is_empty() {
-            if let Some(pos) = codecs.iter().position(|c| {
-                item.codec
-                    .as_deref()
-                    .map(|k| k.eq_ignore_ascii_case(c))
-                    .unwrap_or(false)
-            }) {
-                score += (codecs.len() - pos) as u32 * 30;
-            }
-        }
-
-        // Preferred audio codecs
-        let audio: Vec<String> =
-            serde_json::from_str(&profile.preferred_audio_codecs).unwrap_or_default();
-        if !audio.is_empty() {
-            if let Some(pos) = audio.iter().position(|a| {
-                item.audio_codec
-                    .as_deref()
-                    .map(|k| audio_codec_matches(k, a))
-                    .unwrap_or(false)
-            }) {
-                score += (audio.len() - pos) as u32 * 20;
-            }
-        }
-
-        Some(score)
-    }
+    use crate::watchlist_quality::{fallback_profile, pick_best};
 
     let profiles: std::collections::HashMap<i64, crate::db::QualityProfile> =
         match db.get_quality_profiles() {
@@ -3277,13 +3161,8 @@ pub async fn trigger_watchlist_auto_downloads(
                 return;
             }
         };
-    // "Any" fallback profile (id=1 or bare minimum)
-    let fallback_profile = crate::db::QualityProfile {
-        id: 0, name: "Any".into(), min_resolution: None, preferred_resolution: None,
-        prefer_hdr: false, preferred_codecs: "[]".into(), preferred_audio_codecs: "[]".into(),
-        preferred_release_types: "[]".into(), min_size_gb: None, max_size_gb: None, is_builtin: false,
-        created_at: String::new(),
-    };
+    // Used when the entry's profile no longer exists.
+    let fallback_profile = fallback_profile();
 
     let config = match db.load_config() {
         Ok(c) => c,
@@ -3319,24 +3198,11 @@ pub async fn trigger_watchlist_auto_downloads(
         let profile_id = group[0].profile_id;
         let profile = profiles.get(&profile_id).unwrap_or(&fallback_profile);
 
-        // Score every candidate; discard those that fail hard filters.
-        let mut scored: Vec<(u32, usize)> = group
-            .iter()
-            .enumerate()
-            .filter_map(|(i, c)| {
-                let s = score_candidate(c, profile);
-                if s.is_none() {
-                    println!("[watchlist] auto-download: '{}' rejected by quality profile '{}' (res={:?})",
-                        c.filename, profile.name, c.resolution);
-                }
-                s.map(|score| (score, i))
-            })
-            .collect();
-        if scored.is_empty() {
+        // Best release by quality score; none when hard filters reject all.
+        let Some(best) = pick_best(&group, profile) else {
             continue;
-        }
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
-        let item = &group[scored[0].1];
+        };
+        let item = &group[best];
 
         // Stable, root-independent identity for grab-history dedup.
         let rel_of = |c: &crate::db::WatchlistAutoItem| {

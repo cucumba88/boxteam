@@ -11,6 +11,7 @@ mod upload_notify;
 mod tmdb;
 mod tvdb;
 mod uploads;
+mod watchlist_quality;
 mod web;
 
 use std::collections::HashMap;
