@@ -154,6 +154,7 @@ pub fn run() {
             commands::is_portable_mode,
             commands::reset_db_path,
             commands::get_all_media,
+            commands::get_media_overview,
             commands::start_indexing,
             commands::rematch_all,
             commands::queue_download,

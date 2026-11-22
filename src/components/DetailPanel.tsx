@@ -14,10 +14,10 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { PlexIcon, EmbyIcon } from "./ServerIcons";
 import type { DownloadItem } from "../hooks/useDownloads";
 import type { MediaItem } from "../hooks/useIndexing";
+import { useOverview } from "../hooks/useOverview";
 import FixMatchModal from "./FixMatchModal";
 import {
   AppLanguage,
-  getLocalizedOverview,
   getLocalizedPosterPath,
   getLocalizedTitle,
 } from "../utils/mediaLanguage";
@@ -120,7 +120,7 @@ export default function DetailPanel({
   };
 
   const title = getLocalizedTitle(item, language);
-  const overview = getLocalizedOverview(item, language);
+  const overview = useOverview(item, language);
   const posterPath = getLocalizedPosterPath(item, language);
   const ratingOrder = useRatingOrder();
   const primaryRating = resolveRating(item, ratingOrder);

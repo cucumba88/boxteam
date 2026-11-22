@@ -143,6 +143,7 @@ fn build_router(state: AppState) -> Router {
         .route("/media",                   get(handlers::get_media))
         .route("/media/badges",            post(handlers::check_media_badges_handler))
         .route("/media/{id}/match",        put(handlers::apply_tmdb_match))
+        .route("/media/{id}/overview",     get(handlers::get_media_overview_handler))
         .route("/media/{id}/metadata",     delete(handlers::clear_item_metadata_handler))
         .route("/media/clear-all-metadata",post(handlers::clear_all_metadata_handler))
         .route("/maintenance/reset-library", post(handlers::reset_library_handler))

@@ -17,9 +17,9 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { PlexIcon, EmbyIcon } from "./ServerIcons";
 import type { DownloadItem } from "../hooks/useDownloads";
 import type { MediaItem } from "../hooks/useIndexing";
+import { useOverview } from "../hooks/useOverview";
 import {
   AppLanguage,
-  getLocalizedOverview,
   getLocalizedPosterPath,
   getLocalizedTitle,
 } from "../utils/mediaLanguage";
@@ -282,7 +282,7 @@ export default function TVShowPage({
   const [openingUrl, setOpeningUrl] = useState<string | null>(null);
   const isMobile = useIsMobile();
   const showTitle = getLocalizedTitle(show, language);
-  const overview = getLocalizedOverview(show, language);
+  const overview = useOverview(show, language);
   const posterPath = getLocalizedPosterPath(show, language);
   const poster = posterPath ? `${TMDB_POSTER_W342}${posterPath}` : null;
   const ratingOrder = useRatingOrder();

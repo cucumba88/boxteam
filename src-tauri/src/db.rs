@@ -2965,16 +2965,48 @@ impl Db {
     }
 
 
+    /// Every row with all columns. Used by backend jobs (watchlist,
+    /// notifications, ratings refresh) that may need the synopsis.
     pub fn get_all_media(&self) -> Result<Vec<MediaItem>, String> {
+        self.query_all_media(true)
+    }
+
+    /// Every row without `tmdb_overview` / `tmdb_overview_en` (returned as
+    /// NULL). This is what the Library loads on start-up: the synopses were
+    /// most of the payload (≈ 60 % of 32 MB for 20 000 files) and are only
+    /// shown on a detail page, which fetches them with `get_media_overview`.
+    pub fn get_library_media(&self) -> Result<Vec<MediaItem>, String> {
+        self.query_all_media(false)
+    }
+
+    /// Synopsis (Spanish, English) of one row, or None if the row is gone.
+    pub fn get_media_overview(&self, id: i64) -> Result<Option<(Option<String>, Option<String>)>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare("SELECT id, ftp_path, filename, size_bytes, title, year, season, episode, episode_end, \
-                      resolution, codec, audio_codec, languages, hdr, release_type, release_group, \
-                      media_type, tmdb_id, imdb_id, tmdb_type, tmdb_title, tmdb_title_en, tmdb_year, tmdb_release_date, \
-                      tmdb_overview, tmdb_overview_en, tmdb_poster, tmdb_poster_en, tmdb_rating, tmdb_genres, tmdb_watch_providers, indexed_at, metadata_at, manual_match, \
-                      imdb_rating, imdb_votes, tvdb_id, tvdb_rating, ratings_fetched_at \
-                      FROM media_items ORDER BY COALESCE(tmdb_title, title, filename)")
-            .map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT tmdb_overview, tmdb_overview_en FROM media_items WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+    }
+
+    fn query_all_media(&self, with_overviews: bool) -> Result<Vec<MediaItem>, String> {
+        let conn = self.conn.lock().unwrap();
+        let overview_cols = if with_overviews {
+            "tmdb_overview, tmdb_overview_en"
+        } else {
+            "NULL, NULL"
+        };
+        let sql = format!(
+            "SELECT id, ftp_path, filename, size_bytes, title, year, season, episode, episode_end, \
+             resolution, codec, audio_codec, languages, hdr, release_type, release_group, \
+             media_type, tmdb_id, imdb_id, tmdb_type, tmdb_title, tmdb_title_en, tmdb_year, tmdb_release_date, \
+             {overview_cols}, tmdb_poster, tmdb_poster_en, tmdb_rating, tmdb_genres, tmdb_watch_providers, indexed_at, metadata_at, manual_match, \
+             imdb_rating, imdb_votes, tvdb_id, tvdb_rating, ratings_fetched_at \
+             FROM media_items ORDER BY COALESCE(tmdb_title, title, filename)"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
         let items = stmt
             .query_map([], |row| {
@@ -3725,6 +3757,35 @@ mod tests {
             release_type: None,
             release_group: None,
         }
+    }
+
+    #[test]
+    fn library_list_leaves_out_overviews_and_they_load_per_item() {
+        let db = in_memory_db();
+        let r = db
+            .upsert_media("/m/A (2020)/a.mkv", "a.mkv", Some(1), &parsed("A"), Some("movie"), None, "/m")
+            .expect("upsert");
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE media_items SET tmdb_overview='es', tmdb_overview_en='en', tmdb_title='A' WHERE id=?1",
+                params![r.id],
+            )
+            .expect("update");
+        }
+        let list = db.get_library_media().expect("list");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].tmdb_title.as_deref(), Some("A"));
+        assert!(list[0].tmdb_overview.is_none() && list[0].tmdb_overview_en.is_none());
+
+        let full = db.get_all_media().expect("full");
+        assert_eq!(full[0].tmdb_overview.as_deref(), Some("es"));
+
+        assert_eq!(
+            db.get_media_overview(r.id).expect("overview"),
+            Some((Some("es".to_string()), Some("en".to_string())))
+        );
+        assert_eq!(db.get_media_overview(r.id + 999).expect("missing"), None);
     }
 
     // ── Reset library / factory reset ──────────────────────────────────────

@@ -1604,11 +1604,30 @@ pub async fn reset_db_path(
     crate::db::Db::write_bootstrap(None)
 }
 
+/// Library list for the UI. Synopses are left out (see
+/// `Db::get_library_media`); the detail views call `get_media_overview`.
 #[tauri::command]
 pub async fn get_all_media(
     state: tauri::State<'_, crate::db::Db>,
 ) -> Result<Vec<crate::db::MediaItem>, String> {
-    state.get_all_media()
+    state.get_library_media()
+}
+
+#[derive(serde::Serialize)]
+pub struct MediaOverview {
+    pub tmdb_overview: Option<String>,
+    pub tmdb_overview_en: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_media_overview(
+    state: tauri::State<'_, crate::db::Db>,
+    id: i64,
+) -> Result<MediaOverview, String> {
+    let (tmdb_overview, tmdb_overview_en) = state
+        .get_media_overview(id)?
+        .ok_or_else(|| format!("Media item {id} not found"))?;
+    Ok(MediaOverview { tmdb_overview, tmdb_overview_en })
 }
 
 #[tauri::command]

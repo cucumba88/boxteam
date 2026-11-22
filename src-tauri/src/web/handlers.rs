@@ -424,7 +424,7 @@ pub async fn get_media(
     // would block a tokio worker thread, starving every other in-flight
     // request. Db is Arc<Mutex<Connection>> internally so a clone is cheap.
     let db = state.db.clone();
-    let items = tokio::task::spawn_blocking(move || db.get_all_media())
+    let items = tokio::task::spawn_blocking(move || db.get_library_media())
         .await
         .map_err(|e| ApiError::internal(format!("join error: {e}")))?
         .map_err(ApiError::from)?;
@@ -503,6 +503,20 @@ pub async fn apply_tmdb_match(
         .await.map_err(ApiError::from)?;
     state.db.update_tmdb_manual(id, &movie, &body.media_type).map_err(ApiError::from)?;
     Ok(Json(serde_json::json!({"ok": true})))
+}
+
+/// Synopsis of one item — the list from `get_media` leaves them out.
+pub async fn get_media_overview_handler(
+    AuthUser(_u): AuthUser,
+    Path(id): Path<i64>,
+    State(state): State<AppState>,
+) -> ApiResult<Json<crate::commands::MediaOverview>> {
+    let (tmdb_overview, tmdb_overview_en) = state
+        .db
+        .get_media_overview(id)
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::not_found("Media item not found"))?;
+    Ok(Json(crate::commands::MediaOverview { tmdb_overview, tmdb_overview_en }))
 }
 
 pub async fn clear_item_metadata_handler(
