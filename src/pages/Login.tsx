@@ -25,7 +25,7 @@ export default function Login() {
         }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "No se ha podido iniciar sesión");
     } finally {
       setLoading(false);
     }
@@ -108,7 +108,7 @@ export default function Login() {
               marginTop: 4,
             }}
           >
-            {challengeId ? "Enter your one-time code" : "Sign in to continue"}
+            {challengeId ? "Introduce el código que te hemos enviado" : "Inicia sesión para continuar"}
           </div>
         </div>
 
@@ -128,7 +128,7 @@ export default function Login() {
                 />
               </div>
               <div>
-                <label style={labelStyle}>Password</label>
+                <label style={labelStyle}>Contraseña</label>
                 <input
                   style={inputStyle}
                   type="password"
@@ -143,7 +143,7 @@ export default function Login() {
 
           {challengeId && (
             <div>
-              <label style={labelStyle}>One-time code</label>
+              <label style={labelStyle}>Código de un solo uso</label>
               <input
                 style={{
                   ...inputStyle,
@@ -191,7 +191,7 @@ export default function Login() {
           )}
 
           <button type="submit" style={btnStyle} disabled={loading}>
-            {loading ? "Signing in…" : challengeId ? "Verify code" : "Sign in"}
+            {loading ? "Entrando…" : challengeId ? "Verificar código" : "Iniciar sesión"}
           </button>
 
           {challengeId && (

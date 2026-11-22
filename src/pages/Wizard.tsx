@@ -1,11 +1,16 @@
 import { useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import AppIcon from "../components/AppIcon";
+import AppIcon, { type IconName } from "../components/AppIcon";
+import BoxTeamMark from "../components/BoxTeamMark";
 import StepFTP from "../components/wizard/StepFTP";
 import StepTMDB from "../components/wizard/StepTMDB";
+import StepDownloads from "../components/wizard/StepDownloads";
 import StepDataDir from "../components/wizard/StepDataDir";
-import StepConfirm from "../components/wizard/StepConfirm";
+import StepConfirm, {
+  type ConfirmEditTarget,
+} from "../components/wizard/StepConfirm";
+import type { WizardConfig } from "../components/wizard/types";
 import { isTauri } from "../lib/transport";
 import { t } from "../utils/i18n";
 import {
@@ -16,26 +21,13 @@ import type { AppLanguage } from "../utils/mediaLanguage";
 
 const DEFAULT_FTP_ROOT = "/Compartida";
 
-interface Config {
-  ftp_host: string;
-  ftp_port: number;
-  ftp_user: string;
-  ftp_pass: string;
-  ftp_root: string;
-  ftp_tls: boolean;
-  ftp_tls_accept_invalid_certs: boolean;
-  tmdb_api_key: string;
-  default_language: "es" | "en";
-  download_folder: string;
-  folder_types: string;
-  max_concurrent_downloads: number;
-  emby_url: string;
-  emby_api_key: string;
-  plex_url: string;
-  plex_token: string;
-  auto_check_updates: boolean;
-  updater_endpoint: string;
-  updater_pubkey: string;
+type StepId = "ftp" | "tmdb" | "downloads" | "storage" | "confirm";
+
+interface StepDef {
+  id: StepId;
+  label: string;
+  description: string;
+  icon: IconName;
 }
 
 const shellCard: React.CSSProperties = {
@@ -62,20 +54,6 @@ const subtextStyle: React.CSSProperties = {
   color: "var(--color-text-muted)",
 };
 
-const ghostBtn: React.CSSProperties = {
-  padding: "9px 14px",
-  borderRadius: "var(--radius-full)",
-  border: "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
-  background: "color-mix(in srgb, var(--color-surface) 88%, transparent)",
-  color: "var(--color-text-muted)",
-  cursor: "pointer",
-  fontSize: 13,
-  fontWeight: 600,
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 8,
-};
-
 const responsiveOverviewGrid: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
@@ -85,7 +63,7 @@ const responsiveOverviewGrid: React.CSSProperties = {
 
 const responsiveWizardGrid: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(260px, 300px) minmax(0, 1fr)",
+  gridTemplateColumns: "minmax(220px, 260px) minmax(0, 1fr)",
   gap: 20,
   alignItems: "start",
 };
@@ -98,7 +76,7 @@ function ChoiceCard({
   disabled = false,
   onClick,
 }: {
-  icon: "folder" | "download";
+  icon: IconName;
   title: string;
   description: string;
   emphasis?: boolean;
@@ -158,17 +136,68 @@ function ChoiceCard({
   );
 }
 
+function LanguageSwitch({
+  value,
+  onChange,
+}: {
+  value: AppLanguage;
+  onChange: (next: AppLanguage) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Idioma / Language"
+      style={{
+        display: "inline-flex",
+        padding: 3,
+        gap: 2,
+        borderRadius: "var(--radius-full)",
+        border:
+          "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
+        background: "color-mix(in srgb, var(--color-surface) 88%, transparent)",
+      }}
+    >
+      {(["es", "en"] as const).map((lang) => {
+        const active = value === lang;
+        return (
+          <button
+            key={lang}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(lang)}
+            style={{
+              border: "none",
+              borderRadius: "var(--radius-full)",
+              padding: "5px 11px",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+              background: active
+                ? "color-mix(in srgb, var(--color-primary) 18%, transparent)"
+                : "transparent",
+              color: active ? "var(--color-primary)" : "var(--color-text-muted)",
+            }}
+          >
+            {lang.toUpperCase()}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function Wizard({
   onComplete,
 }: {
   onComplete: (options?: { startIndexing?: boolean }) => void;
 }) {
+  /** 0 = welcome screen; n ≥ 1 = steps[n - 1]. */
   const [step, setStep] = useState(0);
-  const language: AppLanguage = "es";
+  const [language, setLanguage] = useState<AppLanguage>("es");
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState("");
   const [transitioning, setTransitioning] = useState(false);
-  const [config, setConfig] = useState<Config>({
+  const [config, setConfig] = useState<WizardConfig>({
     ftp_host: "",
     ftp_port: 21,
     ftp_user: "",
@@ -190,11 +219,56 @@ export default function Wizard({
     updater_pubkey: "",
   });
 
-  const next = async (partial: Partial<Config>) => {
+  const steps = useMemo<StepDef[]>(
+    () => [
+      {
+        id: "ftp",
+        label: t(language, "wizard.stepFtp"),
+        description: t(language, "settings.ftpDescription"),
+        icon: "folder",
+      },
+      {
+        id: "tmdb",
+        label: t(language, "wizard.stepTmdb"),
+        description: t(language, "wizard.stepTmdbDesc"),
+        icon: "search",
+      },
+      {
+        id: "downloads",
+        label: t(language, "settings.downloadsTitle"),
+        description: t(language, "wizard.stepDownloadsDesc"),
+        icon: "download",
+      },
+      ...(isTauri()
+        ? [
+            {
+              id: "storage" as const,
+              label: t(language, "wizard.stepDataDir"),
+              description: t(language, "wizard.dataDirDesc"),
+              icon: "database" as const,
+            },
+          ]
+        : []),
+      {
+        id: "confirm",
+        label: t(language, "wizard.stepConfirm"),
+        description: t(language, "wizard.confirmDescription"),
+        icon: "check",
+      },
+    ],
+    [language],
+  );
+
+  const currentStep = step > 0 ? steps[step - 1] : null;
+  const goTo = (id: StepId) =>
+    setStep(steps.findIndex((s) => s.id === id) + 1);
+  const back = () => setStep((current) => Math.max(0, current - 1));
+
+  const next = async (partial: Partial<WizardConfig> = {}) => {
     if (transitioning) return;
     const merged = { ...config, ...partial };
 
-    if (step === 1) {
+    if (currentStep?.id === "ftp") {
       setTransitioning(true);
       try {
         const dirs = await invoke<string[]>("ftp_list_root_dirs_preview", {
@@ -218,38 +292,17 @@ export default function Wizard({
     }
 
     setConfig(merged);
-    setStep((current) => (typeof current === "number" ? current + 1 : 0));
+    setStep((current) => Math.min(steps.length, current + 1));
   };
 
-  const steps = useMemo(
-    () => [
-      {
-        label: t(language, "wizard.stepFtp"),
-        description: t(language, "settings.ftpDescription"),
-        icon: "folder" as const,
-      },
-      {
-        label: t(language, "wizard.stepTmdb"),
-        description: t(language, "settings.metaDescription"),
-        icon: "search" as const,
-      },
-      ...(isTauri()
-        ? [
-            {
-              label: t(language, "wizard.stepDataDir"),
-              description: t(language, "wizard.dataDirDesc"),
-              icon: "folder" as const,
-            },
-          ]
-        : []),
-      {
-        label: t(language, "wizard.stepConfirm"),
-        description: t(language, "wizard.confirmDescription"),
-        icon: "settings" as const,
-      },
-    ],
-    [language],
-  );
+  const changeLanguage = (lang: AppLanguage) => {
+    setLanguage(lang);
+    // Until the user picks otherwise in the TMDB step, the library language
+    // follows the language they chose for the wizard itself.
+    if (!config.tmdb_api_key) {
+      setConfig((c) => ({ ...c, default_language: lang }));
+    }
+  };
 
   const restoreBackup = async () => {
     setRestoreError("");
@@ -265,14 +318,12 @@ export default function Wizard({
       if (typeof selected !== "string") return;
       await invoke("import_library_backup", { sourcePath: selected });
       onComplete({ startIndexing: false });
-    } catch (error: any) {
+    } catch (error: unknown) {
       setRestoreError(String(error));
     } finally {
       setRestoring(false);
     }
   };
-
-  const currentStep = step > 0 ? steps[step - 1] : null;
 
   return (
     <div
@@ -284,73 +335,59 @@ export default function Wizard({
       }}
     >
       <div
-        style={{ maxWidth: 1120, margin: "0 auto", display: "grid", gap: 20 }}
+        style={{ maxWidth: 1040, margin: "0 auto", display: "grid", gap: 20 }}
       >
-        <section style={{ ...shellCard, padding: "1.35rem 1.5rem" }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 18,
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-              <div
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 18,
+            flexWrap: "wrap",
+            padding: "0.25rem 0.25rem 0",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 15,
+                background:
+                  "color-mix(in srgb, var(--color-primary) 14%, transparent)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <BoxTeamMark size={28} />
+            </div>
+            <div>
+              <h1
                 style={{
-                  width: 46,
-                  height: 46,
-                  borderRadius: 14,
-                  background:
-                    "color-mix(in srgb, var(--color-primary) 16%, transparent)",
-                  color: "var(--color-primary)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
+                  margin: 0,
+                  fontSize: 26,
+                  fontWeight: 800,
+                  letterSpacing: "-0.03em",
+                  color: "var(--color-text)",
                 }}
               >
-                <AppIcon name="settings" size={20} strokeWidth={2.1} />
-              </div>
-              <div>
-                <h1
-                  style={{
-                    margin: 0,
-                    fontSize: 28,
-                    fontWeight: 800,
-                    letterSpacing: "-0.03em",
-                    color: "var(--color-text)",
-                  }}
-                >
-                  {t(language, "wizard.welcomeTitle")}
-                </h1>
-                <p style={{ ...subtextStyle, marginTop: 8, maxWidth: 760 }}>
-                  {t(language, "wizard.welcomeDescription")}
-                </p>
-              </div>
+                {t(language, "wizard.welcomeTitle")}
+              </h1>
+              <p style={{ ...subtextStyle, marginTop: 4, maxWidth: 640 }}>
+                {currentStep
+                  ? `${t(language, "wizard.stepOf")
+                      .replace("{n}", String(step))
+                      .replace("{total}", String(steps.length))} · ${currentStep.label}`
+                  : t(language, "wizard.welcomeDescription")}
+              </p>
             </div>
-
-            {step > 0 && (
-              <button
-                onClick={() => setStep((current) => Math.max(0, current - 1))}
-                style={ghostBtn}
-              >
-                <span
-                  style={{
-                    transform: "rotate(180deg)",
-                    display: "inline-flex",
-                  }}
-                >
-                  <AppIcon name="chevron-right" size={14} strokeWidth={2.2} />
-                </span>
-                {t(language, "library.prev")}
-              </button>
-            )}
           </div>
-        </section>
+          <LanguageSwitch value={language} onChange={changeLanguage} />
+        </header>
 
-        {step === 0 ? (
+        {step === 0 || !currentStep ? (
           <div style={responsiveOverviewGrid}>
             <section style={{ ...shellCard, padding: "1.4rem 1.5rem" }}>
               <div style={{ display: "grid", gap: 16 }}>
@@ -358,7 +395,7 @@ export default function Wizard({
                   <h2
                     style={{
                       margin: 0,
-                      fontSize: 24,
+                      fontSize: 22,
                       fontWeight: 800,
                       letterSpacing: "-0.03em",
                       color: "var(--color-text)",
@@ -366,74 +403,69 @@ export default function Wizard({
                   >
                     {t(language, "wizard.setupOverview")}
                   </h2>
-                  <p style={subtextStyle}>{t(language, "settings.subtitle")}</p>
+                  <p style={subtextStyle}>
+                    {t(language, "wizard.setupOverviewDesc")}
+                  </p>
                 </div>
 
-                <div style={{ display: "grid", gap: 12 }}>
-                  <div style={{ ...sectionCard, padding: "1rem" }}>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "var(--color-text)",
-                        marginBottom: 4,
-                      }}
-                    >
-                      {t(language, "wizard.stepFtp")}
-                    </div>
-                    <p style={subtextStyle}>
-                      {t(language, "settings.ftpDescription")}
-                    </p>
-                  </div>
-                  <div style={{ ...sectionCard, padding: "1rem" }}>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "var(--color-text)",
-                        marginBottom: 4,
-                      }}
-                    >
-                      {t(language, "wizard.stepTmdb")}
-                    </div>
-                    <p style={subtextStyle}>
-                      {t(language, "settings.metaDescription")}{" "}
-                      {t(language, "settings.downloadsDescription")}
-                    </p>
-                  </div>
-                  {isTauri() && (
-                    <div style={{ ...sectionCard, padding: "1rem" }}>
-                      <div
+                <ol
+                  style={{
+                    listStyle: "none",
+                    margin: 0,
+                    padding: 0,
+                    display: "grid",
+                    gap: 10,
+                  }}
+                >
+                  {steps
+                    .filter((s) => s.id !== "confirm")
+                    .map((s, index) => (
+                      <li
+                        key={s.id}
                         style={{
-                          fontSize: 13,
-                          fontWeight: 700,
-                          color: "var(--color-text)",
-                          marginBottom: 4,
+                          ...sectionCard,
+                          boxShadow: "none",
+                          padding: "0.85rem 1rem",
+                          display: "flex",
+                          gap: 12,
+                          alignItems: "flex-start",
                         }}
                       >
-                        {t(language, "wizard.stepDataDir")}
-                      </div>
-                      <p style={subtextStyle}>
-                        {t(language, "wizard.dataDirDesc")}
-                      </p>
-                    </div>
-                  )}
-                  <div style={{ ...sectionCard, padding: "1rem" }}>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "var(--color-text)",
-                        marginBottom: 4,
-                      }}
-                    >
-                      {t(language, "wizard.stepConfirm")}
-                    </div>
-                    <p style={subtextStyle}>
-                      {t(language, "wizard.confirmDescription")}
-                    </p>
-                  </div>
-                </div>
+                        <span
+                          style={{
+                            width: 26,
+                            height: 26,
+                            borderRadius: 999,
+                            flexShrink: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: "var(--color-primary)",
+                            background:
+                              "color-mix(in srgb, var(--color-primary) 14%, transparent)",
+                          }}
+                        >
+                          {index + 1}
+                        </span>
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 700,
+                              color: "var(--color-text)",
+                            }}
+                          >
+                            {s.label}
+                          </div>
+                          <p style={{ ...subtextStyle, fontSize: 12.5 }}>
+                            {s.description}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                </ol>
               </div>
             </section>
 
@@ -458,6 +490,7 @@ export default function Wizard({
               />
               {restoreError && (
                 <div
+                  role="alert"
                   style={{
                     ...sectionCard,
                     padding: "0.95rem 1rem",
@@ -473,209 +506,88 @@ export default function Wizard({
           </div>
         ) : (
           <div style={responsiveWizardGrid}>
-            <aside
-              style={{
-                display: "grid",
-                gap: 16,
-                alignSelf: "start",
-                minWidth: 0,
-              }}
+            <nav
+              aria-label={t(language, "wizard.progressLabel")}
+              style={{ ...shellCard, padding: "0.75rem", alignSelf: "start" }}
             >
-              <section style={{ ...shellCard, padding: "1rem" }}>
-                <div style={{ display: "grid", gap: 10 }}>
-                  {steps.map((item, index) => {
-                    const isActive = index + 1 === step;
-                    const isDone = index + 1 < step;
-                    return (
-                      <div
-                        key={item.label}
+              <ol
+                style={{
+                  listStyle: "none",
+                  margin: 0,
+                  padding: 0,
+                  display: "grid",
+                  gap: 4,
+                }}
+              >
+                {steps.map((item, index) => {
+                  const isActive = index + 1 === step;
+                  const isDone = index + 1 < step;
+                  return (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        disabled={!isDone}
+                        aria-current={isActive ? "step" : undefined}
+                        onClick={() => setStep(index + 1)}
                         style={{
-                          ...sectionCard,
-                          padding: "0.9rem",
-                          border: isActive
-                            ? "1px solid color-mix(in srgb, var(--color-primary) 44%, transparent)"
-                            : sectionCard.border,
+                          width: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "0.6rem 0.65rem",
+                          borderRadius: "var(--radius)",
+                          border: "none",
+                          textAlign: "left",
+                          font: "inherit",
+                          cursor: isDone ? "pointer" : "default",
                           background: isActive
-                            ? "linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 10%, var(--color-surface)), color-mix(in srgb, var(--color-surface-2) 92%, transparent))"
-                            : sectionCard.background,
-                          opacity: isDone || isActive ? 1 : 0.72,
+                            ? "color-mix(in srgb, var(--color-primary) 12%, transparent)"
+                            : "transparent",
+                          opacity: isDone || isActive ? 1 : 0.6,
                         }}
                       >
-                        <div
+                        <span
                           style={{
+                            width: 30,
+                            height: 30,
+                            borderRadius: 10,
                             display: "flex",
-                            gap: 10,
-                            alignItems: "flex-start",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                            color: isDone
+                              ? "var(--color-success)"
+                              : isActive
+                                ? "var(--color-primary)"
+                                : "var(--color-text-muted)",
+                            background: isDone
+                              ? "color-mix(in srgb, var(--color-success) 14%, transparent)"
+                              : isActive
+                                ? "color-mix(in srgb, var(--color-primary) 16%, transparent)"
+                                : "color-mix(in srgb, var(--color-surface-2) 88%, transparent)",
                           }}
                         >
-                          <div
-                            style={{
-                              width: 34,
-                              height: 34,
-                              borderRadius: 12,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              color: isDone
-                                ? "var(--color-success)"
-                                : isActive
-                                  ? "var(--color-primary)"
-                                  : "var(--color-text-muted)",
-                              background: isDone
-                                ? "color-mix(in srgb, var(--color-success) 14%, transparent)"
-                                : isActive
-                                  ? "color-mix(in srgb, var(--color-primary) 14%, transparent)"
-                                  : "color-mix(in srgb, var(--color-surface-2) 88%, transparent)",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {isDone ? (
-                              <AppIcon
-                                name="check"
-                                size={16}
-                                strokeWidth={2.6}
-                              />
-                            ) : (
-                              <AppIcon
-                                name={item.icon}
-                                size={16}
-                                strokeWidth={2.1}
-                              />
-                            )}
-                          </div>
-                          <div style={{ minWidth: 0 }}>
-                            <div
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 700,
-                                color: "var(--color-text)",
-                                marginBottom: 3,
-                              }}
-                            >
-                              {index + 1}. {item.label}
-                            </div>
-                            <p style={subtextStyle}>{item.description}</p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-
-              <section style={{ ...shellCard, padding: "1rem" }}>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 800,
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    color: "var(--color-text-muted)",
-                    marginBottom: 10,
-                  }}
-                >
-                  {t(language, "wizard.summaryTitle")}
-                </div>
-                <div style={{ display: "grid", gap: 10 }}>
-                  <div
-                    style={{ ...sectionCard, padding: "0.85rem", minWidth: 0 }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: "var(--color-text-muted)",
-                        marginBottom: 4,
-                      }}
-                    >
-                      {t(language, "wizard.stepFtp")}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "var(--color-text)",
-                        overflowWrap: "anywhere",
-                        wordBreak: "break-word",
-                        lineHeight: 1.35,
-                      }}
-                    >
-                      {config.ftp_host
-                        ? `${config.ftp_user || "user"}@${config.ftp_host}:${config.ftp_port}`
-                        : "—"}
-                    </div>
-                    <div
-                      style={{
-                        ...subtextStyle,
-                        marginTop: 4,
-                        overflowWrap: "anywhere",
-                        wordBreak: "break-word",
-                      }}
-                    >
-                      {config.ftp_root || "/"}
-                    </div>
-                  </div>
-                  <div
-                    style={{ ...sectionCard, padding: "0.85rem", minWidth: 0 }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: "var(--color-text-muted)",
-                        marginBottom: 4,
-                      }}
-                    >
-                      {t(language, "wizard.stepTmdb")}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "var(--color-text)",
-                      }}
-                    >
-                      {config.tmdb_api_key
-                        ? t(language, "wizard.tmdbConfigured")
-                        : "—"}
-                    </div>
-                    <div style={{ ...subtextStyle, marginTop: 4 }}>
-                      {t(language, "settings.defaultLanguage")}:{" "}
-                      {config.default_language === "en"
-                        ? t(language, "common.languageEnglish")
-                        : t(language, "common.languageSpanish")}
-                    </div>
-                  </div>
-                  <div
-                    style={{ ...sectionCard, padding: "0.85rem", minWidth: 0 }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: "var(--color-text-muted)",
-                        marginBottom: 4,
-                      }}
-                    >
-                      {t(language, "settings.downloadsTitle")}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "var(--color-text)",
-                        overflowWrap: "anywhere",
-                        wordBreak: "break-word",
-                        lineHeight: 1.35,
-                      }}
-                    >
-                      {config.download_folder || "—"}
-                    </div>
-                    <div style={{ ...subtextStyle, marginTop: 4 }}>
-                      {t(language, "settings.maxConcurrent")}:{" "}
-                      {config.max_concurrent_downloads}
-                    </div>
-                  </div>
-                </div>
-              </section>
-            </aside>
+                          <AppIcon
+                            name={isDone ? "check" : item.icon}
+                            size={15}
+                            strokeWidth={isDone ? 2.6 : 2.1}
+                          />
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 13,
+                            fontWeight: isActive ? 700 : 600,
+                            color: "var(--color-text)",
+                          }}
+                        >
+                          {item.label}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            </nav>
 
             <section
               style={{
@@ -692,74 +604,62 @@ export default function Wizard({
                     "1px solid color-mix(in srgb, var(--color-border) 72%, transparent)",
                 }}
               >
-                <div
-                  style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+                <h2
+                  style={{
+                    margin: 0,
+                    fontSize: 20,
+                    fontWeight: 800,
+                    letterSpacing: "-0.02em",
+                    color: "var(--color-text)",
+                  }}
                 >
-                  <div
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 13,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "var(--color-primary)",
-                      background:
-                        "color-mix(in srgb, var(--color-primary) 16%, transparent)",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {currentStep && (
-                      <AppIcon
-                        name={currentStep.icon}
-                        size={18}
-                        strokeWidth={2.1}
-                      />
-                    )}
-                  </div>
-                  <div>
-                    <h2
-                      style={{
-                        margin: 0,
-                        fontSize: 20,
-                        fontWeight: 800,
-                        letterSpacing: "-0.02em",
-                        color: "var(--color-text)",
-                      }}
-                    >
-                      {currentStep?.label}
-                    </h2>
-                    <p style={{ ...subtextStyle, marginTop: 6 }}>
-                      {currentStep?.description}
-                    </p>
-                  </div>
-                </div>
+                  {currentStep.label}
+                </h2>
+                <p style={{ ...subtextStyle, marginTop: 6 }}>
+                  {currentStep.description}
+                </p>
               </div>
 
               <div style={{ padding: "1.25rem 1.35rem 1.35rem" }}>
-                {step === 1 && (
+                {currentStep.id === "ftp" && (
                   <StepFTP
                     defaults={config}
                     language={language}
                     onNext={next}
+                    onBack={back}
                     transitioning={transitioning}
                   />
                 )}
-                {step === 2 && (
+                {currentStep.id === "tmdb" && (
                   <StepTMDB
                     defaults={config}
                     language={language}
                     onNext={next}
+                    onBack={back}
                   />
                 )}
-                {step === 3 && isTauri() && (
-                  <StepDataDir language={language} onNext={next} />
+                {currentStep.id === "downloads" && (
+                  <StepDownloads
+                    defaults={config}
+                    language={language}
+                    onNext={next}
+                    onBack={back}
+                  />
                 )}
-                {((step === 3 && !isTauri()) || step === 4) && (
+                {currentStep.id === "storage" && (
+                  <StepDataDir
+                    language={language}
+                    onNext={() => next()}
+                    onBack={back}
+                  />
+                )}
+                {currentStep.id === "confirm" && (
                   <StepConfirm
                     config={config}
                     language={language}
                     onComplete={onComplete}
+                    onBack={back}
+                    onEdit={(target: ConfirmEditTarget) => goTo(target)}
                   />
                 )}
               </div>

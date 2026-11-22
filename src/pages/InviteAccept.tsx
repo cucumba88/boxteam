@@ -19,15 +19,15 @@ export default function InviteAccept({ token, onAccepted }: InviteAcceptProps) {
     setError("");
 
     if (!email.trim()) {
-      setError("Email is required.");
+      setError("Introduce un email.");
       return;
     }
     if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
+      setError("La contraseña debe tener al menos 8 caracteres.");
       return;
     }
     if (password !== confirmPassword) {
-      setError("Passwords do not match.");
+      setError("Las contraseñas no coinciden.");
       return;
     }
 
@@ -36,7 +36,7 @@ export default function InviteAccept({ token, onAccepted }: InviteAcceptProps) {
       await acceptInvite(token, email, password);
       onAccepted();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to accept invite");
+      setError(err instanceof Error ? err.message : "No se ha podido aceptar la invitación");
     } finally {
       setLoading(false);
     }
@@ -101,10 +101,10 @@ export default function InviteAccept({ token, onAccepted }: InviteAcceptProps) {
       <div style={cardStyle}>
         <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
           <div style={{ fontSize: 26, fontWeight: 800, color: "var(--color-text)", letterSpacing: "-0.03em" }}>
-            Accept Invitation
+            Te han invitado a BoxTeam
           </div>
           <div style={{ fontSize: 14, color: "var(--color-text-muted)", marginTop: 4 }}>
-            Complete your account setup to join BoxTeam.
+            Elige una contraseña para crear tu cuenta.
           </div>
         </div>
 
@@ -115,12 +115,12 @@ export default function InviteAccept({ token, onAccepted }: InviteAcceptProps) {
           </div>
 
           <div>
-            <label style={labelStyle}>Password</label>
+            <label style={labelStyle}>Contraseña</label>
             <input style={inputStyle} type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required />
           </div>
 
           <div>
-            <label style={labelStyle}>Confirm password</label>
+            <label style={labelStyle}>Repite la contraseña</label>
             <input style={inputStyle} type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} minLength={8} required />
           </div>
 
@@ -131,7 +131,7 @@ export default function InviteAccept({ token, onAccepted }: InviteAcceptProps) {
           )}
 
           <button type="submit" style={buttonStyle} disabled={loading}>
-            {loading ? "Accepting invite..." : "Create account"}
+            {loading ? "Creando cuenta…" : "Crear cuenta"}
           </button>
         </form>
       </div>

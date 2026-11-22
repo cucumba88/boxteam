@@ -19,15 +19,15 @@ export default function WebBootstrap({ onComplete }: WebBootstrapProps) {
     setSuccess("");
 
     if (!email.trim()) {
-      setError("Email is required.");
+      setError("Introduce un email.");
       return;
     }
     if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
+      setError("La contraseña debe tener al menos 8 caracteres.");
       return;
     }
     if (password !== confirmPassword) {
-      setError("Passwords do not match.");
+      setError("Las contraseñas no coinciden.");
       return;
     }
 
@@ -41,13 +41,13 @@ export default function WebBootstrap({ onComplete }: WebBootstrapProps) {
 
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error ?? "Failed to create admin user");
+        throw new Error(data.error ?? "No se ha podido crear la cuenta de administrador");
       }
 
-      setSuccess("Admin account created. You can now sign in.");
+      setSuccess("Cuenta creada. Ya puedes iniciar sesión.");
       setTimeout(() => onComplete(), 700);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Bootstrap failed");
+      setError(err instanceof Error ? err.message : "No se ha podido completar la configuración");
     } finally {
       setLoading(false);
     }
@@ -113,16 +113,16 @@ export default function WebBootstrap({ onComplete }: WebBootstrapProps) {
       <div style={cardStyle}>
         <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
           <div style={{ fontSize: 27, fontWeight: 800, color: "var(--color-text)", letterSpacing: "-0.03em" }}>
-            First-time Setup
+            Bienvenido a BoxTeam
           </div>
           <div style={{ fontSize: 14, color: "var(--color-text-muted)", marginTop: 4 }}>
-            Create your first admin account to enable WebGUI access.
+            Crea la cuenta de administrador para empezar a usar la interfaz web.
           </div>
         </div>
 
         <form onSubmit={submit} style={{ display: "grid", gap: 14 }}>
           <div>
-            <label style={labelStyle}>Admin email</label>
+            <label style={labelStyle}>Email del administrador</label>
             <input
               style={inputStyle}
               type="email"
@@ -134,7 +134,7 @@ export default function WebBootstrap({ onComplete }: WebBootstrapProps) {
           </div>
 
           <div>
-            <label style={labelStyle}>Password</label>
+            <label style={labelStyle}>Contraseña</label>
             <input
               style={inputStyle}
               type="password"
@@ -146,7 +146,7 @@ export default function WebBootstrap({ onComplete }: WebBootstrapProps) {
           </div>
 
           <div>
-            <label style={labelStyle}>Confirm password</label>
+            <label style={labelStyle}>Repite la contraseña</label>
             <input
               style={inputStyle}
               type="password"
@@ -170,7 +170,7 @@ export default function WebBootstrap({ onComplete }: WebBootstrapProps) {
           )}
 
           <button type="submit" style={buttonStyle} disabled={loading}>
-            {loading ? "Creating admin..." : "Create admin account"}
+            {loading ? "Creando cuenta…" : "Crear cuenta de administrador"}
           </button>
         </form>
       </div>

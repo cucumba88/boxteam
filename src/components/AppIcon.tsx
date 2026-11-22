@@ -5,9 +5,11 @@ import {
   Check,
   CheckSquare,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Clapperboard,
   Clock,
+  Database,
   Download,
   FileText,
   Filter,
@@ -47,6 +49,8 @@ export type IconName =
   | "folder"
   | "chevron-down"
   | "chevron-right"
+  | "chevron-left"
+  | "database"
   | "star"
   | "more-horizontal"
   | "clock"
@@ -77,6 +81,8 @@ const ICON_MAP: Record<IconName, React.ComponentType<LucideProps>> = {
   folder: Folder,
   "chevron-down": ChevronDown,
   "chevron-right": ChevronRight,
+  "chevron-left": ChevronLeft,
+  database: Database,
   star: Star,
   "more-horizontal": MoreHorizontal,
   clock: Clock,

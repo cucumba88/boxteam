@@ -490,7 +490,57 @@ const messages = {
   "router.loading": { es: "Cargando…", en: "Loading…" },
 
   "wizard.stepFtp": { es: "Servidor FTP", en: "FTP Server" },
-  "wizard.stepTmdb": { es: "API de TMDB", en: "TMDB API" },
+  "wizard.stepTmdb": { es: "Metadatos (TMDB)", en: "Metadata (TMDB)" },
+  "wizard.stepTmdbDesc": {
+    es: "Valida tu API key de TMDB para traer carátulas, sinopsis y notas, y elige el idioma de la biblioteca.",
+    en: "Validate your TMDB API key to fetch posters, synopses and ratings, and pick the library language.",
+  },
+  "wizard.tmdbShort": { es: "TMDB", en: "TMDB" },
+  "wizard.rootPathHelp": {
+    es: "Carpeta del FTP donde están tus películas y series. Las subcarpetas se clasifican automáticamente.",
+    en: "FTP folder that holds your movies and shows. Subfolders are classified automatically.",
+  },
+  "wizard.retestNeeded": {
+    es: "Datos cambiados: vuelve a probar.",
+    en: "Details changed: test again.",
+  },
+  "wizard.ftpErrorRefused": {
+    es: "El servidor ha rechazado la conexión. Revisa el host y el puerto, y que el FTP esté encendido.",
+    en: "The server refused the connection. Check host and port, and that the FTP server is running.",
+  },
+  "wizard.ftpErrorTimeout": {
+    es: "El servidor no responde. Revisa el host, el puerto y tu red.",
+    en: "The server is not responding. Check host, port and your network.",
+  },
+  "wizard.ftpErrorHost": {
+    es: "No se encuentra ese host. Revisa que esté bien escrito.",
+    en: "That host could not be found. Check the spelling.",
+  },
+  "wizard.ftpErrorAuth": {
+    es: "Usuario o contraseña incorrectos.",
+    en: "Wrong username or password.",
+  },
+  "wizard.ftpErrorTls": {
+    es: "Fallo al negociar FTPS. Prueba a desactivar FTPS o a aceptar certificados no válidos.",
+    en: "FTPS negotiation failed. Try disabling FTPS or accepting invalid certificates.",
+  },
+  "wizard.ftpErrorDetail": { es: "Detalle técnico", en: "Technical detail" },
+  "wizard.downloadFolderHelp": {
+    es: "Carpeta de tu ordenador donde se guardarán las descargas. Puedes cambiarla luego en Ajustes.",
+    en: "Folder on this computer where downloads are saved. You can change it later in Settings.",
+  },
+  "wizard.stepOf": { es: "Paso {n} de {total}", en: "Step {n} of {total}" },
+  "wizard.progressLabel": { es: "Progreso de la configuración", en: "Setup progress" },
+  "wizard.skipForNow": { es: "Omitir por ahora", en: "Skip for now" },
+  "wizard.stepDownloadsDesc": {
+    es: "Elige dónde se guardan los archivos que descargues y cuántos a la vez.",
+    en: "Choose where downloaded files are saved and how many run at once.",
+  },
+  "wizard.edit": { es: "Cambiar", en: "Change" },
+  "wizard.downloadFolderUnset": {
+    es: "Sin elegir: te la pediremos en Ajustes",
+    en: "Not set: you can choose it in Settings",
+  },
   "wizard.stepConfirm": { es: "Confirmar", en: "Confirm" },
   "wizard.stepDataDir": { es: "Almacenamiento", en: "Storage" },
   "wizard.dataDir": {
@@ -500,6 +550,14 @@ const messages = {
   "wizard.dataDirDesc": {
     es: "Elige dónde guardar la biblioteca. Por defecto se usa la carpeta de datos de la aplicación.",
     en: "Choose where to store the library. The app data folder is used by default.",
+  },
+  "wizard.dataDirPick": {
+    es: "Elige una carpeta…",
+    en: "Choose a folder…",
+  },
+  "wizard.dataDirHint": {
+    es: "Aquí se guardan la base de datos de la biblioteca y sus copias de seguridad, no tus películas. Útil si quieres tenerla en otro disco o sincronizada.",
+    en: "This holds the library database and its backups, not your media. Handy if you want it on another drive or synced.",
   },
   "wizard.dataDirDefault": {
     es: "Usar ubicación predeterminada",
@@ -527,19 +585,19 @@ const messages = {
   },
   "wizard.validateKey": { es: "Validar key", en: "Test Key" },
   "wizard.validating": { es: "Validando…", en: "Validating…" },
-  "wizard.validKey": { es: "✓ La key es válida", en: "✓ Key is valid" },
-  "wizard.invalidKey": { es: "✗ Key inválida", en: "✗ Invalid key" },
+  "wizard.validKey": { es: "La key es válida", en: "Key is valid" },
+  "wizard.invalidKey": { es: "La key no es válida. Revisa que sea la v3 (32 caracteres).", en: "Invalid key. Make sure it is the v3 key (32 characters)." },
   "wizard.confirmTitle": { es: "Todo se ve bien", en: "Everything looks good" },
   "wizard.tmdbConfigured": {
-    es: "TMDB API key: configurada ✓",
-    en: "TMDB API key: configured ✓",
+    es: "API key configurada",
+    en: "API key configured",
   },
   "wizard.welcomeTitle": {
     es: "Bienvenido a BoxTeam",
     en: "Welcome to BoxTeam",
   },
   "wizard.welcomeDescription": {
-    es: "Configura una librería nueva o restaura una base de datos existente para no empezar desde cero.",
+    es: "Configura una biblioteca nueva o restaura una base de datos existente para no empezar desde cero.",
     en: "Set up a new library or restore an existing database so you do not have to start from scratch.",
   },
   "wizard.startFresh": {
@@ -547,7 +605,7 @@ const messages = {
     en: "Start fresh setup",
   },
   "wizard.restoreBackup": {
-    es: "Restaurar copia de librería",
+    es: "Restaurar copia de biblioteca",
     en: "Restore library backup",
   },
   "wizard.restoringBackup": {
@@ -567,16 +625,20 @@ const messages = {
     en: "Preparing library…",
   },
   "wizard.confirmDescription": {
-    es: "Revisa la conexión, el idioma inicial, la carpeta de descargas y la estructura de la biblioteca antes de terminar la configuración.",
-    en: "Review the connection, startup language, download folder, and library structure before finishing setup.",
+    es: "Revisa la conexión, el idioma y la carpeta de descargas antes de terminar.",
+    en: "Review the connection, language and download folder before finishing.",
   },
   "wizard.setupOverview": {
-    es: "Pon a punto la conexión principal y deja la librería lista para empezar a indexar.",
-    en: "Dial in the core connection and leave the library ready for its first index.",
+    es: "En unos pocos pasos tu biblioteca estará lista para indexar.",
+    en: "A few steps and your library is ready to index.",
   },
   "wizard.startFreshDescription": {
     es: "Conecta tu FTP, valida TMDB y define las preferencias básicas desde el inicio.",
     en: "Connect your FTP, validate TMDB, and define the core preferences from the start.",
+  },
+  "wizard.setupOverviewDesc": {
+    es: "Necesitas acceso a tu FTP y una API key gratuita de TMDB. Todo lo demás se puede ajustar después en Ajustes.",
+    en: "You need access to your FTP and a free TMDB API key. Everything else can be tweaked later in Settings.",
   },
   "wizard.summaryTitle": {
     es: "Resumen de configuración",
@@ -638,7 +700,7 @@ const messages = {
   },
   "ftp.perm.checkedAt": { es: "comprobado a las", en: "checked at" },
   "settings.ftpDescription": {
-    es: "Datos de conexión para navegar e indexar tu librería remota.",
+    es: "Datos de conexión para navegar e indexar tu biblioteca remota.",
     en: "Connection details for browsing and indexing your remote media library.",
   },
   "settings.host": { es: "Host", en: "Host" },
@@ -799,7 +861,7 @@ const messages = {
     en: "Done — {count} items processed",
   },
   "settings.defaultLanguage": {
-    es: "Idioma por defecto de la librería",
+    es: "Idioma por defecto de la biblioteca",
     en: "Default Library Language",
   },
   "settings.defaultLanguageHelp": {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { apiBase, getToken } from "../lib/transport";
 import AppIcon from "../components/AppIcon";
+import { friendlyFtpError } from "../components/wizard/wizardUi";
 import FtpTlsFields from "../components/FtpTlsFields";
 
 interface WebSetupWizardProps {
@@ -118,11 +119,14 @@ function StepFTP({
 
   const set =
     (key: keyof FtpFields) =>
-    (e: React.ChangeEvent<HTMLInputElement>) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
       setForm((f) => ({
         ...f,
         [key]: key === "ftp_port" ? Number(e.target.value) : e.target.value,
       }));
+      // Editing after a test invalidates it.
+      setTestStatus("idle");
+    };
 
   const testConnection = async () => {
     setTesting(true);
@@ -157,7 +161,8 @@ function StepFTP({
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onNext(form);
+        if (testStatus === "ok") onNext(form);
+        else if (!testing && form.ftp_host) void testConnection();
       }}
       style={{ display: "grid", gap: 20 }}
     >
@@ -230,14 +235,26 @@ function StepFTP({
               </span>
             )}
             {testStatus === "error" && (
-              <span style={{ fontSize: 13, color: "var(--color-danger)" }}>{testError || "Error de conexión"}</span>
+              <span role="alert" style={{ fontSize: 13, color: "var(--color-danger)" }}>
+                {friendlyFtpError("es", testError)}
+                {testError && (
+                  <span style={{ display: "block", fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>
+                    Detalle técnico: {testError}
+                  </span>
+                )}
+              </span>
             )}
           </div>
         </div>
       </section>
 
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button type="submit" style={primaryBtn(false)}>
+        <button
+          type="submit"
+          style={primaryBtn(testStatus !== "ok")}
+          disabled={testStatus !== "ok"}
+          title={testStatus !== "ok" ? "Prueba la conexión antes de continuar" : undefined}
+        >
           Siguiente
           <AppIcon name="chevron-right" size={14} strokeWidth={2.2} />
         </button>
