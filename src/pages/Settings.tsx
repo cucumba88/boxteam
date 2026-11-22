@@ -863,6 +863,7 @@ export default function Settings({
   const [plexMsg, setPlexMsg] = useState("");
   const [telegramStatus, setTelegramStatus] = useState<ConnectionState>("idle");
   const [telegramMsg, setTelegramMsg] = useState("");
+  const [telegramDetecting, setTelegramDetecting] = useState(false);
   const [tmdbTestStatus, setTmdbTestStatus] = useState<ConnectionState>("idle");
   const [omdbTestStatus, setOmdbTestStatus] = useState<ConnectionState>("idle");
   const [tvdbTestStatus, setTvdbTestStatus] = useState<ConnectionState>("idle");
@@ -1233,11 +1234,59 @@ export default function Settings({
         token: form.telegram_bot_token,
         chatId: form.telegram_chat_id,
       });
-      setTelegramMsg("Mensaje de prueba enviado correctamente");
+      setTelegramMsg("Mensaje de prueba enviado. Míralo en Telegram.");
       setTelegramStatus("ok");
     } catch (error: unknown) {
       setTelegramMsg(String(error));
       setTelegramStatus("error");
+    }
+  };
+
+  // Sends a full sample upload card through the real formatter.
+  const sendTelegramSample = async () => {
+    setTelegramStatus("testing");
+    setTelegramMsg("");
+    try {
+      await call("test_telegram_upload_sample", {
+        token: form.telegram_bot_token,
+        chatId: form.telegram_chat_id,
+      });
+      setTelegramMsg("Ejemplo de aviso enviado. Así se verán las subidas.");
+      setTelegramStatus("ok");
+    } catch (error: unknown) {
+      setTelegramMsg(String(error));
+      setTelegramStatus("error");
+    }
+  };
+
+  // Reads the bot's latest update to fill the chat id for the admin.
+  const detectTelegramChat = async () => {
+    setTelegramDetecting(true);
+    setTelegramStatus("idle");
+    setTelegramMsg("");
+    try {
+      const chat = await call<{ id: string; title: string; kind: string }>(
+        "detect_telegram_chat",
+        { token: form.telegram_bot_token },
+      );
+      setForm((f) => (f ? { ...f, telegram_chat_id: chat.id } : f));
+      const kindLabel =
+        chat.kind === "channel"
+          ? "canal"
+          : chat.kind === "private"
+            ? "chat privado"
+            : "grupo";
+      setTelegramMsg(
+        chat.title
+          ? `Detectado ${kindLabel} «${chat.title}». Guarda los cambios para usarlo.`
+          : `Detectado ${kindLabel}. Guarda los cambios para usarlo.`,
+      );
+      setTelegramStatus("ok");
+    } catch (error: unknown) {
+      setTelegramMsg(String(error));
+      setTelegramStatus("error");
+    } finally {
+      setTelegramDetecting(false);
     }
   };
 
@@ -3895,16 +3944,43 @@ export default function Settings({
                           <label style={labelStyle} htmlFor="settings-field-29">
                             Chat ID del canal o grupo
                           </label>
-                          <input
-                            id="settings-field-29"
-                            style={inputStyle}
-                            value={form.telegram_chat_id ?? ""}
-                            onChange={set("telegram_chat_id")}
-                            placeholder="-1001234567890"
-                          />
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              alignItems: "stretch",
+                            }}
+                          >
+                            <input
+                              id="settings-field-29"
+                              style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+                              value={form.telegram_chat_id ?? ""}
+                              onChange={set("telegram_chat_id")}
+                              placeholder="-1001234567890"
+                              inputMode="numeric"
+                            />
+                            <button
+                              type="button"
+                              onClick={detectTelegramChat}
+                              disabled={
+                                telegramDetecting || !form.telegram_bot_token
+                              }
+                              title="Busca el último canal, grupo o chat que ha escrito al bot"
+                              style={{
+                                ...ghostBtn,
+                                flexShrink: 0,
+                                opacity:
+                                  telegramDetecting || !form.telegram_bot_token
+                                    ? 0.5
+                                    : 1,
+                              }}
+                            >
+                              {telegramDetecting ? "Buscando…" : "Detectar"}
+                            </button>
+                          </div>
                           <span style={subtextStyle}>
-                            Puedes obtener el Chat ID enviando un mensaje a tu
-                            bot y usando la API getUpdates.
+                            Añade el bot al canal como administrador (o al
+                            grupo), publica cualquier mensaje y pulsa Detectar.
                           </span>
                         </div>
                         <div
@@ -3932,18 +4008,49 @@ export default function Settings({
                                   : 1,
                             }}
                           >
-                            {telegramStatus === "testing"
-                              ? "Enviando..."
-                              : "Probar notificación"}
+                            Probar conexión
                           </button>
-                          <StatusPill
-                            state={telegramStatus}
-                            text={
-                              telegramMsg ||
-                              (telegramStatus === "ok" ? "Enviado" : "Error")
+                          <button
+                            onClick={sendTelegramSample}
+                            disabled={
+                              telegramStatus === "testing" ||
+                              !form.telegram_bot_token ||
+                              !form.telegram_chat_id
                             }
-                          />
+                            title="Envía un aviso de subida de ejemplo con el formato real"
+                            style={{
+                              ...ghostBtn,
+                              opacity:
+                                telegramStatus === "testing" ||
+                                !form.telegram_bot_token ||
+                                !form.telegram_chat_id
+                                  ? 0.5
+                                  : 1,
+                            }}
+                          >
+                            Enviar ejemplo de subida
+                          </button>
+                          {telegramStatus === "testing" && (
+                            <span style={subtextStyle}>Enviando…</span>
+                          )}
                         </div>
+                        {telegramStatus !== "idle" &&
+                          telegramStatus !== "testing" && (
+                            <div>
+                              <StatusPill
+                                state={telegramStatus}
+                                text={
+                                  telegramMsg ||
+                                  (telegramStatus === "ok" ? "Enviado" : "Error")
+                                }
+                              />
+                            </div>
+                          )}
+                        <span style={subtextStyle}>
+                          Cada subida terminada se anuncia aquí con el póster,
+                          la calidad, el audio y los subtítulos del fichero.
+                          Deja el token vacío para no enviar avisos.
+                        </span>
                       </>
                     )}
                   </div>

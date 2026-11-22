@@ -71,6 +71,9 @@ export interface TmdbMatch {
   poster_path_en: string | null;
   vote_average: number | null;
   genre_ids: number[];
+  /** TMDB namespace the match was searched in. Ids are only unique per
+   *  namespace, so the upload's Telegram card needs it. Set on the client. */
+  media_type?: "movie" | "tv";
 }
 
 export interface UploadItem {

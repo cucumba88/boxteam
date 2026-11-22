@@ -179,6 +179,24 @@ pub async fn resume_pending_uploads(
     Ok(())
 }
 
+/// Personal Telegram notice ("Mis avisos → cuando terminen mis descargas")
+/// for the user who queued the download.
+async fn notify_download_done(db: &crate::db::Db, item: &crate::downloads::DownloadItem) {
+    let Some(user_id) = item.requested_by else { return };
+    let Ok(Some(sub)) = db.get_telegram_sub(user_id) else { return };
+    if !sub.notify_downloads || sub.telegram_bot_token.is_empty() || sub.telegram_chat_id.is_empty() {
+        return;
+    }
+    let msg = crate::upload_notify::build_download_done(
+        item.media_title.as_deref(),
+        &item.filename,
+        item.bytes_total,
+    );
+    if let Err(e) = crate::telegram::send_message(&sub.telegram_bot_token, &sub.telegram_chat_id, &msg).await {
+        eprintln!("[download] personal Telegram notify (user {user_id}) failed: {e}");
+    }
+}
+
 pub(crate) fn spawn_download_job_pub(
     db: crate::db::Db,
     queue_state: crate::downloads::SharedQueue,
@@ -262,8 +280,15 @@ pub(crate) fn spawn_download_job_pub(
             .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         match result {
             Ok(()) => {
-                { queue_state.lock().unwrap().mark_done(id); }
+                let finished = {
+                    let mut q = queue_state.lock().unwrap();
+                    q.mark_done(id);
+                    q.items.iter().find(|i| i.id == id).cloned()
+                };
                 persist_download_state(&db, &queue_state);
+                if let Some(item) = finished {
+                    notify_download_done(&db, &item).await;
+                }
                 if let Some(ref w) = window {
                     w.emit("download:update", serde_json::json!({
                         "id": id,
@@ -2092,7 +2117,9 @@ pub async fn queue_download(
 
     let (id, semaphore, cancel_flag) = {
         let mut queue = queue_state.lock().unwrap();
-        queue.add(ftp_path.clone(), filename.clone(), local_str.clone(), media_title.clone())
+        let added = queue.add(ftp_path.clone(), filename.clone(), local_str.clone(), media_title.clone());
+        queue.set_requested_by(added.0, 0);
+        added
     };
     persist_download_state(&db, queue_state.inner());
 
@@ -3406,160 +3433,6 @@ pub async fn trigger_watchlist_auto_downloads(
 //
 // ─── Analysis / Upload / Telegram commands ────────────────────────────────────
 
-fn format_bytes_human(bytes: u64) -> String {
-    if bytes >= 1_073_741_824 {
-        format!("{:.2} GB", bytes as f64 / 1_073_741_824.0)
-    } else if bytes >= 1_048_576 {
-        format!("{:.0} MB", bytes as f64 / 1_048_576.0)
-    } else {
-        format!("{:.0} KB", bytes as f64 / 1024.0)
-    }
-}
-
-/// Formats a runtime in minutes as "1h 42min" or "45min".
-fn format_runtime(mins: u32) -> String {
-    if mins >= 60 {
-        let h = mins / 60;
-        let m = mins % 60;
-        if m == 0 {
-            format!("{h}h")
-        } else {
-            format!("{h}h {m}min")
-        }
-    } else {
-        format!("{mins}min")
-    }
-}
-
-/// Maps a channel count to a human-readable label (5.1, 7.1, Estéreo, …).
-fn channels_label(ch: u32) -> String {
-    match ch {
-        1 => "Mono".to_string(),
-        2 => "Estéreo".to_string(),
-        6 => "5.1".to_string(),
-        7 => "6.1".to_string(),
-        8 => "7.1".to_string(),
-        n => format!("{}ch", n),
-    }
-}
-
-/// Converts a TMDB ISO date ("2025-12-25") to a compact Spanish string ("25 dic 2025").
-fn format_date_es(date: &str) -> String {
-    let parts: Vec<&str> = date.split('-').collect();
-    if parts.len() < 3 {
-        return date.to_string();
-    }
-    let month_name = match parts[1] {
-        "01" => "ene", "02" => "feb", "03" => "mar", "04" => "abr",
-        "05" => "may", "06" => "jun", "07" => "jul", "08" => "ago",
-        "09" => "sep", "10" => "oct", "11" => "nov", "12" => "dic",
-        _ => parts[1],
-    };
-    format!("{} {} {}", parts[2].trim_start_matches('0').max("1"), month_name, parts[0])
-}
-
-/// Maps an ISO 3166-1 alpha-2 country code to a Spanish country name.
-fn country_name(code: &str) -> &'static str {
-    match code.to_uppercase().as_str() {
-        "AD" => "Andorra",        "AE" => "Emiratos Árabes",  "AF" => "Afganistán",
-        "AL" => "Albania",        "AM" => "Armenia",           "AO" => "Angola",
-        "AR" => "Argentina",      "AT" => "Austria",           "AU" => "Australia",
-        "AZ" => "Azerbaiyán",     "BA" => "Bosnia-Herzegovina","BD" => "Bangladesh",
-        "BE" => "Bélgica",        "BF" => "Burkina Faso",      "BG" => "Bulgaria",
-        "BH" => "Baréin",         "BO" => "Bolivia",           "BR" => "Brasil",
-        "BY" => "Bielorrusia",    "CA" => "Canadá",            "CD" => "Congo (RD)",
-        "CH" => "Suiza",          "CI" => "Costa de Marfil",   "CL" => "Chile",
-        "CM" => "Camerún",        "CN" => "China",             "CO" => "Colombia",
-        "CR" => "Costa Rica",     "CU" => "Cuba",              "CY" => "Chipre",
-        "CZ" => "Chequia",        "DE" => "Alemania",          "DK" => "Dinamarca",
-        "DO" => "Rep. Dominicana","DZ" => "Argelia",           "EC" => "Ecuador",
-        "EE" => "Estonia",        "EG" => "Egipto",            "ES" => "España",
-        "ET" => "Etiopía",        "FI" => "Finlandia",         "FJ" => "Fiyi",
-        "FR" => "Francia",        "GA" => "Gabón",             "GB" => "Reino Unido",
-        "GE" => "Georgia",        "GH" => "Ghana",             "GR" => "Grecia",
-        "GT" => "Guatemala",      "HK" => "Hong Kong",         "HN" => "Honduras",
-        "HR" => "Croacia",        "HU" => "Hungría",           "ID" => "Indonesia",
-        "IE" => "Irlanda",        "IL" => "Israel",            "IN" => "India",
-        "IQ" => "Irak",           "IR" => "Irán",              "IS" => "Islandia",
-        "IT" => "Italia",         "JM" => "Jamaica",           "JO" => "Jordania",
-        "JP" => "Japón",          "KE" => "Kenia",             "KG" => "Kirguistán",
-        "KH" => "Camboya",        "KR" => "Corea del Sur",     "KW" => "Kuwait",
-        "KZ" => "Kazajistán",     "LB" => "Líbano",            "LK" => "Sri Lanka",
-        "LT" => "Lituania",       "LU" => "Luxemburgo",        "LV" => "Letonia",
-        "LY" => "Libia",          "MA" => "Marruecos",         "MD" => "Moldavia",
-        "MK" => "Macedonia del Norte", "ML" => "Malí",         "MM" => "Birmania",
-        "MN" => "Mongolia",       "MX" => "México",            "MY" => "Malasia",
-        "MZ" => "Mozambique",     "NA" => "Namibia",           "NG" => "Nigeria",
-        "NI" => "Nicaragua",      "NL" => "Países Bajos",      "NO" => "Noruega",
-        "NP" => "Nepal",          "NZ" => "Nueva Zelanda",     "OM" => "Omán",
-        "PA" => "Panamá",         "PE" => "Perú",              "PH" => "Filipinas",
-        "PK" => "Pakistán",       "PL" => "Polonia",           "PT" => "Portugal",
-        "PY" => "Paraguay",       "QA" => "Catar",             "RO" => "Rumanía",
-        "RS" => "Serbia",         "RU" => "Rusia",             "RW" => "Ruanda",
-        "SA" => "Arabia Saudí",   "SD" => "Sudán",             "SE" => "Suecia",
-        "SG" => "Singapur",       "SI" => "Eslovenia",         "SK" => "Eslovaquia",
-        "SN" => "Senegal",        "SO" => "Somalia",           "SS" => "Sudán del Sur",
-        "SV" => "El Salvador",    "SY" => "Siria",             "TH" => "Tailandia",
-        "TJ" => "Tayikistán",     "TN" => "Túnez",             "TR" => "Turquía",
-        "TW" => "Taiwán",         "TZ" => "Tanzania",          "UA" => "Ucrania",
-        "UG" => "Uganda",         "US" => "Estados Unidos",    "UY" => "Uruguay",
-        "UZ" => "Uzbekistán",     "VE" => "Venezuela",         "VN" => "Vietnam",
-        "YE" => "Yemen",          "ZA" => "Sudáfrica",         "ZM" => "Zambia",
-        "ZW" => "Zimbabue",
-        _ => "",
-    }
-}
-
-/// Maps an ISO 639-2 (or ISO 639-1) language code to its Spanish display name.
-fn lang_name(code: &str) -> String {
-    match code.to_uppercase().as_str() {
-        "ES" | "SPA" | "ESP"           => "Español",
-        "EN" | "ENG"                   => "Inglés",
-        "FR" | "FRE" | "FRA"           => "Francés",
-        "DE" | "GER" | "DEU"           => "Alemán",
-        "IT" | "ITA"                   => "Italiano",
-        "PT" | "POR"                   => "Portugués",
-        "JA" | "JPN"                   => "Japonés",
-        "KO" | "KOR"                   => "Coreano",
-        "ZH" | "CHI" | "ZHO"           => "Chino",
-        "AR" | "ARA"                   => "Árabe",
-        "RU" | "RUS"                   => "Ruso",
-        "TR" | "TUR"                   => "Turco",
-        "PL" | "POL"                   => "Polaco",
-        "NL" | "DUT" | "NLD"           => "Neerlandés",
-        "SV" | "SWE"                   => "Sueco",
-        "NO" | "NOR" | "NOB" | "NNO"   => "Noruego",
-        "DA" | "DAN"                   => "Danés",
-        "FI" | "FIN"                   => "Finlandés",
-        "HE" | "HEB"                   => "Hebreo",
-        "HU" | "HUN"                   => "Húngaro",
-        "CS" | "CZE" | "CES"           => "Checo",
-        "SK" | "SLO" | "SLK"           => "Eslovaco",
-        "RO" | "ROM" | "RUM" | "RON"   => "Rumano",
-        "EL" | "GRE" | "ELL"           => "Griego",
-        "TH" | "THA"                   => "Tailandés",
-        "VI" | "VIE"                   => "Vietnamita",
-        "ID" | "IND"                   => "Indonesio",
-        "MS" | "MAY" | "MSA"           => "Malayo",
-        "HI" | "HIN"                   => "Hindi",
-        "CA" | "CAT"                   => "Catalán",
-        "LA" | "LAT"                   => "Latín",
-        "EU" | "EUS" | "BAQ"           => "Euskera",
-        "GL" | "GLG"                   => "Gallego",
-        "UK" | "UKR"                   => "Ucraniano",
-        "HR" | "HRV"                   => "Croata",
-        "SR" | "SRP"                   => "Serbio",
-        "BG" | "BUL"                   => "Búlgaro",
-        "SL" | "SLV"                   => "Esloveno",
-        "LT" | "LIT"                   => "Lituano",
-        "LV" | "LAV"                   => "Letón",
-        "ET" | "EST"                   => "Estonio",
-        "SQ" | "ALB" | "SQI"           => "Albanés",
-        other                           => return other.to_uppercase(),
-    }
-    .to_string()
-}
-
 /// Returns the ffprobe version string if found in PATH, or null.
 #[tauri::command]
 pub fn check_ffprobe() -> Option<String> {
@@ -4419,252 +4292,126 @@ fn spawn_upload_job(
                             (1, 1, vec![])
                         };
 
+                    use crate::upload_notify::{self as un, MediaKind, Scope};
+
+                    let dest_display = un::display_dest(&ftp_dest_path);
+                    let parsed = crate::parser::parse_media_path(&ftp_dest_path, &filename);
+
+                    // The TMDB id only means something together with its
+                    // namespace (movie/tv). Use the type the match was searched
+                    // with; guess from the destination path only for items
+                    // queued by older versions that didn't store it.
+                    let item_media_type = {
+                        let q = upload_queue.lock().unwrap();
+                        q.items.iter().find(|i| i.id == id).and_then(|i| i.media_type.clone())
+                    };
+                    let kind = match item_media_type.as_deref() {
+                        Some(t) => MediaKind::from_str_loose(t),
+                        None => {
+                            let p = ftp_dest_path.to_lowercase();
+                            if p.contains("serie") || p.contains("/tv/") || parsed.season.is_some() {
+                                MediaKind::Tv
+                            } else {
+                                MediaKind::Movie
+                            }
+                        }
+                    };
+
+                    let scope = if let Some(ref gid) = group_id {
+                        let names: Vec<String> = {
+                            let q = upload_queue.lock().unwrap();
+                            q.items.iter()
+                                .filter(|i| i.group_id.as_deref() == Some(gid))
+                                .map(|i| i.filename.clone())
+                                .collect()
+                        };
+                        let seasons: Vec<u8> = names.iter()
+                            .filter_map(|n| crate::parser::parse_media_path(&ftp_dest_path, n).season)
+                            .collect();
+                        Scope::Batch { seasons, files: group_total }
+                    } else if kind == MediaKind::Tv {
+                        Scope::Episode {
+                            season: parsed.season,
+                            episode: parsed.episode,
+                            episode_end: parsed.episode_end,
+                        }
+                    } else {
+                        Scope::Whole
+                    };
+
                     let is_partial_failure = !group_failed_names.is_empty();
                     if !is_partial_failure {
-                        // Derive display folder: everything from "Compartida" onwards (case-insensitive).
-                        // Falls back to the full path if the anchor segment is not found.
-                        let dest_display = {
-                            let path = ftp_dest_path.trim_end_matches('/');
-                            let segments: Vec<&str> = path.split('/').collect();
-                            let anchor = segments.iter().position(|s| s.to_lowercase() == "compartida");
-                            match anchor {
-                                Some(idx) => segments[idx..].join("/"),
-                                None => path.to_string(),
-                            }
-                        };
-
-                        // Infer media type from path (rough heuristic)
-                        let path_lower = ftp_dest_path.to_lowercase();
-                        let inferred_media_type = if path_lower.contains("serie") || path_lower.contains("/tv/") {
-                            "tv"
-                        } else {
-                            "movie"
-                        };
-
-                        // Parse the filename to detect season/episode numbers.
-                        let parsed = crate::parser::parse_media_path(&ftp_dest_path, &filename);
-
-                        // For season groups: build a season-level header and episode count
-                        let (header, episode_str) = if group_id.is_some() {
-                            // Count how many episodes were in this group
-                            let ep_count = {
-                                let q = upload_queue.lock().unwrap();
-                                q.group_status(group_id.as_deref().unwrap_or("")).1
-                            };
-                            let season_num = parsed.season.unwrap_or(1);
-                            let h = "📁";
-                            let e = format!("\n🗂 Temporada {season_num} · {ep_count} episodios");
-                            (h, e)
-                        } else {
-                            let h = if inferred_media_type == "tv" {
-                                match (parsed.season, parsed.episode) {
-                                    (Some(_), Some(_)) => "📺",
-                                    (Some(_), None)    => "📁",
-                                    _                  => "📺",
-                                }
-                            } else {
-                                "🎬"
-                            };
-                            let e = match (parsed.season, parsed.episode) {
-                                (Some(s), Some(e)) => format!("\n🗂 T{s} · E{e:02}"),
-                                (Some(s), None)    => format!("\n🗂 Temporada {s}"),
-                                _                  => String::new(),
-                            };
-                            (h, e)
-                        };
-
-                        // Try to fetch TMDB metadata for poster + year
                         let tmdb_data = if let (Some(tid), false) = (tmdb_id, config.tmdb_api_key.is_empty()) {
-                            crate::tmdb::fetch_movie_by_id(&config.tmdb_api_key, tid, inferred_media_type)
+                            crate::tmdb::fetch_movie_by_id(&config.tmdb_api_key, tid, kind.tmdb_path())
                                 .await
+                                .map_err(|e| eprintln!("[upload] TMDB lookup for notification failed: {e}"))
                                 .ok()
                         } else {
                             None
                         };
 
+                        // Title: TMDB (localised) → the match picked in the
+                        // upload form → the title parsed from the file name.
+                        // Never the raw file name with dots and tags.
                         let display_title = tmdb_data.as_ref()
                             .map(|m| m.title.clone())
-                            .or(media_title.clone())
+                            .filter(|t| !t.trim().is_empty())
+                            .or_else(|| media_title.clone().filter(|t| !t.trim().is_empty()))
+                            .or_else(|| Some(parsed.title.clone()).filter(|t| !t.trim().is_empty()))
                             .unwrap_or_else(|| filename.clone());
-
-                        let year_str = tmdb_data.as_ref()
+                        let year = tmdb_data.as_ref()
                             .and_then(|m| m.release_date.as_deref())
                             .and_then(|d| d.split('-').next())
-                            .map(|y| format!(" ({})", y))
-                            .unwrap_or_default();
+                            .filter(|y| y.len() == 4)
+                            .map(str::to_string)
+                            .or_else(|| parsed.year.map(|y| y.to_string()));
 
-                        // Tech-specs line: resolution · video codec · video bitrate · HDR
-                        let bitrate_video_str = video_bitrate_kbps.map(|k| {
-                            if k >= 1000 {
-                                format!("{:.1} Mbps", k as f64 / 1000.0)
-                            } else {
-                                format!("{} Kbps", k)
-                            }
-                        }).unwrap_or_default();
-                        let specs_parts: Vec<String> = [
-                            resolution.as_deref().filter(|s| !s.is_empty()).map(str::to_string),
-                            codec.as_deref().filter(|s| !s.is_empty()).map(str::to_string),
-                            if bitrate_video_str.is_empty() { None } else { Some(bitrate_video_str) },
-                            hdr.as_deref().filter(|s| !s.is_empty()).map(str::to_string),
-                        ].into_iter().flatten().collect();
-                        let specs_str = if specs_parts.is_empty() {
-                            String::new()
-                        } else {
-                            format!("\n📺 {}", specs_parts.join(" · "))
+                        let size_total = match group_id {
+                            Some(ref gid) => upload_queue.lock().unwrap().group_total_bytes(gid),
+                            None => size_bytes,
                         };
 
-                        // Audio tracks: one line per track (🔊 emoji on first, indented bullet on rest)
-                        // Falls back to plain language list if no track metadata
-                        let audio_str = if !audio_tracks.is_empty() {
-                            let mut seen = std::collections::HashSet::new();
-                            let parts: Vec<String> = audio_tracks.iter()
-                                .filter_map(|t| {
-                                    let lang_label = t.language.as_deref()
-                                        .map(lang_name)
-                                        .unwrap_or_else(|| "Desconocido".into());
-                                    let ch_label = t.channels.map(channels_label).unwrap_or_default();
-                                    let bitrate_str = t.bitrate_kbps.map(|k| {
-                                        if k >= 1000 {
-                                            format!(" {:.1} Mbps", k as f64 / 1000.0)
-                                        } else {
-                                            format!(" {} Kbps", k)
-                                        }
-                                    }).unwrap_or_default();
-                                    let entry = format!(
-                                        "{}{}{}{}",
-                                        lang_label,
-                                        if t.codec.is_empty() { String::new() } else { format!(" {}", t.codec) },
-                                        if ch_label.is_empty() { String::new() } else { format!(" {}", ch_label) },
-                                        bitrate_str,
-                                    );
-                                    if seen.insert(entry.clone()) { Some(entry) } else { None }
-                                })
-                                .collect();
-                            if parts.is_empty() {
-                                String::new()
-                            } else {
-                                parts.iter().map(|p| format!("\n🔊 {}", p)).collect::<String>()
-                            }
-                        } else if !languages.is_empty() {
-                            let names: Vec<String> = languages.iter().map(|l| lang_name(l)).collect();
-                            format!("\n🗣️ {}", names.join(" · "))
-                        } else if let Some(ref ac) = audio_codec {
-                            format!("\n🔊 {}", ac)
-                        } else {
-                            String::new()
+                        let notice = un::UploadNotice {
+                            kind,
+                            title: display_title,
+                            year,
+                            scope,
+                            release_type: parsed.release_type.clone(),
+                            resolution: resolution.clone(),
+                            codec: codec.clone(),
+                            hdr: hdr.clone(),
+                            video_bitrate_kbps,
+                            audio_tracks: audio_tracks.clone(),
+                            languages: languages.clone(),
+                            audio_codec: audio_codec.clone(),
+                            subtitle_tracks: subtitle_tracks.clone(),
+                            subtitle_langs: subtitle_langs.clone(),
+                            size_bytes: size_total,
+                            filename: group_id.is_none().then(|| filename.clone()),
+                            tmdb: tmdb_data.as_ref().map(|m| un::TmdbInfo {
+                                rating: m.vote_average,
+                                runtime_mins: m.runtime_mins,
+                                release_date: m.release_date.clone(),
+                                country: m.origin_country.as_deref()
+                                    .map(un::country_name)
+                                    .filter(|c| !c.is_empty())
+                                    .map(str::to_string),
+                                genres: m.genres.clone(),
+                                overview: m.overview.clone(),
+                            }),
+                            tmdb_id,
+                            dest: dest_display.clone(),
                         };
-
-                        // Subtitle tracks: "💬 Español · Inglés (forzado)"
-                        let subs_str = if !subtitle_tracks.is_empty() {
-                            let mut seen = std::collections::HashSet::new();
-                            let parts: Vec<String> = subtitle_tracks.iter()
-                                .filter_map(|t| {
-                                    let lang = t.language.as_deref().unwrap_or("und");
-                                    let key = format!("{}{}", lang, t.is_forced);
-                                    if !seen.insert(key) { return None; }
-                                    let name = lang_name(lang);
-                                    if t.is_forced {
-                                        Some(format!("{} (forzado)", name))
-                                    } else {
-                                        Some(name.into())
-                                    }
-                                })
-                                .collect();
-                            if parts.is_empty() { String::new() } else { format!("\n💬 {}", parts.join(" · ")) }
-                        } else if !subtitle_langs.is_empty() {
-                            let names: Vec<String> = subtitle_langs.iter().map(|l| lang_name(l)).collect();
-                            format!("\n💬 {}", names.join(" · "))
-                        } else {
-                            String::new()
-                        };
-
-                        // File size
-                        let size_str = if let Some(ref gid) = group_id {
-                            let total = upload_queue.lock().unwrap().group_total_bytes(gid);
-                            if total > 0 {
-                                format!("\n💾 {}", format_bytes_human(total))
-                            } else {
-                                String::new()
-                            }
-                        } else if size_bytes > 0 {
-                            format!("\n💾 {}", format_bytes_human(size_bytes))
-                        } else {
-                            String::new()
-                        };
-
-                        // TMDB rating + runtime on one line
-                        let rating_val = tmdb_data.as_ref()
-                            .and_then(|m| m.vote_average)
-                            .filter(|&r| r > 0.0);
-                        let runtime_val = tmdb_data.as_ref()
-                            .and_then(|m| m.runtime_mins);
-                        let meta_inline_str = match (rating_val, runtime_val) {
-                            (Some(r), Some(mins)) => format!("\n⭐ {:.1}   ⏱️ {}", r, format_runtime(mins)),
-                            (Some(r), None)        => format!("\n⭐ {:.1}", r),
-                            (None, Some(mins))     => format!("\n⏱️ {}", format_runtime(mins)),
-                            (None, None)           => String::new(),
-                        };
-
-                        // Release date + country on one line
-                        let release_date_str = tmdb_data.as_ref()
-                            .and_then(|m| m.release_date.as_deref())
-                            .map(format_date_es)
-                            .unwrap_or_default();
-                        let country_str = tmdb_data.as_ref()
-                            .and_then(|m| m.origin_country.as_deref())
-                            .map(country_name)
-                            .unwrap_or_default();
-                        let date_country_str = match (release_date_str.as_str(), country_str) {
-                            ("", "")    => String::new(),
-                            (d, "")     => format!("\n📅 {d}"),
-                            ("", c)     => format!("\n🌍 {c}"),
-                            (d,  c)     => format!("\n📅 {d}   🌍 {c}"),
-                        };
-
-                        // Genres
-                        let genres_str = tmdb_data.as_ref()
-                            .map(|m| m.genres.as_slice())
-                            .filter(|g| !g.is_empty())
-                            .map(|g| format!("\n🎭 {}", g.join(" · ")))
-                            .unwrap_or_default();
-
-                        // Synopsis (shortened)
-                        let overview_str = tmdb_data.as_ref()
-                            .and_then(|m| m.overview.as_deref())
-                            .filter(|s| !s.is_empty())
-                            .map(|s| {
-                                let truncated = if s.chars().count() > 250 {
-                                    let cut: String = s.chars().take(250).collect();
-                                    format!("{}…", cut)
-                                } else {
-                                    s.to_string()
-                                };
-                                format!("\n\n<i>{}</i>", truncated)
-                            })
-                            .unwrap_or_default();
-
-                        let tmdb_link_str = if let Some(tid) = tmdb_id {
-                            let tmdb_type_path = if inferred_media_type == "tv" { "tv" } else { "movie" };
-                            format!("\n🔗 <a href=\"https://www.themoviedb.org/{tmdb_type_path}/{tid}\">Ver en TMDB</a>")
-                        } else {
-                            String::new()
-                        };
-
-                        let msg = format!(
-                            "{header} <b><u>{display_title}</u></b>{year_str}{episode_str}{specs_str}{audio_str}{subs_str}{size_str}{meta_inline_str}{date_country_str}{genres_str}{overview_str}{tmdb_link_str}\n\n📂 <code>{dest_display}</code>",
-                        );
+                        let msg = un::build_upload_caption(&notice, un::CAPTION_LIMIT);
 
                         let poster_url = tmdb_data.as_ref()
                             .and_then(|m| m.poster_path.as_deref())
                             .map(|p| format!("https://image.tmdb.org/t/p/w500{p}"));
 
-                        // Prefer sendPhoto when we have a poster. If it fails (caption
-                        // too long, Telegram can't pull from image.tmdb.org, network
-                        // blip, etc.) fall back to sendMessage with the FULL text so
-                        // the user still gets the upload notification — just without
-                        // the cover image. The send_photo helper logs the underlying
-                        // Telegram `description` on its own, so we don't need to
-                        // re-log here on the photo path.
+                        // Prefer sendPhoto when we have a poster. If it fails
+                        // (Telegram can't fetch the image, network blip…) fall
+                        // back to sendMessage with the same text so the
+                        // announcement still goes out, just without the cover.
                         let notify_result = if let Some(ref url) = poster_url {
                             match crate::telegram::send_photo(&tg_token, &tg_chat, url, &msg).await {
                                 Ok(()) => Ok(()),
@@ -4681,54 +4428,31 @@ fn spawn_upload_job(
                             eprintln!("[upload] Telegram notify failed: {e}");
                         }
 
-                        // Personal subscriber notifications (each user's own bot)
+                        // Personal subscribers who asked for "nuevo contenido".
+                        // (Their "mis descargas" toggle is for downloads and is
+                        // handled where downloads finish.)
                         if let Ok(subs) = db.list_telegram_subs() {
+                            let line = un::build_new_content_line(&notice);
                             for sub in subs {
-                                if sub.notify_downloads && !sub.telegram_bot_token.is_empty() {
-                                    let sub_msg = format!(
-                                        "✅ Descarga completada: <b>{display_title}</b>",
-                                    );
-                                    crate::telegram::send_message(&sub.telegram_bot_token, &sub.telegram_chat_id, &sub_msg).await.ok();
+                                if sub.notify_new_content && !sub.telegram_bot_token.is_empty() {
+                                    if let Err(e) = crate::telegram::send_message(&sub.telegram_bot_token, &sub.telegram_chat_id, &line).await {
+                                        eprintln!("[upload] personal Telegram notify (user {}) failed: {e}", sub.user_id);
+                                    }
                                 }
                             }
                         }
                     } else {
-                        // ── Partial-failure card ──────────────────────────
-                        // Lists up to 10 failed filenames; counts remainder.
-                        let dest_display = {
-                            let path = ftp_dest_path.trim_end_matches('/');
-                            let segments: Vec<&str> = path.split('/').collect();
-                            let anchor = segments.iter().position(|s| s.to_lowercase() == "compartida");
-                            match anchor {
-                                Some(idx) => segments[idx..].join("/"),
-                                None => path.to_string(),
-                            }
-                        };
                         let display_title = media_title
                             .clone()
-                            .unwrap_or_else(|| filename.clone());
-                        let shown: Vec<String> = group_failed_names.iter()
-                            .take(10)
-                            .map(|n| format!("• <code>{}</code>", html_escape(n)))
-                            .collect();
-                        let more = if group_failed_names.len() > 10 {
-                            format!("\n…y {} más", group_failed_names.len() - 10)
-                        } else {
-                            String::new()
-                        };
-                        let body = format!(
-                            "⚠️ <b>Subida parcial</b>\n\n\
-                            <b><u>{}</u></b>\n\
-                            ✅ {} de {} episodios subidos\n\
-                            ❌ Fallaron {} episodios:\n{}{}\n\n\
-                            📂 <code>{}</code>",
-                            html_escape(&display_title),
+                            .filter(|t| !t.trim().is_empty())
+                            .unwrap_or_else(|| parsed.title.clone());
+                        let body = un::build_partial_failure(
+                            &display_title,
+                            &scope,
                             group_done,
                             group_total,
-                            group_failed_names.len(),
-                            shown.join("\n"),
-                            more,
-                            html_escape(&dest_display),
+                            &group_failed_names,
+                            &dest_display,
                         );
                         if let Err(e) = crate::telegram::send_message(&tg_token, &tg_chat, &body).await {
                             eprintln!("[upload] Telegram partial-failure notify failed: {e}");
@@ -4738,12 +4462,6 @@ fn spawn_upload_job(
             }
         }
     });
-}
-
-/// Minimal HTML escape for Telegram HTML-mode message text. Telegram does NOT
-/// support `&apos;` so we only escape the bare-minimum entities.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 #[tauri::command]
@@ -4764,13 +4482,14 @@ pub async fn queue_upload(
     audio_tracks: Vec<crate::analysis::AudioTrack>,
     subtitle_tracks: Vec<crate::analysis::SubtitleTrack>,
     group_id: Option<String>,
+    media_type: Option<String>,
     upload_queue: tauri::State<'_, crate::uploads::SharedUploadQueue>,
     db: tauri::State<'_, crate::db::Db>,
     app: tauri::AppHandle,
 ) -> Result<u64, String> {
     let (id, semaphore, cancel_flag) = {
         let mut q = upload_queue.lock().unwrap();
-        q.add(
+        let added = q.add(
             local_path.clone(),
             ftp_dest_path.clone(),
             filename.clone(),
@@ -4787,7 +4506,13 @@ pub async fn queue_upload(
             audio_tracks.clone(),
             subtitle_tracks.clone(),
             group_id.clone(),
-        )
+        );
+        if let Some(item) = q.items.iter_mut().find(|i| i.id == added.0) {
+            item.media_type = media_type
+                .as_deref()
+                .map(|t| if t.eq_ignore_ascii_case("tv") { "tv" } else { "movie" }.to_string());
+        }
+        added
     };
 
     let item = {
@@ -5131,6 +4856,28 @@ pub async fn test_telegram(token: String, chat_id: String) -> Result<(), String>
         "✅ BoxTeam — conexión con Telegram correcta",
     )
     .await
+}
+
+/// Send a sample upload card (same formatter as real uploads) so admins can
+/// check how announcements look in their channel.
+#[tauri::command]
+pub async fn test_telegram_upload_sample(token: String, chat_id: String) -> Result<(), String> {
+    let caption = crate::upload_notify::build_upload_caption(
+        &crate::upload_notify::sample_notice(),
+        crate::upload_notify::CAPTION_LIMIT,
+    );
+    let text = format!("🧪 <i>Ejemplo de aviso de subida</i>\n\n{caption}");
+    crate::telegram::send_message(&token, &chat_id, &text).await
+}
+
+/// Find the chat id of the channel/group/private chat the bot last saw.
+#[tauri::command]
+pub async fn detect_telegram_chat(token: String) -> Result<crate::telegram::DetectedChat, String> {
+    crate::telegram::detect_latest_chat(token.trim())
+        .await?
+        .ok_or_else(|| {
+            "Telegram aún no le ha enviado nada al bot. Añádelo al canal o grupo (en un canal, como administrador), publica un mensaje y vuelve a pulsar Detectar.".to_string()
+        })
 }
 
 // ─── Personal Telegram subscription commands ───────────────────────────────

@@ -102,6 +102,25 @@ struct FfprobeDisposition {
 #[derive(Debug, Deserialize)]
 struct FfprobeTags {
     language: Option<String>,
+    /// Per-track bitrate written by mkvmerge ("statistics tags"). MKV streams
+    /// usually have no `bit_rate`, and the container's overall bitrate also
+    /// counts audio, so this is the accurate figure when present.
+    #[serde(rename = "BPS")]
+    bps: Option<String>,
+    #[serde(rename = "BPS-eng")]
+    bps_eng: Option<String>,
+}
+
+/// Stream bitrate in kbps: `bit_rate` first, then the MKV `BPS` tag.
+fn stream_kbps(s: &FfprobeStream) -> Option<u32> {
+    let tag = s.tags.as_ref().and_then(|t| t.bps.as_deref().or(t.bps_eng.as_deref()));
+    s.bit_rate
+        .as_deref()
+        .and_then(|b| b.parse::<u64>().ok())
+        .filter(|&b| b > 0)
+        .or_else(|| tag.and_then(|b| b.trim().parse::<u64>().ok()).filter(|&b| b > 0))
+        .map(|bps| (bps / 1000) as u32)
+        .filter(|&k| k > 0)
 }
 
 #[derive(Debug, Deserialize)]
@@ -316,11 +335,16 @@ pub fn ffprobe_analyze(path: &str) -> Result<LocalMediaInfo, String> {
     let codec = video.and_then(|v| v.codec_name.clone()).map(|c| normalize_codec(&c));
     // Stream-level bit_rate is often absent in MKV containers; fall back to the
     // container's overall bit_rate which is reliable for all formats.
-    let video_bitrate_kbps = video.and_then(|v| v.bit_rate.as_deref())
-        .and_then(|b| b.parse::<u64>().ok())
-        .or_else(|| probe.format.as_ref().and_then(|f| f.bit_rate.as_deref()).and_then(|b| b.parse::<u64>().ok()))
-        .map(|bps| (bps / 1000) as u32)
-        .filter(|&k| k > 0);
+    // Stream bit_rate / MKV BPS tag first; the container's overall bit_rate
+    // (which also counts audio) is only a last resort.
+    let video_bitrate_kbps = video.and_then(stream_kbps)
+        .or_else(|| {
+            probe.format.as_ref()
+                .and_then(|f| f.bit_rate.as_deref())
+                .and_then(|b| b.parse::<u64>().ok())
+                .map(|bps| (bps / 1000) as u32)
+                .filter(|&k| k > 0)
+        });
 
     // Prefer actual dimensions from ffprobe (ground truth), fall back to
     // resolution keyword in the filename/path if dims are unavailable.
@@ -375,10 +399,7 @@ pub fn ffprobe_analyze(path: &str) -> Result<LocalMediaInfo, String> {
                 }
                 None => String::new(),
             };
-            let bitrate_kbps = s.bit_rate.as_deref()
-                .and_then(|b| b.parse::<u64>().ok())
-                .map(|bps| (bps / 1000) as u32)
-                .filter(|&k| k > 0);
+            let bitrate_kbps = stream_kbps(s);
             AudioTrack {
                 codec,
                 language: lang,
@@ -631,6 +652,18 @@ mod tests {
 
     fn parse_stream(json: &str) -> FfprobeStream {
         serde_json::from_str(json).expect("valid stream JSON")
+    }
+
+    #[test]
+    fn mkv_bps_tag_is_used_when_stream_has_no_bit_rate() {
+        let v = parse_stream(r#"{"codec_type":"video","tags":{"BPS":"3004285"}}"#);
+        assert_eq!(stream_kbps(&v), Some(3004));
+        let legacy = parse_stream(r#"{"codec_type":"audio","tags":{"BPS-eng":"191226"}}"#);
+        assert_eq!(stream_kbps(&legacy), Some(191));
+        let both = parse_stream(r#"{"codec_type":"audio","bit_rate":"640000","tags":{"BPS":"1"}}"#);
+        assert_eq!(stream_kbps(&both), Some(640));
+        let none = parse_stream(r#"{"codec_type":"audio"}"#);
+        assert_eq!(stream_kbps(&none), None);
     }
 
     #[test]

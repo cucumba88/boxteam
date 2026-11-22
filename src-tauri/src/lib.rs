@@ -7,6 +7,7 @@ mod ftp;
 mod omdb;
 mod parser;
 mod telegram;
+mod upload_notify;
 mod tmdb;
 mod tvdb;
 mod uploads;
@@ -205,6 +206,8 @@ pub fn run() {
             commands::stat_local_files,
             commands::test_smtp,
             commands::test_telegram,
+            commands::test_telegram_upload_sample,
+            commands::detect_telegram_chat,
             commands::get_telegram_sub,
             commands::link_telegram_bot,
             commands::update_telegram_sub,

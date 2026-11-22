@@ -554,7 +554,7 @@ pub async fn get_downloads(
 }
 
 pub async fn queue_download(
-    AuthUser(_u): AuthUser,
+    AuthUser(user): AuthUser,
     State(state): State<AppState>,
     Json(body): Json<QueueDownloadRequest>,
 ) -> ApiResult<Json<u64>> {
@@ -575,8 +575,10 @@ pub async fn queue_download(
 
     let (id, semaphore, cancel_flag) = {
         let mut queue = state.queue.lock().unwrap();
-        queue.add(body.ftp_path.clone(), body.filename.clone(),
-            local_path.to_string_lossy().to_string(), body.media_title.clone())
+        let added = queue.add(body.ftp_path.clone(), body.filename.clone(),
+            local_path.to_string_lossy().to_string(), body.media_title.clone());
+        queue.set_requested_by(added.0, user.id);
+        added
     };
     { state.db.save_download_state(&state.queue.lock().unwrap().items).ok(); }
 

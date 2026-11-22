@@ -25,6 +25,11 @@ pub struct DownloadItem {
     pub added_at_ms: u64,
     pub started_at_ms: Option<u64>,
     pub completed_at_ms: Option<u64>,
+    /// User who asked for this download (0 = desktop user, web users by id).
+    /// Used for the personal Telegram "tus descargas" notice. `None` for
+    /// automatic downloads and items saved by older versions.
+    #[serde(default)]
+    pub requested_by: Option<i64>,
 }
 
 pub struct DownloadQueue {
@@ -77,8 +82,15 @@ impl DownloadQueue {
             added_at_ms: now_ms(),
             started_at_ms: None,
             completed_at_ms: None,
+            requested_by: None,
         });
         (id, self.semaphore.clone(), cancel_flag)
+    }
+
+    pub fn set_requested_by(&mut self, id: u64, user_id: i64) {
+        if let Some(item) = self.items.iter_mut().find(|i| i.id == id) {
+            item.requested_by = Some(user_id);
+        }
     }
 
     pub fn restore(&mut self, mut items: Vec<DownloadItem>) {

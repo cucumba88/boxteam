@@ -53,6 +53,11 @@ pub struct UploadItem {
     /// Maximum number of attempts the job will make before giving up.
     #[serde(default = "default_max_attempts")]
     pub max_attempts: u8,
+    /// TMDB namespace of `tmdb_id` ("movie" | "tv"). Ids are only unique per
+    /// namespace, so the Telegram card needs it to fetch the right title and
+    /// poster. `None` for items queued before it was stored.
+    #[serde(default)]
+    pub media_type: Option<String>,
 }
 
 pub struct UploadQueue {
@@ -135,6 +140,7 @@ impl UploadQueue {
             group_id,
             attempt: 0,
             max_attempts: default_max_attempts(),
+            media_type: None,
         });
         (id, self.semaphore.clone(), cancel_flag)
     }

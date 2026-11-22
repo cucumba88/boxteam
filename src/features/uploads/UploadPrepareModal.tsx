@@ -194,12 +194,16 @@ export default function UploadPrepareModal({
         const rawTitle =
           suggestion?.detected_title ??
           f.filename.replace(/\.[^.]+$/, "").replace(/[._]/g, " ");
+        const kind: "movie" | "tv" =
+          suggestion?.media_type === "tv" ? "tv" : "movie";
         const tmdbMatches = await invoke<TmdbMatch[]>("search_tmdb", {
           query: cleanTmdbQuery(rawTitle),
-          mediaType: suggestion?.media_type === "tv" ? "tv" : "movie",
+          mediaType: kind,
           year: suggestion?.detected_year ?? null,
         });
-        const tmdbMatch = tmdbMatches[0] ?? null;
+        const tmdbMatch = tmdbMatches[0]
+          ? { ...tmdbMatches[0], media_type: kind }
+          : null;
         setFiles((prev) =>
           prev.map((entry) =>
             entry.path === f.path ? { ...entry, tmdbMatch } : entry,
@@ -276,6 +280,10 @@ export default function UploadPrepareModal({
           ),
         ];
         const subtitleTracks = info?.subtitle_tracks ?? [];
+        // Namespace of tmdbId for the Telegram card (movie vs tv ids clash).
+        const mediaType =
+          f.tmdbMatch?.media_type ??
+          (f.suggestion?.media_type === "tv" ? "tv" : "movie");
 
         // TV season directory: explode into individual episode uploads (flat into dest folder)
         if (f.isDirectory && f.episodePlan && f.episodePlan.length > 0) {
@@ -310,6 +318,7 @@ export default function UploadPrepareModal({
               audioTracks,
               subtitleTracks,
               groupId,
+              mediaType,
             });
           }
         } else {
@@ -330,6 +339,7 @@ export default function UploadPrepareModal({
             audioTracks,
             subtitleTracks,
             groupId: null,
+            mediaType,
           });
         }
       }

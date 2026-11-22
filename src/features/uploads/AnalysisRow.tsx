@@ -727,12 +727,15 @@ export default function AnalysisRow({
     setTmdbSearching(true);
     setTmdbSearched(false);
     try {
+      const kind: "movie" | "tv" = mediaType === "tv" ? "tv" : "movie";
       const results = await invoke<TmdbMatch[]>("search_tmdb", {
         query: tmdbQuery.trim(),
-        mediaType: mediaType === "tv" ? "tv" : "movie",
+        mediaType: kind,
         year: suggestion?.detected_year ?? null,
       });
-      setTmdbResults(results.slice(0, 6));
+      setTmdbResults(
+        results.slice(0, 6).map((r) => ({ ...r, media_type: kind })),
+      );
       setTmdbSearched(true);
     } catch {
       setTmdbResults([]);
