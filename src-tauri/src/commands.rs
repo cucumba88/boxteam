@@ -928,6 +928,12 @@ async fn resolve_plex_imdb_id(
         .and_then(|caps| caps.get(1).map(|value| value.as_str().to_string())))
 }
 
+/// Key that identifies one TMDB lookup during an indexing run. Every episode
+/// of a show parses to the same title/year/type, so they share one lookup.
+pub(crate) fn tmdb_lookup_key(title: &str, year: Option<u16>, search_type: &str) -> String {
+    format!("{}|{}|{}", search_type, year.map(|y| y.to_string()).unwrap_or_default(), title.trim().to_lowercase())
+}
+
 async fn resolve_tmdb_match_with_plex(
     config: &crate::db::AppConfig,
     api_key: &str,
@@ -1051,7 +1057,123 @@ async fn enrich_extra_ratings(
     item_id: i64,
     imdb_id: &str,
     log_window: Option<&tauri::WebviewWindow>,
-) -> (Option<crate::omdb::OmdbRating>, Option<crate::tvdb::TvdbRating>) {
+) -> ExtraRatings {
+    let (omdb, tvdb) = fetch_extra_ratings(config, imdb_id, log_window).await;
+    persist_extra_ratings(db, item_id, &omdb, &tvdb, log_window);
+    (omdb, tvdb)
+}
+
+/// Same as `enrich_extra_ratings`, but every file sharing an IMDb id (all the
+/// episodes of a show) reuses one OMDb/TVDB fetch from `cache`. OMDb's free
+/// tier is 1 000 requests a day, so this matters on big libraries.
+async fn enrich_extra_ratings_cached(
+    db: &crate::db::Db,
+    config: &crate::db::AppConfig,
+    item_id: i64,
+    imdb_id: &str,
+    log_window: Option<&tauri::WebviewWindow>,
+    cache: &LookupCache,
+) -> ExtraRatings {
+    let cell = cache.ratings_cell(imdb_id.trim());
+    let (omdb, tvdb) = cell
+        .get_or_init(|| fetch_extra_ratings(config, imdb_id, log_window))
+        .await
+        .clone();
+    persist_extra_ratings(db, item_id, &omdb, &tvdb, log_window);
+    (omdb, tvdb)
+}
+
+fn persist_extra_ratings(
+    db: &crate::db::Db,
+    item_id: i64,
+    omdb: &Option<crate::omdb::OmdbRating>,
+    tvdb: &Option<crate::tvdb::TvdbRating>,
+    log_window: Option<&tauri::WebviewWindow>,
+) {
+    if omdb.is_some() || tvdb.is_some() {
+        if let Err(e) = db.update_extra_ratings(item_id, omdb.as_ref(), tvdb.as_ref()) {
+            emit_ratings_log(&log_window.cloned(), format!("✗ Persist id={item_id}: {e}"));
+        }
+    }
+}
+
+type ExtraRatings = (Option<crate::omdb::OmdbRating>, Option<crate::tvdb::TvdbRating>);
+type TmdbMatch = Option<(crate::tmdb::TmdbMovie, String)>;
+
+/// Memo of remote lookups for the duration of one indexing / refresh run.
+/// Every episode of a show parses to the same title, year and type, so
+/// without this a 60-episode show cost 60 identical TMDB searches (each
+/// several throttled requests) plus 60 OMDb/TVDB fetches. Concurrent tasks
+/// asking for the same key wait for the first one instead of racing it.
+/// Failed TMDB lookups are not cached, so the next file retries them.
+#[derive(Clone, Default)]
+pub(crate) struct LookupCache {
+    tmdb: Arc<Mutex<std::collections::HashMap<String, Arc<tokio::sync::OnceCell<TmdbMatch>>>>>,
+    ratings: Arc<Mutex<std::collections::HashMap<String, Arc<tokio::sync::OnceCell<ExtraRatings>>>>>,
+}
+
+impl LookupCache {
+    fn tmdb_cell(&self, key: String) -> Arc<tokio::sync::OnceCell<TmdbMatch>> {
+        let mut map = self.tmdb.lock().unwrap_or_else(|e| e.into_inner());
+        map.entry(key).or_default().clone()
+    }
+
+    fn ratings_cell(&self, imdb_id: &str) -> Arc<tokio::sync::OnceCell<ExtraRatings>> {
+        let mut map = self.ratings.lock().unwrap_or_else(|e| e.into_inner());
+        map.entry(imdb_id.to_string()).or_default().clone()
+    }
+
+    /// `resolve_tmdb_match_with_plex`, memoised by (type, year, title).
+    async fn tmdb_match(
+        &self,
+        config: &crate::db::AppConfig,
+        api_key: &str,
+        title: &str,
+        year: Option<u16>,
+        tmdb_search_type: &str,
+    ) -> Result<TmdbMatch, String> {
+        let cell = self.tmdb_cell(tmdb_lookup_key(title, year, tmdb_search_type));
+        cell.get_or_try_init(|| {
+            resolve_tmdb_match_with_plex(config, api_key, title, year, tmdb_search_type)
+        })
+        .await
+        .cloned()
+    }
+
+    /// `tmdb::fetch_movie_by_id`, memoised by (tmdb_id, type).
+    async fn tmdb_by_id(
+        &self,
+        api_key: &str,
+        tmdb_id: i64,
+        media_type: &str,
+    ) -> Result<crate::tmdb::TmdbMovie, String> {
+        let cell = self.tmdb_cell(format!("id|{media_type}|{tmdb_id}"));
+        let found = cell
+            .get_or_try_init(|| async {
+                crate::tmdb::fetch_movie_by_id(api_key, tmdb_id, media_type)
+                    .await
+                    .map(|movie| Some((movie, media_type.to_string())))
+            })
+            .await?;
+        found
+            .as_ref()
+            .map(|(movie, _)| movie.clone())
+            .ok_or_else(|| format!("TMDB id {tmdb_id} not found"))
+    }
+
+    fn has_tmdb_by_id(&self, tmdb_id: i64, media_type: &str) -> bool {
+        let map = self.tmdb.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(&format!("id|{media_type}|{tmdb_id}"))
+            .is_some_and(|cell| cell.initialized())
+    }
+}
+
+/// Fetch OMDb + TVDB ratings for an IMDb id without persisting them.
+async fn fetch_extra_ratings(
+    config: &crate::db::AppConfig,
+    imdb_id: &str,
+    log_window: Option<&tauri::WebviewWindow>,
+) -> ExtraRatings {
     let imdb_id = imdb_id.trim();
     if imdb_id.is_empty() {
         return (None, None);
@@ -1118,17 +1240,7 @@ async fn enrich_extra_ratings(
         }
     };
 
-    let (omdb, tvdb) = tokio::join!(omdb_fut, tvdb_fut);
-
-    if omdb.is_some() || tvdb.is_some() {
-        if let Err(e) = db.update_extra_ratings(item_id, omdb.as_ref(), tvdb.as_ref()) {
-            emit_ratings_log(
-                &log_target,
-                format!("✗ Persist id={item_id}: {e}"),
-            );
-        }
-    }
-    (omdb, tvdb)
+    tokio::join!(omdb_fut, tvdb_fut)
 }
 
 /// Global guard so concurrent "Refresh ratings" presses (or a desktop press
@@ -1676,6 +1788,7 @@ pub async fn start_indexing_internal(
     // Counters for TMDB enrichment progress events (index:tmdb_progress)
     let tmdb_done = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let tmdb_total = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let lookups = LookupCache::default();
 
     if total == 0 {
         if let Some(ref w) = window { w.emit("index:error", serde_json::json!({ "message": "FTP crawl returned 0 media files. Check your Root Path setting." })).ok(); }
@@ -1799,25 +1912,21 @@ pub async fn start_indexing_internal(
                 let label = if upsert.is_new { "new" } else { "existing" };
                 let tmdb_done_clone = tmdb_done.clone();
                 let tmdb_total_clone = tmdb_total.clone();
+                let lookups_clone = lookups.clone();
                 tmdb_total.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
                 metadata_tasks.push(tokio::spawn(async move {
                     on_log_clone(format!("🌐 TMDB ({label}): {title}"));
-                    let result = resolve_tmdb_match_with_plex(
-                        &config_clone,
-                        &api_key,
-                        &title,
-                        year,
-                        &tmdb_stype,
-                    )
-                    .await;
+                    let result = lookups_clone
+                        .tmdb_match(&config_clone, &api_key, &title, year, &tmdb_stype)
+                        .await;
                     match result {
                         Ok(Some((movie, actual_type))) => {
                             on_log_clone(format!("🌐 TMDB: {} → {}", title, movie.title));
                             db_clone.update_tmdb_auto(id, &movie, &actual_type).ok();
                             let (omdb, tvdb) = match movie.imdb_id.as_deref() {
                                 Some(imdb) if !imdb.is_empty() =>
-                                    enrich_extra_ratings(&db_clone, &config_clone, id, imdb, window_clone.as_ref()).await,
+                                    enrich_extra_ratings_cached(&db_clone, &config_clone, id, imdb, window_clone.as_ref(), &lookups_clone).await,
                                 _ => (None, None),
                             };
                             if let Some(ref w) = window_clone {
@@ -2412,6 +2521,10 @@ pub async fn refresh_all_metadata_internal(
     }
     crate::ws_broadcast("metadata:refresh_progress", serde_json::json!({ "done": 0, "total": total }));
 
+    // Episodes of a show share a tmdb_id / search key, so their TMDB and
+    // OMDb/TVDB results are fetched once per run (see LookupCache).
+    let lookups = LookupCache::default();
+
     for (i, item) in items.into_iter().enumerate() {
         let media_type = item.tmdb_type
             .clone()
@@ -2427,7 +2540,14 @@ pub async fn refresh_all_metadata_internal(
             format!("🌐 [{}/{}] Refreshing metadata: {}", i + 1, total, title),
         );
 
-        tokio::time::sleep(std::time::Duration::from_millis(260)).await;
+        // Pace real requests only: a result already in the run cache costs
+        // nothing remote, so it skips the delay.
+        let cached = item
+            .tmdb_id
+            .is_some_and(|id| lookups.has_tmdb_by_id(id, &media_type));
+        if !cached {
+            tokio::time::sleep(std::time::Duration::from_millis(260)).await;
+        }
 
         // Items with no tmdb_id need a full search, not just a detail fetch.
         if item.tmdb_id.is_none() {
@@ -2440,12 +2560,12 @@ pub async fn refresh_all_metadata_internal(
                 _ => "movie",
             };
             let year = item.year.map(|y| y as u16);
-            match resolve_tmdb_match_with_plex(&config, &config.tmdb_api_key, &title, year, tmdb_search_type).await {
+            match lookups.tmdb_match(&config, &config.tmdb_api_key, &title, year, tmdb_search_type).await {
                 Ok(Some((movie, actual_type))) => {
                     db.update_tmdb_auto(item.id, &movie, &actual_type).ok();
                     let (omdb, tvdb) = match movie.imdb_id.as_deref() {
                         Some(imdb) if !imdb.is_empty() =>
-                            enrich_extra_ratings(&db, &config, item.id, imdb, window.as_ref()).await,
+                            enrich_extra_ratings_cached(&db, &config, item.id, imdb, window.as_ref(), &lookups).await,
                         _ => (None, None),
                     };
                     if let Some(ref w) = window {
@@ -2483,7 +2603,7 @@ pub async fn refresh_all_metadata_internal(
 
         let tmdb_id = item.tmdb_id.unwrap();
 
-        match crate::tmdb::fetch_movie_by_id(&config.tmdb_api_key, tmdb_id, &media_type).await {
+        match lookups.tmdb_by_id(&config.tmdb_api_key, tmdb_id, &media_type).await {
             Ok(movie) => {
                 db.refresh_tmdb_metadata(
                     item.id,
@@ -2498,7 +2618,7 @@ pub async fn refresh_all_metadata_internal(
                 let (omdb, tvdb) = if needs_extra_ratings {
                     match movie.imdb_id.as_deref() {
                         Some(imdb) if !imdb.is_empty() =>
-                            enrich_extra_ratings(&db, &config, item.id, imdb, window.as_ref()).await,
+                            enrich_extra_ratings_cached(&db, &config, item.id, imdb, window.as_ref(), &lookups).await,
                         _ => (None, None),
                     }
                 } else {
@@ -4825,6 +4945,39 @@ pub async fn revoke_telegram_sub(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod indexing_tests {
     use super::*;
+
+    #[test]
+    fn episodes_of_a_show_share_one_tmdb_lookup_key() {
+        let a = tmdb_lookup_key("The Bear", Some(2022), "tv");
+        let b = tmdb_lookup_key("the bear ", Some(2022), "tv");
+        assert_eq!(a, b);
+        assert_ne!(a, tmdb_lookup_key("The Bear", Some(2022), "movie"));
+        assert_ne!(a, tmdb_lookup_key("The Bear", None, "tv"));
+    }
+
+    #[tokio::test]
+    async fn lookup_cache_runs_each_key_once_even_when_concurrent() {
+        let cache = LookupCache::default();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut tasks = Vec::new();
+        for _ in 0..60 {
+            let cell = cache.ratings_cell("tt0000001");
+            let calls = calls.clone();
+            tasks.push(tokio::spawn(async move {
+                cell.get_or_init(|| async {
+                    calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    (None, None)
+                })
+                .await
+                .clone()
+            }));
+        }
+        for t in tasks {
+            t.await.expect("task");
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
 
     // ── looks_like_tv_content ───────────────────────────────────────────────
 

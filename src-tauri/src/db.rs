@@ -688,6 +688,14 @@ impl Db {
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN tmdb_poster_en TEXT;").ok();
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN imdb_id TEXT;").ok();
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN ftp_relative_path TEXT;").ok();
+        // `upsert_media` looks every *new* path up by ftp_relative_path (to
+        // re-key rows after an ftp_root change). Without an index that was a
+        // full table scan per new file, so a first index was O(N²): 20 000
+        // files took ~20 s of pure SQLite time.
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_media_ftp_relative_path ON media_items(ftp_relative_path);",
+        )
+        .ok();
         // Multi-source rating fields. OMDb supplies imdb_rating + imdb_votes
         // (by IMDb id); TVDB supplies tvdb_id + tvdb_rating (TVDB's `score`).
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN imdb_rating REAL;").ok();
@@ -3602,6 +3610,65 @@ impl Db {
 }
 
 // ── Fix 2: SQLite transaction tests ─────────────────────────────────────────
+
+#[cfg(test)]
+impl Db {
+    /// File-backed Db at an explicit path with production tuning (WAL, pragmas).
+    pub(crate) fn open_at_for_tests(path: &std::path::Path) -> Db {
+        let conn = Connection::open(path).expect("open bench db");
+        Self::tune_connection(&conn).expect("tune");
+        Self::apply_migrations(&conn).expect("migrations");
+        Db {
+            conn: Arc::new(Mutex::new(conn)),
+            data_dir: path.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
+            is_portable: false,
+        }
+    }
+
+    /// Fill every row with realistic-size TMDB metadata (one tmdb_id per title,
+    /// so episodes of a show share it like they do after a real match).
+    pub(crate) fn fill_synthetic_metadata_for_tests(&self) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let rows: Vec<(i64, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT id, COALESCE(title, filename) FROM media_items")
+                .map_err(|e| e.to_string())?;
+            let mapped = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map_err(|e| e.to_string())?;
+            mapped.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
+        };
+        let mut ids: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        let overview = "Una historia sobre ".to_string() + &"personajes que se enfrentan a decisiones difíciles. ".repeat(6);
+        conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+        {
+            let mut upd = conn
+                .prepare(
+                    "UPDATE media_items SET tmdb_id=?1, tmdb_type=media_type, tmdb_title=?2, tmdb_title_en=?2,
+                     tmdb_year='2020', tmdb_release_date='2020-05-01', tmdb_overview=?3, tmdb_overview_en=?3,
+                     tmdb_poster=?4, tmdb_poster_en=?4, tmdb_rating=7.1, tmdb_genres='[18,53,80]',
+                     tmdb_watch_providers='[8,337]', metadata_at='2026-11-01T00:00:00Z', imdb_id=?5
+                     WHERE id=?6",
+                )
+                .map_err(|e| e.to_string())?;
+            for (id, title) in rows {
+                let next = ids.len() as i64 + 1000;
+                let tmdb_id = *ids.entry(title.clone()).or_insert(next);
+                upd.execute(params![
+                    tmdb_id,
+                    title,
+                    overview,
+                    format!("/p{tmdb_id:07}abcdefghijklmnop.jpg"),
+                    format!("tt{tmdb_id:07}"),
+                    id
+                ])
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {

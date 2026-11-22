@@ -1,5 +1,5 @@
 import { hdrFilterKeys } from "../utils/techTags";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MediaItem } from "../hooks/useIndexing";
 import { formSelectCompact } from "../lib/formStyles";
 import { formatReleaseType } from "../lib/format";
@@ -89,6 +89,31 @@ function countPlatforms(items: MediaItem[]): Map<number, number> {
     }
   }
   return counts;
+}
+
+function facetCounts(items: MediaItem[]) {
+  const resolutionCounts = countBy(items, (item) =>
+    normalizeResolution(item.resolution),
+  );
+  const releaseTypeCounts = countBy(items, (item) =>
+    normalizeReleaseType(item.release_type),
+  );
+  // One item can count for several HDR chips ("DV+HDR10" → DV, HDR10, HDR).
+  const hdrCounts = new Map<string, number>();
+  for (const item of items) {
+    for (const key of hdrFilterKeys(item.hdr)) {
+      hdrCounts.set(key, (hdrCounts.get(key) ?? 0) + 1);
+    }
+  }
+  const codecCounts = countBy(items, (item) => normalizeCodec(item.codec));
+  return {
+    resolutionCounts,
+    releaseTypeCounts,
+    hdrCounts,
+    codecCounts,
+    platformCounts: countPlatforms(items),
+    genreCounts: countGenres(items),
+  };
 }
 
 // Compact section with collapsible toggle
@@ -271,20 +296,18 @@ export default function FilterBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchDraft]);
 
-  const resolutionCounts = countBy(items, (item) =>
-    normalizeResolution(item.resolution),
-  );
-  const releaseTypeCounts = countBy(items, (item) =>
-    normalizeReleaseType(item.release_type),
-  );
-  // One item can count for several HDR chips ("DV+HDR10" → DV, HDR10, HDR).
-  const hdrCounts = new Map<string, number>();
-  for (const item of items) {
-    for (const key of hdrFilterKeys(item.hdr)) {
-      hdrCounts.set(key, (hdrCounts.get(key) ?? 0) + 1);
-    }
-  }
-  const codecCounts = countBy(items, (item) => normalizeCodec(item.codec));
+  // The facet counts walk every item (and JSON-parse genres), so they are
+  // memoised on `items`: without this they re-ran on every keystroke in the
+  // search box and on every Library re-render (several per second while
+  // scrolling), which on a 20 000-title library cost ~30 ms each time.
+  const {
+    resolutionCounts,
+    releaseTypeCounts,
+    hdrCounts,
+    codecCounts,
+    platformCounts,
+    genreCounts,
+  } = useMemo(() => facetCounts(items), [items]);
   const releaseTypeOptions = Array.from(
     new Set([
       "WEB-DL",
@@ -342,14 +365,12 @@ export default function FilterBar({
   const showHdrSection = hdrFilterOptions.length > 1 || !!filters.hdr;
   const showCodecSection = codecFilterOptions.length > 1 || !!filters.codec;
 
-  const platformCounts = countPlatforms(items);
   const platformOptions = PROVIDER_LIST.filter(
     (p) => platformCounts.has(p.id) || filters.platform === String(p.id),
   );
   const showPlatformSection =
     platformOptions.length > 0 || !!filters.platform;
 
-  const genreCounts = countGenres(items);
   const genreOptions = [...GENRE_LIST]
     .filter((g) => genreCounts.has(g.id) || filters.genre === String(g.id))
     .sort((a, b) =>

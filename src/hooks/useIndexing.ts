@@ -87,6 +87,73 @@ export function useIndexing() {
     );
   };
 
+  // ── Coalesced item updates ────────────────────────────────────────────
+  // A big index streams thousands of `index:progress` batches and one
+  // `index:update` per TMDB match. Applying each one with its own setItems
+  // copied the whole array and re-ran every Library memo (filter, sort,
+  // de-dup, facet counts) per event. They are buffered here and applied
+  // together at most every FLUSH_MS.
+  const FLUSH_MS = 250;
+  const pendingAdditionsRef = useRef<MediaItem[]>([]);
+  const pendingPatchesRef = useRef<Map<number, Partial<MediaItem>>>(new Map());
+  const flushTimerRef = useRef<number | null>(null);
+
+  const flushPending = useCallback(() => {
+    flushTimerRef.current = null;
+    const additions = pendingAdditionsRef.current;
+    const patches = pendingPatchesRef.current;
+    if (additions.length === 0 && patches.size === 0) return;
+    pendingAdditionsRef.current = [];
+    pendingPatchesRef.current = new Map();
+    setItems((prev) => {
+      let next: MediaItem[] | null = null;
+      for (const item of additions) {
+        if (itemIndexRef.current.has(item.id)) continue;
+        if (!next) next = prev.slice();
+        itemIndexRef.current.set(item.id, next.length);
+        next.push(item);
+      }
+      for (const [id, patch] of patches) {
+        const index = itemIndexRef.current.get(id);
+        if (index == null) continue;
+        if (!next) next = prev.slice();
+        next[index] = { ...next[index], ...patch };
+      }
+      return next ?? prev;
+    });
+  }, []);
+
+  const scheduleFlush = useCallback(() => {
+    if (flushTimerRef.current == null) {
+      flushTimerRef.current = window.setTimeout(flushPending, FLUSH_MS);
+    }
+  }, [flushPending]);
+
+  /** Queue a partial update. Null fields are dropped so a partial event
+   *  (e.g. a search-result match without watch_providers) can't wipe data we
+   *  already have; the DB layer preserves those columns the same way. */
+  const queuePatch = useCallback(
+    (payload: Partial<MediaItem> & { id: number }) => {
+      const patch: Partial<MediaItem> = {};
+      for (const [k, v] of Object.entries(payload)) {
+        if (v !== null) (patch as Record<string, unknown>)[k] = v;
+      }
+      const pending = pendingPatchesRef.current;
+      pending.set(payload.id, { ...pending.get(payload.id), ...patch });
+      scheduleFlush();
+    },
+    [scheduleFlush],
+  );
+
+  useEffect(
+    () => () => {
+      if (flushTimerRef.current != null) {
+        window.clearTimeout(flushTimerRef.current);
+      }
+    },
+    [],
+  );
+
   const addLog = useCallback((msg: string) => {
     if (!ENABLE_ACTIVITY_LOG) return;
     setLog((prev) => [...prev.slice(-MAX_LOG + 1), { ts: Date.now(), msg }]);
@@ -121,22 +188,13 @@ export function useIndexing() {
       const last = payload[payload.length - 1];
       setProgress({ current: last.current, total: last.total });
 
-      setItems((prev) => {
-        // Only append items that are genuinely new (not already in the index map).
-        const additions: MediaItem[] = [];
-        for (const item of payload) {
-          if (!itemIndexRef.current.has(item.id)) {
-            additions.push(item);
-          }
+      // Only genuinely new items are appended (checked again at flush time).
+      for (const item of payload) {
+        if (!itemIndexRef.current.has(item.id)) {
+          pendingAdditionsRef.current.push(item);
         }
-        if (additions.length === 0) return prev;
-        const next = [...prev, ...additions];
-        // Rebuild index for all newly added items.
-        for (let i = prev.length; i < next.length; i++) {
-          itemIndexRef.current.set(next[i].id, i);
-        }
-        return next;
-      });
+      }
+      scheduleFlush();
     });
 
     const unComplete = listen<{
@@ -203,23 +261,7 @@ export function useIndexing() {
 
     const unUpdate = listen<Partial<MediaItem> & { id: number }>(
       "index:update",
-      ({ payload }) => {
-        setItems((prev) => {
-          const index = itemIndexRef.current.get(payload.id);
-          if (index == null) return prev;
-          const next = prev.slice();
-          // Drop null fields so a partial event (e.g. a search-result match
-          // that doesn't carry watch_providers) can't wipe data we already
-          // have in memory. The DB layer already uses COALESCE / CASE to
-          // preserve those columns; this mirrors that semantic on the wire.
-          const patch: Partial<MediaItem> = {};
-          for (const [k, v] of Object.entries(payload)) {
-            if (v !== null) (patch as Record<string, unknown>)[k] = v;
-          }
-          next[index] = { ...next[index], ...patch };
-          return next;
-        });
-      },
+      ({ payload }) => queuePatch(payload),
     );
 
     const unError = listen<{ message: string }>(
@@ -354,19 +396,7 @@ export function useIndexing() {
         setIsIndexing(false);
         addLog(`⚠ Error: ${p.message}`);
       } else if (event === "index:update") {
-        setItems((prev) => {
-          const index = itemIndexRef.current.get(p.id as number);
-          if (index == null) return prev;
-          const next = prev.slice();
-          // Same null-drop guard as the Tauri listener above — partial events
-          // must not wipe fields that the sender didn't fetch on this path.
-          const patch: Partial<MediaItem> = {};
-          for (const [k, v] of Object.entries(p as Partial<MediaItem>)) {
-            if (v !== null) (patch as Record<string, unknown>)[k] = v;
-          }
-          next[index] = { ...next[index], ...patch };
-          return next;
-        });
+        queuePatch(p as Partial<MediaItem> & { id: number });
       } else if (event === "watch_providers:refresh_progress") {
         const done = (p.done as number) ?? 0;
         const total = (p.total as number) ?? 0;

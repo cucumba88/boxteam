@@ -345,33 +345,38 @@ function getAddedTimestamp(item: MediaItem): number {
   return item.id;
 }
 
+// Shared collator: `Intl.Collator#compare` is several times faster than
+// `String#localeCompare`, which builds a collator on every call.
+const TITLE_COLLATOR = new Intl.Collator();
+
 function deduplicateByTitle(entries: MediaItem[]): MediaItem[] {
-  const seen = new Map<string, MediaItem>();
+  // The winner's timestamp is cached next to it so a 60-episode show parses
+  // each `indexed_at` once instead of twice per collision.
+  const seen = new Map<string, { item: MediaItem; addedAt: number }>();
   for (const entry of entries) {
     const key =
       entry.tmdb_id != null
         ? `tmdb:${entry.tmdb_id}`
         : `title:${entry.title ?? entry.filename}`;
     const current = seen.get(key);
+    const entryAddedAt = getAddedTimestamp(entry);
     if (!current) {
-      seen.set(key, entry);
+      seen.set(key, { item: entry, addedAt: entryAddedAt });
       continue;
     }
-    const entryAddedAt = getAddedTimestamp(entry);
-    const currentAddedAt = getAddedTimestamp(current);
-    if (entryAddedAt > currentAddedAt) {
-      seen.set(key, entry);
+    if (entryAddedAt > current.addedAt) {
+      seen.set(key, { item: entry, addedAt: entryAddedAt });
       continue;
     }
     if (
-      entryAddedAt === currentAddedAt &&
+      entryAddedAt === current.addedAt &&
       entry.tmdb_poster &&
-      !current.tmdb_poster
+      !current.item.tmdb_poster
     ) {
-      seen.set(key, entry);
+      seen.set(key, { item: entry, addedAt: entryAddedAt });
     }
   }
-  return [...seen.values()];
+  return Array.from(seen.values(), (v) => v.item);
 }
 
 export default function Library({
@@ -1110,8 +1115,11 @@ export default function Library({
             (movie.title ?? movie.filename)),
     );
 
-  const visibleTabs = TABS.filter(
-    (tab) => tab.id !== "uploads" || uploadsTabVisible,
+  // Memoised so the memos that depend on it (sidebar, command palette)
+  // don't rebuild on every Library render.
+  const visibleTabs = useMemo(
+    () => TABS.filter((tab) => tab.id !== "uploads" || uploadsTabVisible),
+    [uploadsTabVisible],
   );
   const mobileBottomTabs = visibleTabs.filter((tab) =>
     (["all", "movie", "tv", "watchlist", "downloads"] as TabId[]).includes(
@@ -1119,18 +1127,38 @@ export default function Library({
     ),
   );
 
+  // Library-tab counts only depend on the items, so they live in their own
+  // memo: the combined one below re-runs on every download progress tick,
+  // and de-duplicating 20 000 titles four times per tick was the main cost
+  // of the Library while a download was running.
+  const libraryTabCounts = useMemo(() => {
+    const byTab: Record<"movie" | "tv" | "documentary", MediaItem[]> = {
+      movie: [],
+      tv: [],
+      documentary: [],
+    };
+    for (const item of items) {
+      for (const id of ["movie", "tv", "documentary"] as const) {
+        if (tabFilter(item, id)) byTab[id].push(item);
+      }
+    }
+    return {
+      // Match the header count: grouped view counts titles, the files view
+      // counts files.
+      all: allView === "grouped" ? deduplicateByTitle(items).length : items.length,
+      movie: deduplicateByTitle(byTab.movie).length,
+      tv: deduplicateByTitle(byTab.tv).length,
+      documentary: deduplicateByTitle(byTab.documentary).length,
+    };
+  }, [items, allView]);
+
   const tabCounts = useMemo(
     () =>
       visibleTabs.reduce(
         (acc, t) => {
           switch (t.id) {
             case "all":
-              // Match the header count: grouped view counts titles, the
-              // files view counts files.
-              acc[t.id] =
-                allView === "grouped"
-                  ? deduplicateByTitle(items).length
-                  : items.length;
+              acc[t.id] = libraryTabCounts.all;
               break;
             case "downloads":
               acc[t.id] = downloads.filter(
@@ -1145,16 +1173,14 @@ export default function Library({
             case "movie":
             case "tv":
             case "documentary":
-              acc[t.id] = deduplicateByTitle(
-                items.filter((i) => tabFilter(i, t.id)),
-              ).length;
+              acc[t.id] = libraryTabCounts[t.id];
               break;
           }
           return acc;
         },
         {} as Record<TabId, number>,
       ),
-    [downloads, uploads, items, allView],
+    [downloads, uploads, libraryTabCounts],
   );
 
   const tabItems = useMemo(
@@ -1173,17 +1199,48 @@ export default function Library({
     [tabItems, tabItemsForDisplay, useGroupedMovies],
   );
 
+  // Folded search text per item, built once per library change (and only
+  // once someone searches) instead of folding five fields of every item on
+  // every keystroke.
+  const hasSearch = filters.search.trim() !== "";
+  const searchHaystacks = useMemo(() => {
+    if (!hasSearch) return null;
+    const map = new Map<number, string>();
+    for (const item of items) {
+      map.set(
+        item.id,
+        foldForSearch(
+          [
+            item.tmdb_title ?? "",
+            item.tmdb_title_en ?? "",
+            item.title ?? "",
+            item.release_group ?? "",
+            item.filename,
+          ].join("\n"),
+        ),
+      );
+    }
+    return map;
+  }, [items, hasSearch]);
+
   const filtered = useMemo(() => {
+    const q = foldForSearch(filters.search);
     const matchingItems = filterableItems
       .filter((item) => {
-        const q = foldForSearch(filters.search);
         const matchesSearch =
           !q ||
-          foldForSearch(item.tmdb_title ?? "").includes(q) ||
-          foldForSearch(item.tmdb_title_en ?? "").includes(q) ||
-          foldForSearch(item.title ?? "").includes(q) ||
-          foldForSearch(item.release_group ?? "").includes(q) ||
-          foldForSearch(item.filename).includes(q);
+          (
+            searchHaystacks?.get(item.id) ??
+            foldForSearch(
+              [
+                item.tmdb_title ?? "",
+                item.tmdb_title_en ?? "",
+                item.title ?? "",
+                item.release_group ?? "",
+                item.filename,
+              ].join("\n"),
+            )
+          ).includes(q);
         const matchesGenre =
           !filters.genre ||
           (parsedGenreMap.get(item.id) ?? []).includes(Number(filters.genre));
@@ -1212,48 +1269,48 @@ export default function Library({
       sort === "added-desc" ||
       sort === "title-asc" ||
       !sort;
+    const isReleaseSort = sort === "release-desc" || sort === "release-asc";
     const keyed = matchingItems.map((item) => ({
       item,
       titleKey: needsTitleKey
         ? titleSortKey(getLocalizedTitle(item, language))
         : "",
+      // Numeric/string keys computed once per item, not once per comparison.
+      num:
+        sort === "added-desc"
+          ? getAddedTimestamp(item)
+          : sort === "rating-desc"
+            ? (resolveRating(item, ratingOrder)?.value ?? -1)
+            : 0,
+      release: isReleaseSort
+        ? (item.tmdb_release_date ?? `${item.year ?? "0000"}-01-01`)
+        : "",
     }));
+    const cmp = TITLE_COLLATOR.compare;
     keyed.sort((a, b) => {
       switch (sort) {
         case "title-desc":
-          return b.titleKey.localeCompare(a.titleKey);
-        case "release-desc": {
-          const ra = a.item.tmdb_release_date ?? `${a.item.year ?? "0000"}-01-01`;
-          const rb = b.item.tmdb_release_date ?? `${b.item.year ?? "0000"}-01-01`;
-          return rb.localeCompare(ra);
-        }
-        case "release-asc": {
-          const ra = a.item.tmdb_release_date ?? `${a.item.year ?? "0000"}-01-01`;
-          const rb = b.item.tmdb_release_date ?? `${b.item.year ?? "0000"}-01-01`;
-          return ra.localeCompare(rb);
-        }
+          return cmp(b.titleKey, a.titleKey);
+        case "release-desc":
+          return cmp(b.release, a.release);
+        case "release-asc":
+          return cmp(a.release, b.release);
         case "year-desc":
           return (b.item.year ?? 0) - (a.item.year ?? 0);
         case "year-asc":
           return (a.item.year ?? 0) - (b.item.year ?? 0);
-        case "rating-desc": {
-          const ra = resolveRating(a.item, ratingOrder)?.value ?? -1;
-          const rb = resolveRating(b.item, ratingOrder)?.value ?? -1;
-          return rb - ra;
-        }
-        case "added-desc": {
-          const ta = getAddedTimestamp(a.item);
-          const tb = getAddedTimestamp(b.item);
-          return tb - ta || a.titleKey.localeCompare(b.titleKey);
-        }
+        case "rating-desc":
+          return b.num - a.num;
+        case "added-desc":
+          return b.num - a.num || cmp(a.titleKey, b.titleKey);
         default:
-          return a.titleKey.localeCompare(b.titleKey);
+          return cmp(a.titleKey, b.titleKey);
       }
     });
     const sortedItems = keyed.map(({ item }) => item);
 
     return useGroupedMovies ? deduplicateByTitle(sortedItems) : sortedItems;
-  }, [filterableItems, filters, language, parsedGenreMap, parsedPlatformMap, useGroupedMovies, ratingOrder]);
+  }, [filterableItems, filters, language, parsedGenreMap, parsedPlatformMap, searchHaystacks, useGroupedMovies, ratingOrder]);
 
   // Empty-state copy: distinguish "your search/filters matched nothing" from
   // "this tab has no content at all" (only the latter points at folder types).
@@ -1861,10 +1918,54 @@ export default function Library({
   }, [language, tabCounts, visibleTabs]);
 
   // ─── Command palette items ────────────────────────────────────────────
+  // Library item search for the palette, in its own memo: folding 4 000
+  // titles used to re-run whenever the tab counts changed (every download
+  // progress tick) or, through the unstable `visibleTabs`, on every render.
+  const handleCardSelectRef = useRef(handleCardSelect);
+  handleCardSelectRef.current = handleCardSelect;
+  const commandSearchItems: CommandItem[] = useMemo(() => {
+    const libraryLabel = shellLabels.library;
+    // Library item search: cap to a sensible number to keep the palette snappy.
+    return items.slice(0, 4000).map((item) => {
+      const title = getLocalizedTitle(item, language);
+      const year = item.year ?? "";
+      const tag =
+        item.media_type === "movie"
+          ? language === "es"
+            ? "Película"
+            : "Movie"
+          : item.media_type === "tv"
+            ? language === "es"
+              ? "Serie"
+              : "TV Show"
+            : item.media_type === "documentary"
+              ? language === "es"
+                ? "Documental"
+                : "Documentary"
+              : "";
+      return {
+        id: `lib:${item.id}`,
+        title,
+        subtitle: [tag, year].filter(Boolean).join(" · "),
+        icon:
+          item.media_type === "movie"
+            ? Clapperboard
+            : item.media_type === "documentary"
+              ? FileText
+              : Tv2,
+        section: libraryLabel,
+        searchKey: foldForSearch(
+          `${title} ${item.tmdb_title_en ?? ""} ${item.title ?? ""} ${item.release_group ?? ""} ${item.filename}`,
+        ),
+        onSelect: () => handleCardSelectRef.current(item),
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, language]);
+
   const commandItems: CommandItem[] = useMemo(() => {
     const navLabel = shellLabels.navigation;
     const actionsLabel = shellLabels.actions;
-    const libraryLabel = shellLabels.library;
 
     const navItems: CommandItem[] = visibleTabs.map((tab) => {
       const label = t(language, tab.labelKey as never);
@@ -1910,45 +2011,10 @@ export default function Library({
       },
     ];
 
-    // Library item search: cap to a sensible number to keep the palette snappy.
-    const searchItems: CommandItem[] = items.slice(0, 4000).map((item) => {
-      const title = getLocalizedTitle(item, language);
-      const year = item.year ?? "";
-      const tag =
-        item.media_type === "movie"
-          ? language === "es"
-            ? "Película"
-            : "Movie"
-          : item.media_type === "tv"
-            ? language === "es"
-              ? "Serie"
-              : "TV Show"
-            : item.media_type === "documentary"
-              ? language === "es"
-                ? "Documental"
-                : "Documentary"
-              : "";
-      return {
-        id: `lib:${item.id}`,
-        title,
-        subtitle: [tag, year].filter(Boolean).join(" · "),
-        icon:
-          item.media_type === "movie"
-            ? Clapperboard
-            : item.media_type === "documentary"
-              ? FileText
-              : Tv2,
-        section: libraryLabel,
-        searchKey: foldForSearch(
-          `${title} ${item.tmdb_title_en ?? ""} ${item.title ?? ""} ${item.release_group ?? ""} ${item.filename}`,
-        ),
-        onSelect: () => handleCardSelect(item),
-      };
-    });
-
-    return [...navItems, ...actionItems, ...searchItems];
+    return [...navItems, ...actionItems, ...commandSearchItems];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, language, visibleTabs, tabCounts]);
+  }, [language, visibleTabs, tabCounts, commandSearchItems]);
+
 
   const mediaContent = useEpisodeList ? (
     <EpisodeListView

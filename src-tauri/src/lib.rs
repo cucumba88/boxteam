@@ -6,6 +6,8 @@ mod env_compat;
 mod ftp;
 mod omdb;
 mod parser;
+#[cfg(test)]
+mod perf_bench;
 mod telegram;
 mod upload_notify;
 mod tmdb;
