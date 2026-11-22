@@ -201,6 +201,10 @@ export default function DownloadsTab({
           ? historyDownloads.filter((d) => d.status === "error")
           : [];
 
+  // A filter like "Completadas" shouldn't leave an empty "En curso" block on top.
+  const showActiveSection = filter === "all" || filter === "active" || filter === "queued";
+  const showHistorySection = filter === "all" || filter === "done" || filter === "failed";
+
   const renderRow = (item: DownloadItem) => (
     <DownloadRow
       key={item.id}
@@ -271,6 +275,7 @@ export default function DownloadsTab({
           />
         ) : (
           <>
+            {showActiveSection && (
             <TransferSection
               title={t(language, "downloads.activeSection")}
               count={filteredActive.length}
@@ -281,7 +286,9 @@ export default function DownloadsTab({
                 <TransferEmptySection icon={Clock} text={t(language, "downloads.noActive")} />
               )}
             </TransferSection>
+            )}
 
+            {showHistorySection && (
             <TransferSection
               title={t(language, "downloads.historySection")}
               count={filteredHistory.length}
@@ -304,6 +311,7 @@ export default function DownloadsTab({
                 <TransferEmptySection icon={Check} text={t(language, "downloads.noHistory")} />
               )}
             </TransferSection>
+            )}
           </>
         )}
       </TransferBody>

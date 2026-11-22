@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, RefreshCw } from "lucide-react";
+import { percentOf } from "../lib/progressFormat";
+import { COMPLETION_FLASH_MS } from "../shell/AppStatusBar";
 
 /**
  * Compact progress feedback for the mobile shell. The desktop AppStatusBar
@@ -10,19 +12,17 @@ import { Check, RefreshCw } from "lucide-react";
  * Renders as a sticky strip directly below the mobile top navbar:
  *   • Idle → nothing (height 0)
  *   • Working → 32px row: spinner + label + percent + thin progress bar
- *   • Completion → brief 3s green confirmation row
+ *   • Completion → brief green confirmation row (same duration as desktop)
  *
  * Visual language matches the desktop status bar (same accent strip,
  * brand-purple progress, success green for completion) so the experience
  * stays coherent across surfaces.
  */
 
-type ProgressLike = { current: number; total: number } | null | undefined;
-
 interface Props {
   indexing?: {
     label: string;
-    progress?: ProgressLike;
+    percent?: number | null;
     isActive: boolean;
   };
   metaRefresh?: { label: string; done: number; total: number } | null;
@@ -41,18 +41,20 @@ export default function MobileProgressStrip({
   onCompletionFlashClear,
 }: Props) {
   const [flashVisible, setFlashVisible] = useState(false);
+  const onClearRef = useRef(onCompletionFlashClear);
+  onClearRef.current = onCompletionFlashClear;
   useEffect(() => {
     if (!completionFlash) {
       setFlashVisible(false);
       return;
     }
     setFlashVisible(true);
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       setFlashVisible(false);
-      onCompletionFlashClear?.();
-    }, 3500);
-    return () => window.clearTimeout(t);
-  }, [completionFlash, onCompletionFlashClear]);
+      onClearRef.current?.();
+    }, COMPLETION_FLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, [completionFlash]);
 
   const liveWorkActive = !!(
     indexing?.isActive ||
@@ -65,9 +67,9 @@ export default function MobileProgressStrip({
   useEffect(() => {
     if (liveWorkActive && flashVisible) {
       setFlashVisible(false);
-      onCompletionFlashClear?.();
+      onClearRef.current?.();
     }
-  }, [liveWorkActive, flashVisible, onCompletionFlashClear]);
+  }, [liveWorkActive, flashVisible]);
 
   const visible = liveWorkActive || flashVisible;
   if (!visible) return null;
@@ -78,29 +80,16 @@ export default function MobileProgressStrip({
 
   if (indexing?.isActive) {
     label = indexing.label;
-    if (indexing.progress && indexing.progress.total > 0) {
-      pct = Math.min(
-        100,
-        Math.round((indexing.progress.current / indexing.progress.total) * 100),
-      );
-    }
+    pct = indexing.percent ?? null;
   } else if (metaRefresh && metaRefresh.total > 0) {
     label = metaRefresh.label;
-    pct = Math.min(100, Math.round((metaRefresh.done / metaRefresh.total) * 100));
+    pct = percentOf(metaRefresh.done, metaRefresh.total);
   } else if (ratingsRefresh && ratingsRefresh.total > 0) {
     label = ratingsRefresh.label;
-    pct = Math.min(
-      100,
-      Math.round((ratingsRefresh.done / ratingsRefresh.total) * 100),
-    );
+    pct = percentOf(ratingsRefresh.done, ratingsRefresh.total);
   } else if (watchProvidersRefresh && watchProvidersRefresh.total > 0) {
     label = watchProvidersRefresh.label;
-    pct = Math.min(
-      100,
-      Math.round(
-        (watchProvidersRefresh.done / watchProvidersRefresh.total) * 100,
-      ),
-    );
+    pct = percentOf(watchProvidersRefresh.done, watchProvidersRefresh.total);
   }
 
   const isFlash = !liveWorkActive && flashVisible && completionFlash;

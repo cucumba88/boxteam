@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import StatusBadge, { type BadgeTone } from "../../components/ui/StatusBadge";
 import { formatBytes } from "../../lib/format";
+import { formatEta, formatSpeed, percentOf } from "../../lib/progressFormat";
+import { t } from "../../utils/i18n";
 import type { AppLanguage } from "../../utils/mediaLanguage";
 
 export type TransferStatus =
@@ -52,27 +54,9 @@ const TONE_COLOR: Record<BadgeTone, string> = {
 
 // ─── Formatting ──────────────────────────────────────────────────────────────
 
-export function formatSpeed(bps?: number | null): string {
-  if (bps == null || bps <= 0) return "";
-  if (bps >= 1024 ** 2) return `${(bps / 1024 ** 2).toFixed(1)} MB/s`;
-  if (bps >= 1024) return `${(bps / 1024).toFixed(0)} KB/s`;
-  return `${bps.toFixed(0)} B/s`;
-}
-
-export function formatEta(
-  language: AppLanguage,
-  bps: number | undefined | null,
-  remainingBytes: number,
-): string {
-  if (!bps || bps <= 0 || remainingBytes <= 0) return "";
-  const secs = remainingBytes / bps;
-  const left = language === "es" ? "restantes" : "left";
-  if (secs < 60) return `${Math.ceil(secs)} s ${left}`;
-  if (secs < 3600) return `${Math.ceil(secs / 60)} min ${left}`;
-  const h = Math.floor(secs / 3600);
-  const m = Math.round((secs % 3600) / 60);
-  return `${h} h ${m} min ${left}`;
-}
+// Speed / ETA live in lib/progressFormat so download rings, transfer rows and
+// the toolbar total all print the same units.
+export { formatSpeed, formatEta } from "../../lib/progressFormat";
 
 export function formatElapsed(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -492,12 +476,16 @@ export function TransferProgress({
   language: AppLanguage;
   done: number;
   total: number;
+  /** undefined → still measuring; 0 → no bytes for a while (stalled). */
   speedBps?: number | null;
   direction: "down" | "up";
 }) {
-  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  // Size not known yet (the FTP SIZE reply hasn't arrived): show an
+  // indeterminate bar instead of "0% · 0 B / 0 B".
+  const pct = percentOf(done, total);
   const speed = formatSpeed(speedBps);
-  const eta = formatEta(language, speedBps, total - done);
+  const eta = pct == null ? "" : formatEta(language, speedBps, total - done);
+  const arrow = direction === "down" ? "↓" : "↑";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div
@@ -512,17 +500,29 @@ export function TransferProgress({
         }}
       >
         <span>
-          <span style={{ color: "var(--color-text)", fontWeight: 600 }}>{pct}%</span>
-          {" · "}
-          {formatBytes(done)} / {formatBytes(total)}
+          {pct == null ? (
+            <span style={{ color: "var(--color-text)", fontWeight: 600 }}>
+              {t(language, "transfers.preparing")}
+            </span>
+          ) : (
+            <>
+              <span style={{ color: "var(--color-text)", fontWeight: 600 }}>{pct}%</span>
+              {" · "}
+              {formatBytes(done)} / {formatBytes(total)}
+            </>
+          )}
         </span>
         <span style={{ display: "inline-flex", gap: 10 }}>
           {speed ? (
             <span style={{ color: "var(--color-primary)", fontWeight: 700 }}>
-              {direction === "down" ? "↓" : "↑"} {speed}
+              {arrow} {speed}
             </span>
           ) : (
-            <span>{language === "es" ? "Calculando velocidad…" : "Measuring speed…"}</span>
+            <span>
+              {speedBps === 0
+                ? t(language, "transfers.stalled")
+                : t(language, "transfers.measuringSpeed")}
+            </span>
           )}
           {eta && <span>{eta}</span>}
         </span>
@@ -531,23 +531,28 @@ export function TransferProgress({
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={pct}
+        aria-valuenow={pct ?? undefined}
+        aria-busy={pct == null || undefined}
+        className={pct == null ? "ui-progress-indeterminate" : undefined}
         style={{
           height: 6,
           borderRadius: 999,
           overflow: "hidden",
           background: "var(--color-surface-2)",
+          position: "relative",
         }}
       >
-        <div
-          style={{
-            height: "100%",
-            width: `${pct}%`,
-            borderRadius: 999,
-            background: "var(--color-primary)",
-            transition: "width 0.35s ease",
-          }}
-        />
+        {pct != null && (
+          <div
+            style={{
+              height: "100%",
+              width: `${pct}%`,
+              borderRadius: 999,
+              background: "var(--color-primary)",
+              transition: "width 0.35s ease",
+            }}
+          />
+        )}
       </div>
     </div>
   );

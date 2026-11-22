@@ -64,7 +64,7 @@ import WatchlistAddModal from "../features/watchlist/WatchlistAddModal";
 import { useWatchlist } from "../features/watchlist/useWatchlist";
 import UploadsTab from "../features/uploads/UploadsTab";
 import { useUploads } from "../features/uploads/useUploads";
-import DownloadFeedbackToast from "../components/DownloadFeedbackToast";
+import Toaster, { pushToast } from "../components/Toaster";
 import IndexErrorToast from "../components/IndexErrorToast";
 import { useQuitHandler } from "../hooks/useQuitHandler";
 import VirtualMediaGrid, {
@@ -85,6 +85,11 @@ import {
   useRatingOrder,
 } from "../lib/ratingSource";
 import { useRatingsRefresh } from "../lib/ratingsRefreshState";
+import {
+  completionSublabel,
+  formatCount,
+  indexingView,
+} from "../lib/progressFormat";
 import {
   SLUG_TO_TAB,
   TAB_SLUGS,
@@ -2065,8 +2070,29 @@ export default function Library({
     />
   );
 
+  // One label/percent for the whole indexing run (scan → files → TMDB),
+  // shared by the desktop status bar and the mobile strip.
+  const indexingStatus = useMemo(
+    () => indexingView(language, progress, tmdbProgress),
+    [language, progress, tmdbProgress],
+  );
+  // Memoised so the status bar's auto-hide timer isn't restarted on every
+  // re-render (download progress re-renders this page several times a second,
+  // which used to keep "Indexación completa" on screen indefinitely).
+  const completionFlash = useMemo(
+    () =>
+      completionSummary && !isIndexing
+        ? {
+            label: t(language, "toast.indexComplete"),
+            sublabel: completionSublabel(language, completionSummary),
+          }
+        : null,
+    [completionSummary, isIndexing, language],
+  );
+
   const statusBarNode = (
     <AppStatusBar
+      language={language}
       connection={
         ftpHost
           ? {
@@ -2077,23 +2103,11 @@ export default function Library({
       }
       indexing={{
         isActive: isIndexing,
-        progress,
+        percent: indexingStatus.percent,
         label: isIndexing
-          ? progress
-            ? t(language, "toast.enriching", {
-                current: progress.current,
-                total: progress.total,
-              })
-            : tmdbProgress
-              ? t(language, "toast.tmdbOf", {
-                  done: tmdbProgress.done,
-                  total: tmdbProgress.total,
-                })
-              : t(language, "toast.scanning")
+          ? indexingStatus.label
           : t(language, "statusbar.indexedFiles", {
-              count: items.length.toLocaleString(
-                language === "es" ? "es-ES" : "en-US",
-              ),
+              count: formatCount(items.length, language),
             }),
       }}
       // Inline progress for background refreshes — replaces the floating
@@ -2105,8 +2119,8 @@ export default function Library({
         metaRefreshProgress
           ? {
               label: t(language, "metaRefresh.banner", {
-                done: metaRefreshProgress.done,
-                total: metaRefreshProgress.total,
+                done: formatCount(metaRefreshProgress.done, language),
+                total: formatCount(metaRefreshProgress.total, language),
               }),
               done: metaRefreshProgress.done,
               total: metaRefreshProgress.total,
@@ -2117,8 +2131,8 @@ export default function Library({
         ratingsRefresh.state === "running"
           ? {
               label: t(language, "ratings.banner", {
-                done: ratingsRefresh.done,
-                total: ratingsRefresh.total,
+                done: formatCount(ratingsRefresh.done, language),
+                total: formatCount(ratingsRefresh.total, language),
               }),
               done: ratingsRefresh.done,
               total: ratingsRefresh.total,
@@ -2129,8 +2143,8 @@ export default function Library({
         watchProvidersProgress
           ? {
               label: t(language, "watchProviders.banner", {
-                done: watchProvidersProgress.done,
-                total: watchProvidersProgress.total,
+                done: formatCount(watchProvidersProgress.done, language),
+                total: formatCount(watchProvidersProgress.total, language),
               }),
               done: watchProvidersProgress.done,
               total: watchProvidersProgress.total,
@@ -2141,19 +2155,7 @@ export default function Library({
       // toast. The status bar shows a brief green chip in the same slot
       // for ~4s, then reverts to the item-count label. Same intent, zero
       // overlap with page content.
-      completionFlash={
-        completionSummary && !isIndexing
-          ? {
-              label: t(language, "toast.indexComplete"),
-              sublabel:
-                completionSummary.newItems > 0
-                  ? t(language, "toast.newItemsAdded", {
-                      count: completionSummary.newItems,
-                    })
-                  : t(language, "toast.noNewItems"),
-            }
-          : null
-      }
+      completionFlash={completionFlash}
       onCompletionFlashClear={dismissCompletion}
       transfers={{
         downloads: tabCounts.downloads ?? 0,
@@ -2542,25 +2544,15 @@ export default function Library({
         <MobileProgressStrip
           indexing={{
             isActive: isIndexing,
-            progress,
-            label: progress
-              ? t(language, "toast.enriching", {
-                  current: progress.current,
-                  total: progress.total,
-                })
-              : tmdbProgress
-                ? t(language, "toast.tmdbOf", {
-                    done: tmdbProgress.done,
-                    total: tmdbProgress.total,
-                  })
-                : t(language, "toast.scanning"),
+            percent: indexingStatus.percent,
+            label: indexingStatus.label,
           }}
           metaRefresh={
             metaRefreshProgress
               ? {
                   label: t(language, "metaRefresh.banner", {
-                    done: metaRefreshProgress.done,
-                    total: metaRefreshProgress.total,
+                    done: formatCount(metaRefreshProgress.done, language),
+                    total: formatCount(metaRefreshProgress.total, language),
                   }),
                   done: metaRefreshProgress.done,
                   total: metaRefreshProgress.total,
@@ -2571,8 +2563,8 @@ export default function Library({
             ratingsRefresh.state === "running"
               ? {
                   label: t(language, "ratings.banner", {
-                    done: ratingsRefresh.done,
-                    total: ratingsRefresh.total,
+                    done: formatCount(ratingsRefresh.done, language),
+                    total: formatCount(ratingsRefresh.total, language),
                   }),
                   done: ratingsRefresh.done,
                   total: ratingsRefresh.total,
@@ -2583,27 +2575,15 @@ export default function Library({
             watchProvidersProgress
               ? {
                   label: t(language, "watchProviders.banner", {
-                    done: watchProvidersProgress.done,
-                    total: watchProvidersProgress.total,
+                    done: formatCount(watchProvidersProgress.done, language),
+                    total: formatCount(watchProvidersProgress.total, language),
                   }),
                   done: watchProvidersProgress.done,
                   total: watchProvidersProgress.total,
                 }
               : null
           }
-          completionFlash={
-            completionSummary && !isIndexing
-              ? {
-                  label: t(language, "toast.indexComplete"),
-                  sublabel:
-                    completionSummary.newItems > 0
-                      ? t(language, "toast.newItemsAdded", {
-                          count: completionSummary.newItems,
-                        })
-                      : t(language, "toast.noNewItems"),
-                }
-              : null
-          }
+          completionFlash={completionFlash}
           onCompletionFlashClear={dismissCompletion}
         />
       )}
@@ -3198,7 +3178,7 @@ export default function Library({
                           }
                           if (failed > 0) {
                             await watchlist.refresh();
-                            window.alert(t(language, "watchlist.removeError"));
+                            pushToast({ kind: "error", title: t(language, "watchlist.removeError") });
                           }
                         })();
                       }}
@@ -4044,19 +4024,20 @@ export default function Library({
           summary all render inline in the AppStatusBar (desktop) and
           MobileProgressStrip (mobile) — no floating cards that could cover
           page content or sidebar actions. */}
-      <DownloadFeedbackToast
+      <Toaster
         language={language}
         onGoToDownloads={() => switchTab("downloads")}
-      />
-      {indexError && (
-        <IndexErrorToast
-          message={indexError}
-          language={language}
-          onRetry={retryIndexing}
-          onOpenSettings={() => setShowSettings(true)}
-          onDismiss={clearIndexError}
-        />
-      )}
+      >
+        {indexError && (
+          <IndexErrorToast
+            message={indexError}
+            language={language}
+            onRetry={retryIndexing}
+            onOpenSettings={() => setShowSettings(true)}
+            onDismiss={clearIndexError}
+          />
+        )}
+      </Toaster>
 
       {/* DetailPanel + TVShowPanel renders moved inline into MAIN CONTENT
           as DetailPage + TVShowPage. */}

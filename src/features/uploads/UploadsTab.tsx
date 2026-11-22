@@ -193,6 +193,7 @@ export default function UploadsTab({
           />
         ) : (
           <>
+            {(filter === "all" || filter === "active" || filter === "queued") && (
             <TransferSection
               title={t(language, "upload.active")}
               count={filteredActive.length}
@@ -206,7 +207,9 @@ export default function UploadsTab({
                 />
               )}
             </TransferSection>
+            )}
 
+            {(filter === "all" || filter === "done" || filter === "failed") && (
             <TransferSection
               title={t(language, "upload.history")}
               count={filteredHistory.length}
@@ -301,6 +304,7 @@ export default function UploadsTab({
                 })()
               )}
             </TransferSection>
+            )}
           </>
         )}
 

@@ -60,9 +60,11 @@ export function useIndexing() {
     total: number;
   } | null>(null);
   const [indexError, setIndexError] = useState<string | null>(null);
+  // `null` counts = the run finished but we don't know the numbers (web mode
+  // noticed it via polling after a missed WS event).
   const [completionSummary, setCompletionSummary] = useState<{
-    newItems: number;
-    removed: number;
+    newItems: number | null;
+    removed: number | null;
   } | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [tmdbProgress, setTmdbProgress] = useState<{
@@ -295,6 +297,8 @@ export function useIndexing() {
     };
   }, []);
 
+  const dismissCompletion = useCallback(() => setCompletionSummary(null), []);
+
   // In web mode: connect via WebSocket for real-time events, with polling as a fallback.
   useEffect(() => {
     if (isTauri()) return;
@@ -305,10 +309,27 @@ export function useIndexing() {
       if (event === "index:start") {
         setIndexError(null);
         setIsIndexing(true);
-        setProgress({ current: 0, total: 0 });
+        setProgress(null);
         setTmdbProgress(null);
         setCompletionSummary(null);
         addLog("▶ Indexing started");
+      } else if (event === "index:progress") {
+        // Web mode gets counts only (the desktop event carries full items).
+        const current = (p.current as number) ?? 0;
+        const total = (p.total as number) ?? 0;
+        setIsIndexing(true);
+        if (total > 0) setProgress({ current, total });
+      } else if (event === "index:tmdb_progress") {
+        const done = (p.done as number) ?? 0;
+        const total = (p.total as number) ?? 0;
+        setTmdbProgress({ done, total });
+      } else if (event === "metadata:refresh_progress") {
+        const done = (p.done as number) ?? 0;
+        const total = (p.total as number) ?? 0;
+        setMetaRefreshProgress({ done, total });
+        if (done >= total) {
+          setTimeout(() => setMetaRefreshProgress(null), 1500);
+        }
       } else if (event === "index:complete") {
         setProgress(null);
         setTmdbProgress(null);
@@ -401,11 +422,10 @@ export function useIndexing() {
           const loaded = await call<MediaItem[]>("get_all_media");
           rebuildIndex(loaded);
           setItems(loaded);
-          setCompletionSummary({ newItems: 0, removed: 0 });
+          setCompletionSummary({ newItems: null, removed: null });
         } else if (!wasRunning && running) {
           setIndexError(null);
           setCompletionSummary(null);
-          setProgress((prev) => prev ?? { current: 0, total: 0 });
         }
 
         wasRunning = running;
@@ -436,7 +456,7 @@ export function useIndexing() {
     metaRefreshProgress,
     watchProvidersProgress,
     completionSummary,
-    dismissCompletion: () => setCompletionSummary(null),
+    dismissCompletion,
     /** Force-clear all indexing/TMDB state. Use when tasks are stuck and never complete. */
     forceClearIndexing: () => {
       setIsIndexing(false);

@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { Clock, RefreshCw, Trash2, X } from "lucide-react";
+import ConfirmDialog from "../../components/ConfirmDialog";
 import type { UploadItem } from "./types";
 import type { AppLanguage } from "../../utils/mediaLanguage";
 import { t } from "../../utils/i18n";
@@ -45,6 +47,7 @@ export default function UploadCard({
   onDelete,
 }: UploadCardProps) {
   const es = language === "es";
+  const [confirmRemoteDelete, setConfirmRemoteDelete] = useState(false);
   const pct =
     item.bytes_total > 0
       ? Math.min(100, Math.round((item.bytes_done / item.bytes_total) * 100))
@@ -105,16 +108,7 @@ export default function UploadCard({
               size="sm"
               variant="danger"
               icon={Trash2}
-              onClick={() => {
-                if (
-                  window.confirm(
-                    es
-                      ? `¿Borrar "${item.filename}" del servidor FTP? No se puede deshacer.`
-                      : `Delete "${item.filename}" from the FTP server? This can't be undone.`,
-                  )
-                )
-                  onDelete(item.id, true);
-              }}
+              onClick={() => setConfirmRemoteDelete(true)}
             >
               {es ? "Borrar del servidor" : "Delete from server"}
             </Button>
@@ -146,7 +140,7 @@ export default function UploadCard({
             item.bytes_total > 0 && {
               key: "resume",
               label: es
-                ? `Llegó al ${pct} % · al reintentar sigue desde ahí`
+                ? `Llegó al ${pct}% · al reintentar sigue desde ahí`
                 : `Reached ${pct}% · retry resumes from there`,
             },
         ]}
@@ -166,7 +160,7 @@ export default function UploadCard({
           text={
             item.bytes_done > 0 && item.bytes_total > 0
               ? es
-                ? `En cola · seguirá desde ${formatBytes(item.bytes_done)} (${pct} %)`
+                ? `En cola · seguirá desde ${formatBytes(item.bytes_done)} (${pct}%)`
                 : `Queued · will resume from ${formatBytes(item.bytes_done)} (${pct}%)`
               : es
                 ? "Esperando en cola…"
@@ -175,6 +169,24 @@ export default function UploadCard({
         />
       )}
       {item.error && finished && <TransferError message={item.error} />}
+      {/* Same in-app dialog as the rest of the app — window.confirm looks
+          foreign and isn't reliable inside the Tauri webview. */}
+      <ConfirmDialog
+        open={confirmRemoteDelete}
+        title={es ? "Borrar del servidor FTP" : "Delete from the FTP server"}
+        description={
+          es
+            ? `Se borrará «${item.filename}» del servidor. No se puede deshacer.`
+            : `"${item.filename}" will be deleted from the server. This can't be undone.`
+        }
+        confirmLabel={es ? "Borrar del servidor" : "Delete from server"}
+        cancelLabel={es ? "Cancelar" : "Cancel"}
+        onCancel={() => setConfirmRemoteDelete(false)}
+        onConfirm={() => {
+          setConfirmRemoteDelete(false);
+          onDelete(item.id, true);
+        }}
+      />
     </TransferCard>
   );
 }

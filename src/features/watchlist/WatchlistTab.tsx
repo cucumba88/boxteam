@@ -10,6 +10,7 @@ import WatchlistCard from "./WatchlistCard";
 import WatchlistDetailPanel from "./WatchlistDetailPanel";
 import { foldForSearch } from "../../utils/textSearch";
 import { t } from "../../utils/i18n";
+import { pushToast } from "../../components/Toaster";
 
 /** Reads a watchlist detail tmdb_id from "/watchlist/<id>". Returns null on
  *  bad input or when running inside Tauri (no URL bar there). */
@@ -133,7 +134,7 @@ export default function WatchlistTab({
   const handleRemove = (id: number) => {
     watchlist.remove(id).catch((e) => {
       console.error("[watchlist] remove failed:", e);
-      window.alert(t(language, "watchlist.removeError"));
+      pushToast({ kind: "error", title: t(language, "watchlist.removeError") });
     });
     // closeDetail (not just setSelected) so the web URL leaves
     // /watchlist/<id>; otherwise Back reopened a title that no longer exists.

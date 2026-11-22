@@ -1696,6 +1696,14 @@ pub async fn start_indexing_internal(
         if let Some(ref w) = window {
             w.emit("index:progress", serde_json::json!(batch)).ok();
         }
+        // Web clients only need the counter (the desktop payload carries the
+        // full items and would flood the WS channel).
+        if let Some(last) = batch.last() {
+            crate::ws_broadcast(
+                "index:progress",
+                serde_json::json!({ "current": last["current"], "total": last["total"] }),
+            );
+        }
         batch.clear();
     };
 
@@ -1848,12 +1856,11 @@ pub async fn start_indexing_internal(
                     // Emit progress after task completes (success or failure)
                     let done = tmdb_done_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                     let total_val = tmdb_total_clone.load(std::sync::atomic::Ordering::SeqCst);
+                    let tmdb_payload = serde_json::json!({ "done": done, "total": total_val });
                     if let Some(ref w) = window_clone {
-                        w.emit(
-                            "index:tmdb_progress",
-                            serde_json::json!({ "done": done, "total": total_val }),
-                        ).ok();
+                        w.emit("index:tmdb_progress", tmdb_payload.clone()).ok();
                     }
+                    crate::ws_broadcast("index:tmdb_progress", tmdb_payload);
                 }));
             }
         }
@@ -2403,6 +2410,7 @@ pub async fn refresh_all_metadata_internal(
     if let Some(ref w) = window {
         w.emit("metadata:refresh_progress", serde_json::json!({ "done": 0, "total": total })).ok();
     }
+    crate::ws_broadcast("metadata:refresh_progress", serde_json::json!({ "done": 0, "total": total }));
 
     for (i, item) in items.into_iter().enumerate() {
         let media_type = item.tmdb_type
@@ -2528,12 +2536,11 @@ pub async fn refresh_all_metadata_internal(
         }
 
         // Emit per-item progress
+        let refresh_payload = serde_json::json!({ "done": i + 1, "total": total });
         if let Some(ref w) = window {
-            w.emit(
-                "metadata:refresh_progress",
-                serde_json::json!({ "done": i + 1, "total": total }),
-            ).ok();
+            w.emit("metadata:refresh_progress", refresh_payload.clone()).ok();
         }
+        crate::ws_broadcast("metadata:refresh_progress", refresh_payload);
     }
 
     emit_index_log(

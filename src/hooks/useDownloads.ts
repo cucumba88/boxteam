@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import {
+  addUnique,
+  createSpeedTracker,
+} from "../features/transfers/speedTracker";
 import { call, isTauri } from "../lib/transport";
 
 export interface DownloadItem {
@@ -20,65 +24,21 @@ export interface DownloadItem {
 
 export function useDownloads() {
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
-  // Track last progress sample per download for speed calculation
-  const speedState = useRef<
-    Record<
-      number,
-      { ts: number; bytes: number; uiTs?: number; smoothedBps?: number }
-    >
-  >({});
-
-  const applySnapshotSpeed = (items: DownloadItem[]): DownloadItem[] => {
-    const now = Date.now();
-
-    return items.map((item) => {
-      if (item.status !== "downloading") {
-        delete speedState.current[item.id];
-        return { ...item, speed_bps: undefined };
-      }
-
-      const prev = speedState.current[item.id];
-      if (!prev) {
-        speedState.current[item.id] = {
-          ts: now,
-          bytes: item.bytes_done,
-          smoothedBps: item.speed_bps,
-        };
-        return item;
-      }
-
-      const dtMs = now - prev.ts;
-      const dBytes = item.bytes_done - prev.bytes;
-      let nextSpeed = prev.smoothedBps;
-
-      if (dtMs > 0 && dBytes >= 0) {
-        const instantBps = (dBytes / dtMs) * 1000;
-        nextSpeed =
-          prev.smoothedBps == null
-            ? instantBps
-            : prev.smoothedBps * 0.65 + instantBps * 0.35;
-      }
-
-      speedState.current[item.id] = {
-        ts: now,
-        bytes: item.bytes_done,
-        smoothedBps: nextSpeed,
-      };
-
-      return { ...item, speed_bps: nextSpeed };
-    });
-  };
+  const tracker = useRef(createSpeedTracker()).current;
+  const isActive = (item: DownloadItem) => item.status === "downloading";
+  const mergeSnapshot = (fresh: DownloadItem[]) =>
+    setDownloads((current) => tracker.onSnapshot(fresh, current, isActive, isTauri()));
 
   useEffect(() => {
     call<DownloadItem[]>("get_downloads")
-      .then((items) => setDownloads(applySnapshotSpeed(items)))
+      .then(mergeSnapshot)
       .catch(console.error);
 
     // Keep desktop and web views converged even when actions are triggered
     // from a different client (e.g., browser updates while desktop is open).
     const syncTimer = window.setInterval(() => {
       call<DownloadItem[]>("get_downloads")
-        .then((items) => setDownloads(applySnapshotSpeed(items)))
+        .then(mergeSnapshot)
         .catch(() => {});
     }, 1200);
 
@@ -87,7 +47,7 @@ export function useDownloads() {
     }
 
     const unAdded = listen<DownloadItem>("download:added", ({ payload }) => {
-      setDownloads((prev) => [payload, ...prev]);
+      setDownloads((prev) => addUnique(prev, payload));
     });
 
     const unUpdate = listen<Partial<DownloadItem> & { id: number }>(
@@ -98,7 +58,7 @@ export function useDownloads() {
         );
         // Clear speed when no longer downloading
         if (payload.status && payload.status !== "downloading") {
-          delete speedState.current[payload.id];
+          tracker.reset(payload.id);
         }
       },
     );
@@ -109,30 +69,11 @@ export function useDownloads() {
       bytes_total: number;
       timestamp_ms: number;
     }>("download:progress", ({ payload }) => {
-      const prev = speedState.current[payload.id];
-      let speed_bps: number | undefined;
-      let shouldPatchSpeed = false;
-      if (prev) {
-        const dtMs = payload.timestamp_ms - prev.ts;
-        const dBytes = payload.bytes_done - prev.bytes;
-        if (dtMs > 0) {
-          const instantBps = (dBytes / dtMs) * 1000;
-          const smoothedBps =
-            prev.smoothedBps == null
-              ? instantBps
-              : prev.smoothedBps * 0.65 + instantBps * 0.35;
-          speed_bps = smoothedBps;
-          shouldPatchSpeed =
-            prev.uiTs == null || payload.timestamp_ms - prev.uiTs >= 900;
-        }
-      }
-      speedState.current[payload.id] = {
-        ts: payload.timestamp_ms,
-        bytes: payload.bytes_done,
-        uiTs: shouldPatchSpeed ? payload.timestamp_ms : prev?.uiTs,
-        smoothedBps: speed_bps ?? prev?.smoothedBps,
-      };
-
+      const speed_bps = tracker.onEvent(
+        payload.id,
+        payload.bytes_done,
+        payload.timestamp_ms,
+      );
       setDownloads((prev) =>
         prev.map((d) =>
           d.id === payload.id
@@ -140,7 +81,7 @@ export function useDownloads() {
                 ...d,
                 bytes_done: payload.bytes_done,
                 bytes_total: payload.bytes_total,
-                ...(shouldPatchSpeed && speed_bps != null ? { speed_bps } : {}),
+                ...(speed_bps != null ? { speed_bps } : {}),
               }
             : d,
         ),

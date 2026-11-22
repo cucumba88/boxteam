@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   Check,
@@ -8,10 +8,15 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
+import type { AppLanguage } from "../utils/mediaLanguage";
+import { t } from "../utils/i18n";
+import { percentOf } from "../lib/progressFormat";
 
-type ProgressLike = { current: number; total: number } | null | undefined;
+/** How long the green "done" chip stays. Shared with MobileProgressStrip. */
+export const COMPLETION_FLASH_MS = 4000;
 
 interface Props {
+  language: AppLanguage;
   connection?: {
     state: "ok" | "warn" | "error" | "unknown";
     label: string;
@@ -23,7 +28,8 @@ interface Props {
    */
   indexing?: {
     label: string;
-    progress?: ProgressLike;
+    /** 0–100, or null while the total isn't known yet (spinner only). */
+    percent?: number | null;
     isActive: boolean;
   };
   /**
@@ -59,6 +65,7 @@ const DOT_COLORS: Record<"ok" | "warn" | "error" | "unknown", string> = {
 };
 
 export default function AppStatusBar({
+  language,
   connection,
   indexing,
   metaRefresh,
@@ -76,18 +83,22 @@ export default function AppStatusBar({
   // enough to not feel persistent. Mirrors what the old floating toast did
   // (8s auto-dismiss) but inline so it never covers content.
   const [flashVisible, setFlashVisible] = useState(false);
+  // Keep the latest callback in a ref: an inline `() => …` prop changes on
+  // every parent render and would otherwise restart the timer forever.
+  const onClearRef = useRef(onCompletionFlashClear);
+  onClearRef.current = onCompletionFlashClear;
   useEffect(() => {
     if (!completionFlash) {
       setFlashVisible(false);
       return;
     }
     setFlashVisible(true);
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       setFlashVisible(false);
-      onCompletionFlashClear?.();
-    }, 4000);
-    return () => window.clearTimeout(t);
-  }, [completionFlash, onCompletionFlashClear]);
+      onClearRef.current?.();
+    }, COMPLETION_FLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, [completionFlash]);
 
   // Live work always takes priority over the completion flash — a user who
   // kicked off "refresh metadata" right after an index run needs to see the
@@ -103,9 +114,9 @@ export default function AppStatusBar({
   useEffect(() => {
     if (liveWorkActive && flashVisible) {
       setFlashVisible(false);
-      onCompletionFlashClear?.();
+      onClearRef.current?.();
     }
-  }, [liveWorkActive, flashVisible, onCompletionFlashClear]);
+  }, [liveWorkActive, flashVisible]);
 
   // Priority for the center slot, top to bottom:
   //   1. Completion flash (transient win)
@@ -113,18 +124,8 @@ export default function AppStatusBar({
   //   3. Metadata refresh (post-index)
   //   4. Ratings refresh (manual)
   //   5. Item-count idle label
-  const indexingActive =
-    indexing?.isActive &&
-    indexing?.progress &&
-    indexing.progress.total > 0;
-  const indexingPercent = indexingActive
-    ? Math.min(
-        100,
-        Math.round(
-          (indexing!.progress!.current / indexing!.progress!.total) * 100,
-        ),
-      )
-    : 0;
+  const indexingPercent =
+    indexing?.isActive && indexing.percent != null ? indexing.percent : null;
 
   // Shared renderer for a progress slot — keeps the visual signature
   // consistent across indexing / meta-refresh / ratings-refresh so the bar
@@ -144,6 +145,7 @@ export default function AppStatusBar({
         aria-valuenow={pct}
         aria-valuemin={0}
         aria-valuemax={100}
+        aria-label={label}
       >
         <div style={{ width: `${pct}%` }} />
       </div>
@@ -162,7 +164,7 @@ export default function AppStatusBar({
     if (indexing?.isActive) {
       // Indexing has an indeterminate phase (scanning, no percent yet);
       // show the spinner + label, and add the bar only once we have one.
-      if (indexingActive) {
+      if (indexingPercent != null) {
         return renderProgress(indexing.label, indexingPercent);
       }
       return (
@@ -178,26 +180,15 @@ export default function AppStatusBar({
       );
     }
     if (metaRefresh && metaRefresh.total > 0) {
-      const pct = Math.min(
-        100,
-        Math.round((metaRefresh.done / metaRefresh.total) * 100),
-      );
+      const pct = percentOf(metaRefresh.done, metaRefresh.total) ?? 0;
       return renderProgress(metaRefresh.label, pct);
     }
     if (ratingsRefresh && ratingsRefresh.total > 0) {
-      const pct = Math.min(
-        100,
-        Math.round((ratingsRefresh.done / ratingsRefresh.total) * 100),
-      );
+      const pct = percentOf(ratingsRefresh.done, ratingsRefresh.total) ?? 0;
       return renderProgress(ratingsRefresh.label, pct);
     }
     if (watchProvidersRefresh && watchProvidersRefresh.total > 0) {
-      const pct = Math.min(
-        100,
-        Math.round(
-          (watchProvidersRefresh.done / watchProvidersRefresh.total) * 100,
-        ),
-      );
+      const pct = percentOf(watchProvidersRefresh.done, watchProvidersRefresh.total) ?? 0;
       return renderProgress(watchProvidersRefresh.label, pct);
     }
     if (flashVisible && completionFlash) {
@@ -261,7 +252,8 @@ export default function AppStatusBar({
             type="button"
             className="shell-statusbar-btn"
             onClick={onJumpToDownloads}
-            title="Active downloads"
+            title={t(language, "statusbar.activeDownloads")}
+            aria-label={`${t(language, "statusbar.activeDownloads")}: ${transfers.downloads}`}
           >
             <Download size={12} strokeWidth={2.2} aria-hidden="true" />
             <span>{transfers.downloads}</span>
@@ -272,7 +264,8 @@ export default function AppStatusBar({
             type="button"
             className="shell-statusbar-btn"
             onClick={onJumpToUploads}
-            title="Active uploads"
+            title={t(language, "statusbar.activeUploads")}
+            aria-label={`${t(language, "statusbar.activeUploads")}: ${transfers.uploads}`}
           >
             <Upload size={12} strokeWidth={2.2} aria-hidden="true" />
             <span>{transfers.uploads}</span>
@@ -283,7 +276,8 @@ export default function AppStatusBar({
             type="button"
             className="shell-statusbar-btn"
             onClick={onShowActivity}
-            title="Activity log"
+            title={t(language, "statusbar.activityLog")}
+            aria-label={t(language, "statusbar.activityLog")}
           >
             <Activity size={12} strokeWidth={2.2} aria-hidden="true" />
             {activityCount !== undefined && activityCount > 0 && (

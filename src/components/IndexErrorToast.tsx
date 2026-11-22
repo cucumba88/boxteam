@@ -1,7 +1,8 @@
-import { useState } from "react";
-import AppIcon from "./AppIcon";
+import { RefreshCw, Settings, WifiOff, X } from "lucide-react";
 import type { AppLanguage } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
+import { describeIndexError } from "../lib/progressFormat";
+import Button from "./ui/Button";
 
 interface IndexErrorToastProps {
   message: string;
@@ -11,6 +12,13 @@ interface IndexErrorToastProps {
   onDismiss: () => void;
 }
 
+/**
+ * Persistent card shown when a library refresh fails. Lives inside the
+ * <Toaster> stack (no own positioning) so it never sits under the download
+ * toasts or the mobile tab bar. The backend error is technical English, so we
+ * lead with a Spanish sentence the user can act on and keep the raw text as a
+ * small "technical detail" line.
+ */
 export default function IndexErrorToast({
   message,
   language,
@@ -18,154 +26,48 @@ export default function IndexErrorToast({
   onOpenSettings,
   onDismiss,
 }: IndexErrorToastProps) {
-  const [retrying, setRetrying] = useState(false);
-
-  const handleRetry = async () => {
-    setRetrying(true);
-    onDismiss();
-    onRetry();
-    // The hook will clear the error on index:start and show new errors if they occur
-    setRetrying(false);
-  };
-
+  const { message: friendly, detail } = describeIndexError(language, message);
   return (
-    <div
-      style={{
-        position: "fixed",
-        right: 18,
-        bottom: 22,
-        width: "min(380px, calc(100vw - 36px))",
-        padding: "0.95rem 1rem",
-        borderRadius: "calc(var(--radius-lg) + 2px)",
-        border:
-          "1px solid color-mix(in srgb, var(--color-danger) 34%, transparent)",
-        background:
-          "linear-gradient(155deg, color-mix(in srgb, var(--color-surface) 95%, transparent), color-mix(in srgb, var(--color-surface-2) 87%, transparent))",
-        boxShadow: "0 18px 42px color-mix(in srgb, black 30%, transparent)",
-        backdropFilter: "blur(18px) saturate(150%)",
-        WebkitBackdropFilter: "blur(18px) saturate(150%)",
-        zIndex: 46,
-      }}
-    >
-      {/* Header row */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: 12,
-          marginBottom: 10,
-        }}
-      >
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 34,
-              height: 34,
-              borderRadius: 999,
-              background:
-                "color-mix(in srgb, var(--color-danger) 14%, transparent)",
-              color: "var(--color-danger)",
-              flexShrink: 0,
+    <div className="ui-toast ui-toast--error" role="alert">
+      <span className="ui-toast-icon" aria-hidden="true">
+        <WifiOff size={16} strokeWidth={2.2} />
+      </span>
+      <div className="ui-toast-body">
+        <div className="ui-toast-title">{t(language, "toast.error.title")}</div>
+        <div className="ui-toast-text">{friendly}</div>
+        {detail && (
+          <div className="ui-toast-detail" title={t(language, "toast.error.details")}>
+            {detail}
+          </div>
+        )}
+        <div className="ui-toast-actions">
+          <Button
+            size="sm"
+            variant="danger"
+            icon={RefreshCw}
+            onClick={() => {
+              // The hook clears the error on index:start and re-shows it if
+              // the new run fails too.
+              onDismiss();
+              onRetry();
             }}
           >
-            <AppIcon name="wifi-off" size={17} strokeWidth={2.1} />
-          </span>
-          <div>
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 700,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: "var(--color-danger)",
-                marginBottom: 4,
-              }}
-            >
-              {t(language, "toast.error.title")}
-            </div>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 500,
-                color: "var(--color-text)",
-                wordBreak: "break-word",
-              }}
-            >
-              {message}
-            </div>
-          </div>
+            {t(language, "toast.error.retry")}
+          </Button>
+          <Button size="sm" variant="ghost" icon={Settings} onClick={onOpenSettings}>
+            {t(language, "library.openSettings")}
+          </Button>
         </div>
-
-        <button
-          onClick={onDismiss}
-          title={t(language, "toast.error.dismiss")}
-          style={{
-            width: 30,
-            height: 30,
-            border:
-              "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
-            borderRadius: 999,
-            background:
-              "color-mix(in srgb, var(--color-surface) 96%, transparent)",
-            color: "var(--color-text-muted)",
-            cursor: "pointer",
-            fontSize: 16,
-            lineHeight: 1,
-            flexShrink: 0,
-          }}
-        >
-          ×
-        </button>
       </div>
-
-      {/* Action buttons */}
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <button
-          onClick={onOpenSettings}
-          style={{
-            height: 32,
-            padding: "0 12px",
-            borderRadius: "var(--radius)",
-            border:
-              "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
-            background: "none",
-            color: "var(--color-text-muted)",
-            cursor: "pointer",
-            fontSize: 12,
-            fontWeight: 600,
-          }}
-        >
-          {t(language, "library.openSettings")}
-        </button>
-        <button
-          onClick={handleRetry}
-          disabled={retrying}
-          style={{
-            height: 32,
-            padding: "0 14px",
-            borderRadius: "var(--radius)",
-            border: "none",
-            background:
-              "color-mix(in srgb, var(--color-danger) 18%, transparent)",
-            color: "var(--color-danger)",
-            cursor: retrying ? "not-allowed" : "pointer",
-            fontSize: 12,
-            fontWeight: 700,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            opacity: retrying ? 0.6 : 1,
-            transition: "opacity 0.15s ease",
-          }}
-        >
-          <AppIcon name="refresh-cw" size={13} strokeWidth={2.3} />
-          {t(language, "toast.error.retry")}
-        </button>
-      </div>
+      <button
+        type="button"
+        className="ui-toast-close"
+        onClick={onDismiss}
+        aria-label={t(language, "toast.error.dismiss")}
+        title={t(language, "toast.error.dismiss")}
+      >
+        <X size={14} strokeWidth={2.4} aria-hidden="true" />
+      </button>
     </div>
   );
 }

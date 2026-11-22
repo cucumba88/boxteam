@@ -83,6 +83,31 @@ const messages = {
     es: "{count} títulos",
     en: "{count} titles",
   },
+  "statusbar.activeDownloads": {
+    es: "Descargas en curso",
+    en: "Active downloads",
+  },
+  "statusbar.activeUploads": {
+    es: "Subidas en curso",
+    en: "Active uploads",
+  },
+  "statusbar.activityLog": {
+    es: "Registro de actividad",
+    en: "Activity log",
+  },
+  "transfers.measuringSpeed": {
+    es: "Calculando velocidad…",
+    en: "Measuring speed…",
+  },
+  "transfers.stalled": {
+    es: "Sin datos del servidor…",
+    en: "Waiting for the server…",
+  },
+  "transfers.preparing": {
+    es: "Preparando…",
+    en: "Preparing…",
+  },
+  "transfers.left": { es: "restantes", en: "left" },
   "statusbar.indexedFiles": {
     es: "{count} archivos indexados en total",
     en: "{count} files indexed in total",
@@ -222,36 +247,44 @@ const messages = {
 
   "toast.refresh": { es: "Actualización de librería", en: "Library refresh" },
   "toast.indexing": {
-    es: "Indexando {current} / {total}",
-    en: "Indexing {current} / {total}",
+    es: "Indexando archivos · {current}/{total}",
+    en: "Indexing files · {current}/{total}",
   },
   "toast.enriching": {
-    es: "Obteniendo metadatos {current} / {total}",
-    en: "Fetching metadata {current} / {total}",
+    es: "Obteniendo metadatos · {current}/{total}",
+    en: "Fetching metadata · {current}/{total}",
   },
   "toast.indexComplete": {
     es: "Indexación completa",
     en: "Indexing complete",
   },
   "toast.newItemsAdded": {
-    es: "{count} nuevo(s) elemento(s) añadido(s)",
-    en: "{count} new item(s) added",
+    es: "{count} nuevos",
+    en: "{count} new",
+  },
+  "toast.newItemAdded": {
+    es: "1 nuevo",
+    en: "1 new",
   },
   "toast.noNewItems": {
-    es: "Sin elementos nuevos",
-    en: "No new items",
+    es: "Sin cambios",
+    en: "No changes",
   },
   "toast.itemsRemoved": {
-    es: "{count} elemento(s) eliminado(s) (no encontrado(s) en FTP)",
-    en: "{count} item(s) removed (no longer on FTP)",
+    es: "{count} ya no están en el FTP",
+    en: "{count} no longer on FTP",
+  },
+  "toast.itemRemoved": {
+    es: "1 ya no está en el FTP",
+    en: "1 no longer on FTP",
   },
   "toast.starting": {
-    es: "Iniciando indexacion...",
-    en: "Starting indexing...",
+    es: "Iniciando indexación…",
+    en: "Starting indexing…",
   },
   "toast.scanning": {
-    es: "Escaneando carpetas FTP...",
-    en: "Scanning FTP folders...",
+    es: "Buscando archivos en el FTP…",
+    en: "Scanning FTP folders…",
   },
   "toast.subtitle": {
     es: "Buscando archivos nuevos en FTP y enriqueciendo solo los nuevos",
@@ -266,7 +299,29 @@ const messages = {
     en: "Minimize refresh status",
   },
 
-  "toast.error.title": { es: "Error de conexión", en: "Connection error" },
+  "toast.error.title": {
+    es: "No se pudo actualizar la biblioteca",
+    en: "Library refresh failed",
+  },
+  "toast.error.noFiles": {
+    es: "El FTP no devolvió ningún archivo de vídeo. Revisa la carpeta raíz en Ajustes.",
+    en: "The FTP server returned no video files. Check the root folder in Settings.",
+  },
+  "toast.error.connection": {
+    es: "No se pudo conectar con el servidor FTP. Comprueba que está encendido y que los datos de acceso son correctos.",
+    en: "Couldn't reach the FTP server. Check that it is online and that the credentials are right.",
+  },
+  "toast.error.auth": {
+    es: "El servidor FTP rechazó el usuario o la contraseña.",
+    en: "The FTP server rejected the username or password.",
+  },
+  "toast.error.timeout": {
+    es: "El servidor FTP tardó demasiado en responder.",
+    en: "The FTP server took too long to respond.",
+  },
+  "toast.error.details": { es: "Detalle técnico", en: "Technical detail" },
+  "toast.close": { es: "Cerrar aviso", en: "Close notification" },
+  "toast.region": { es: "Avisos", en: "Notifications" },
   "toast.error.retry": { es: "Reintentar", en: "Retry" },
   "toast.error.dismiss": { es: "Descartar", en: "Dismiss" },
 
@@ -366,24 +421,32 @@ const messages = {
   "downloads.error": { es: "Error", en: "Error" },
   "downloads.cancelled": { es: "Cancelada", en: "Cancelled" },
   "downloads.toastQueuedTitle": {
-    es: "Descarga agregada",
+    es: "Descarga añadida",
     en: "Download queued",
   },
+  "downloads.toastQueuedManyTitle": {
+    es: "{count} descargas añadidas",
+    en: "{count} downloads queued",
+  },
   "downloads.toastQueuedBody": {
-    es: "La descarga fue enviada a la cola.",
-    en: "The download was added to the queue.",
+    es: "Ya está en la cola de descargas.",
+    en: "It's in the download queue.",
+  },
+  "downloads.toastQueuedManyBody": {
+    es: "Ya están en la cola de descargas.",
+    en: "They're in the download queue.",
   },
   "downloads.toastGoToDownloads": {
     es: "Ver descargas →",
     en: "View downloads →",
   },
   "downloads.toastErrorTitle": {
-    es: "Error al agregar descarga",
-    en: "Download failed",
+    es: "No se pudo añadir la descarga",
+    en: "Couldn't queue the download",
   },
   "downloads.toastErrorBody": {
-    es: "No se pudo enviar la descarga a la cola.",
-    en: "The download could not be added to the queue.",
+    es: "Inténtalo de nuevo en unos segundos.",
+    en: "Try again in a few seconds.",
   },
   "downloads.subtitle": {
     es: "Sigue el estado de las descargas, reintenta fallos y abre el contenido completado desde un solo lugar.",
@@ -425,8 +488,8 @@ const messages = {
     en: "There is no download history yet.",
   },
   "downloads.clearCompleted": {
-    es: "Limpiar completadas",
-    en: "Clear Completed",
+    es: "Limpiar historial",
+    en: "Clear history",
   },
   "downloads.downloadingCount": {
     es: "{count} descargando",
@@ -1398,7 +1461,7 @@ const messages = {
   },
   "upload.active": { es: "En curso", en: "Active" },
   "upload.history": { es: "Historial", en: "History" },
-  "upload.clearCompleted": { es: "Limpiar completadas", en: "Clear completed" },
+  "upload.clearCompleted": { es: "Limpiar historial", en: "Clear history" },
   "upload.status.queued": { es: "En cola", en: "Queued" },
   "upload.status.uploading": { es: "Subiendo", en: "Uploading" },
   "upload.status.done": { es: "Completada", en: "Done" },

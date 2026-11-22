@@ -1,4 +1,6 @@
+import { Clock } from "lucide-react";
 import type { DownloadItem } from "../hooks/useDownloads";
+import { formatEtaShort, formatSpeed, percentOf } from "../lib/progressFormat";
 
 interface DownloadRingProps {
   downloadItem: DownloadItem | undefined;
@@ -11,36 +13,18 @@ export default function DownloadRing({ downloadItem }: DownloadRingProps) {
 
   const r = 28; // Fixed radius
   const circumference = 2 * Math.PI * r;
-  const pct =
-    status === "downloading" && bytes_total > 0
-      ? Math.min(100, (bytes_done / bytes_total) * 100)
-      : 0;
-  const offset = circumference * (1 - pct / 100);
+  // Same numbers as the Downloads tab: binary units, same ETA wording.
+  // Queued → clock instead of a misleading "0%"; downloading without a known
+  // size yet → spinning arc, no percent.
+  const isQueued = status === "queued";
+  const pct = isQueued ? null : percentOf(bytes_done, bytes_total);
+  const indeterminate = !isQueued && pct == null;
+  const offset = circumference * (1 - (pct ?? (indeterminate ? 25 : 0)) / 100);
 
-  const formatSpeed = (bps: number): string => {
-    if (bps >= 1_000_000) return (bps / 1_000_000).toFixed(1) + " MB/s";
-    if (bps >= 1_000) return (bps / 1_000).toFixed(1) + " KB/s";
-    return bps.toFixed(0) + " B/s";
-  };
-
-  const formatEta = (
-    remainingBytes: number,
-    bytesPerSec: number,
-  ): string | null => {
-    if (bytesPerSec <= 0) return null;
-    const totalSeconds = Math.floor(remainingBytes / bytesPerSec);
-    const hours = Math.floor(totalSeconds / 3600);
-    const mins = Math.floor((totalSeconds % 3600) / 60);
-    if (hours > 0) return `${hours}h ${mins}m`;
-    if (mins > 0) return `${mins}m`;
-    return "< 1m";
-  };
-
-  const displaySpeed =
-    status === "downloading" && speed_bps ? formatSpeed(speed_bps) : null;
+  const displaySpeed = status === "downloading" ? formatSpeed(speed_bps) || null : null;
   const displayEta =
-    status === "downloading" && speed_bps
-      ? formatEta(bytes_total - bytes_done, speed_bps)
+    status === "downloading" && pct != null
+      ? formatEtaShort(speed_bps, bytes_total - bytes_done) || null
       : null;
 
   return (
@@ -81,12 +65,14 @@ export default function DownloadRing({ downloadItem }: DownloadRingProps) {
         {/* SVG ring */}
         <svg
           viewBox="0 0 70 70"
+          className={indeterminate ? "ui-spin" : undefined}
           style={{
             position: "absolute",
             inset: 0,
             width: "100%",
             height: "100%",
             transform: "rotate(-90deg)",
+            transformOrigin: "50% 50%",
             filter:
               "drop-shadow(0 0 5px color-mix(in srgb, var(--color-primary) 60%, transparent))",
           }}
@@ -112,11 +98,20 @@ export default function DownloadRing({ downloadItem }: DownloadRingProps) {
             strokeDashoffset={offset}
             strokeLinecap="round"
             style={{ transition: "stroke-dashoffset 0.8s ease" }}
-            className={status === "queued" ? "ring-pulse" : undefined}
+            className={isQueued ? "ring-pulse" : undefined}
           />
         </svg>
 
-        {/* Percentage text overlay */}
+        {/* Centre: percent, or a clock while queued */}
+        {isQueued ? (
+          <Clock
+            size={24}
+            strokeWidth={2.2}
+            color="#fff"
+            aria-hidden="true"
+            style={{ position: "relative", filter: "drop-shadow(0 1px 4px rgba(0,0,0,0.8))" }}
+          />
+        ) : pct != null ? (
         <div
           style={{
             position: "relative",
@@ -152,6 +147,7 @@ export default function DownloadRing({ downloadItem }: DownloadRingProps) {
             %
           </span>
         </div>
+        ) : null}
       </div>
 
       {/* Metadata pills (speed & ETA) */}
