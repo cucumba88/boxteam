@@ -57,6 +57,9 @@ jobs:
       - name: Frontend build (seed check + tsc + vite)
         run: npm run build
 
+      - name: Script tests (Telegram release)
+        run: node --test scripts/telegram-release.test.mjs
+
       - name: Cargo check
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked
 

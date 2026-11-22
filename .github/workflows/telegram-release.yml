@@ -1,0 +1,79 @@
+name: Telegram release
+
+# Announces each release on Telegram: a message with the highlights from the
+# release notes, followed by the Windows installer (.exe) uploaded as a file.
+#
+# Runs after every build of a v* tag. Each run checks whether the release is
+# complete (.exe + Linux packages attached, Docker build finished); only the
+# run that sees it complete posts, once per release (scripts/telegram-release.mjs
+# leaves a hidden marker in the release notes).
+#
+# Needs the repo secrets TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID. Without them
+# it does nothing.
+on:
+  workflow_run:
+    workflows: [Build Linux, Build Windows, Build Docker]
+    types: [completed]
+  # Manual run: re-post a release, or preview the message (dry run).
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag de la release (p. ej. v0.18.0). Vacío = la última"
+        required: false
+        default: ""
+      dry_run:
+        description: "Solo vista previa: no envía nada, deja el mensaje en el resumen"
+        type: boolean
+        default: true
+      force:
+        description: "Publicar aunque ya se hubiera publicado o falte algún build"
+        type: boolean
+        default: false
+
+# Serialise runs per release so two builds finishing together can't both post.
+concurrency:
+  group: telegram-release-${{ github.event.workflow_run.head_branch || inputs.release_tag || 'latest' }}
+  cancel-in-progress: false
+
+jobs:
+  announce:
+    # Tag builds (push of v*) and manual Windows re-runs for a release tag;
+    # never main-branch or PR builds.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       ((github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v')) ||
+        github.event.workflow_run.event == 'workflow_dispatch'))
+    # Override with the repo variable LINUX_RUNNER_LABELS (JSON array).
+    runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["self-hosted", "linux", "x64", "unraid"]') }}
+    timeout-minutes: 30
+    permissions:
+      contents: write # read the release, download the .exe, add the "posted" marker
+      actions: read # check the Docker build of the tag
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/telegram-release.mjs
+            .github/workflows/build-docker.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Post to Telegram
+        run: node scripts/telegram-release.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # A manual Windows re-run builds from main, so head_branch isn't the
+          # tag; the script then falls back to the latest release.
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.workflow_run.head_branch }}
+          APP_NAME: BoxTeam
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          FORCE: ${{ inputs.force || 'false' }}

@@ -1,0 +1,465 @@
+#!/usr/bin/env node
+// Announces a GitHub release on Telegram: one message with the highlights
+// (built from the release notes) and, right below it, the Windows installer
+// uploaded as a file (the repo is private, so GitHub links are no use to the
+// channel).
+//
+// Run by .github/workflows/telegram-release.yml whenever a build of a v* tag
+// finishes. It only posts once the release is complete (.exe and Linux
+// packages attached, Docker build finished) and only once per release: after
+// posting it appends a hidden marker to the release notes.
+//
+// Environment:
+//   GITHUB_TOKEN, GITHUB_REPOSITORY        (set by GitHub Actions)
+//   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID   (repo secrets)
+//   RELEASE_TAG      tag to announce; empty or not v* = latest release
+//   APP_NAME         app name in the message (default BoxTeam)
+//   UPLOAD_PATTERN   regex of assets uploaded to Telegram (default \.exe$)
+//   FORCE=true       post even if already posted or builds are missing
+//   DRY_RUN=true     send nothing; print the message to the log and job summary
+//   NOTES_WAIT_SECONDS   how long to wait for the release notes (default 900)
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Telegram limits: 4096 chars per message, counted in UTF-16 units over the
+// visible text (tags stripped). Bots can upload files up to 50 MB.
+export const MESSAGE_LIMIT = 4096;
+export const UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024;
+export const SENT_MARKER = "<!-- telegram: publicado -->";
+
+// ---------------------------------------------------------------------------
+// Formatting (pure, tested in telegram-release.test.mjs)
+// ---------------------------------------------------------------------------
+
+export function escapeHtml(text) {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Length as Telegram counts it: visible text in UTF-16 units. */
+export function visibleLength(html) {
+  return html
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&").length;
+}
+
+/** Inline Markdown (bold, italic, code, links) to Telegram HTML. */
+export function inlineMarkdownToHtml(text) {
+  // Pull code spans out first so nothing inside them gets formatted.
+  const codes = [];
+  let out = text.replace(/`([^`]+)`/g, (_, code) => {
+    codes.push(code);
+    return `\u0000${codes.length - 1}\u0000`;
+  });
+  out = escapeHtml(out);
+  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label, url) =>
+    `<a href="${url.replace(/"/g, "&quot;")}">${label}</a>`,
+  );
+  out = out.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  out = out.replace(/__(.+?)__/g, "<b>$1</b>");
+  out = out.replace(/(^|[^\w*])\*(?!\s)(.+?)(?<!\s)\*(?!\w)/g, "$1<i>$2</i>");
+  out = out.replace(/(^|[^\w])_(?!\s)(.+?)(?<!\s)_(?!\w)/g, "$1<i>$2</i>");
+  out = out.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${escapeHtml(codes[Number(i)])}</code>`);
+  return out;
+}
+
+/** Removes HTML comments (markers, the <!-- telegram --> block) from notes. */
+export function stripComments(markdown) {
+  return markdown.replace(/<!--[\s\S]*?-->/g, "");
+}
+
+/**
+ * Hand-written Telegram text: if the notes contain a block
+ *   <!-- telegram
+ *   ...
+ *   -->
+ * that text is used verbatim instead of the automatic summary. GitHub
+ * doesn't render it.
+ */
+export function extractTelegramOverride(body) {
+  const match = /<!--\s*telegram\s*\n([\s\S]*?)-->/.exec(body ?? "");
+  const text = match?.[1]?.trim();
+  return text ? text : null;
+}
+
+/**
+ * Converts GitHub-flavoured release notes into Telegram HTML blocks.
+ * Each block is { kind: "heading" | "item" | "text", html }.
+ */
+export function notesToBlocks(markdown) {
+  const blocks = [];
+  let paragraph = [];
+  const flush = () => {
+    if (paragraph.length) {
+      blocks.push({ kind: "text", html: inlineMarkdownToHtml(paragraph.join(" ")) });
+      paragraph = [];
+    }
+  };
+
+  for (const raw of stripComments(markdown).replace(/\r\n/g, "\n").split("\n")) {
+    const line = raw.trim();
+    if (!line) {
+      flush();
+      continue;
+    }
+    // "## Versión X — date" is already in the message header.
+    if (/^#{1,2}\s+versi[oó]n\b/i.test(line)) {
+      flush();
+      continue;
+    }
+    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+    if (heading) {
+      flush();
+      blocks.push({ kind: "heading", html: `<b>${inlineMarkdownToHtml(heading[1].replace(/\*\*/g, ""))}</b>` });
+      continue;
+    }
+    const item = /^[-*+]\s+(.*)$/.exec(line) ?? /^\d+[.)]\s+(.*)$/.exec(line);
+    if (item) {
+      flush();
+      blocks.push({ kind: "item", html: `• ${inlineMarkdownToHtml(item[1])}` });
+      continue;
+    }
+    const quote = /^>\s?(.*)$/.exec(line);
+    if (quote) {
+      flush();
+      blocks.push({ kind: "text", html: `<i>${inlineMarkdownToHtml(quote[1])}</i>` });
+      continue;
+    }
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
+      flush();
+      continue;
+    }
+    paragraph.push(line);
+  }
+  flush();
+  return blocks;
+}
+
+/** Joins blocks: blank line before headings and paragraphs, list items tight. */
+export function joinBlocks(blocks) {
+  let out = "";
+  let prev = null;
+  for (const block of blocks) {
+    if (out) {
+      const tight = block.kind === "item" && (prev === "item" || prev === "heading");
+      out += tight ? "\n" : "\n\n";
+    }
+    out += block.html;
+    prev = block.kind;
+  }
+  return out;
+}
+
+/** "v0.18.0" -> "0.18.0" */
+export function versionFromTag(tag) {
+  return tag.replace(/^v/i, "");
+}
+
+/**
+ * Builds the whole message. If the notes don't fit, whole blocks are dropped
+ * from the end (never mid-line) and a "more changes" line is added.
+ */
+export function buildReleaseMessage({
+  appName,
+  tag,
+  notes,
+  releaseUrl = null,
+  dockerImage = null,
+  uploads = [],
+  limit = MESSAGE_LIMIT,
+}) {
+  const version = versionFromTag(tag);
+  const header = `🚀 <b>${escapeHtml(appName)} ${escapeHtml(version)} ya disponible</b>`;
+
+  const footer = [];
+  if (uploads.length) {
+    const names = uploads.map((u) => u.label).join(" y ");
+    footer.push(`📥 <b>${escapeHtml(names[0].toUpperCase() + names.slice(1))}</b>: aquí abajo 👇`);
+  }
+  if (dockerImage) footer.push(`🐳 Docker: <code>${escapeHtml(`${dockerImage}:${version}`)}</code>`);
+  if (releaseUrl) footer.push(`📄 <a href="${releaseUrl}">Notas completas en GitHub</a>`);
+  const footerHtml = footer.join("\n");
+
+  const override = extractTelegramOverride(notes);
+  let blocks = override
+    ? override.split(/\n{2,}/).map((p) => ({ kind: "text", html: escapeHtml(p) }))
+    : notesToBlocks(notes ?? "");
+
+  const compose = (bs, truncated) =>
+    [header, joinBlocks(bs) + (truncated ? "\n\n<i>…y más cambios en las notas completas.</i>" : ""), footerHtml]
+      .filter((s) => s.trim())
+      .join("\n\n");
+
+  let message = compose(blocks, false);
+  if (visibleLength(message) <= limit) return message;
+
+  // Too long: drop blocks from the end, plus any heading left without items.
+  while (blocks.length) {
+    blocks = blocks.slice(0, -1);
+    while (blocks.length && blocks[blocks.length - 1].kind === "heading") blocks = blocks.slice(0, -1);
+    message = compose(blocks, true);
+    if (visibleLength(message) <= limit) return message;
+  }
+  return compose([], true);
+}
+
+/** Spanish label for an uploaded asset. */
+export function uploadLabel(name) {
+  if (/setup\.exe$|\.exe$/i.test(name)) return "el instalador de Windows";
+  if (/portable.*\.zip$/i.test(name)) return "la versión portable de Windows";
+  if (/\.AppImage$/i.test(name)) return "el AppImage de Linux";
+  if (/\.deb$/i.test(name)) return "el paquete .deb";
+  if (/\.rpm$/i.test(name)) return "el paquete .rpm";
+  return name;
+}
+
+export function uploadCaption({ appName, tag, name }) {
+  const version = versionFromTag(tag);
+  if (/\.exe$/i.test(name)) return `🪟 ${appName} ${version} para Windows (instalador)`;
+  if (/portable.*\.zip$/i.test(name)) return `🪟 ${appName} ${version} para Windows (portable)`;
+  return `${appName} ${version} · ${name}`;
+}
+
+/** Which platform builds have not attached their files yet. */
+export function missingAssets(assets) {
+  const names = assets.map((a) => a.name);
+  const missing = [];
+  if (!names.some((n) => /\.exe$/i.test(n))) missing.push("Windows (.exe)");
+  if (!names.some((n) => /\.(AppImage|deb)$/i.test(n))) missing.push("Linux (AppImage/.deb)");
+  return missing;
+}
+
+/** Docker image name as configured in build-docker.yml (oscata or boxteam). */
+export function dockerImageFromWorkflow(yaml, owner) {
+  const match = /IMAGE:\s*ghcr\.io\/\$\{\{\s*github\.repository_owner\s*\}\}\/([\w.-]+)/.exec(yaml ?? "");
+  return match ? `ghcr.io/${owner.toLowerCase()}/${match[1]}` : null;
+}
+
+// ---------------------------------------------------------------------------
+// GitHub and Telegram
+// ---------------------------------------------------------------------------
+
+const env = (name, fallback = "") => (process.env[name] ?? "").trim() || fallback;
+const truthy = (v) => /^(1|true|yes|sí|si)$/i.test(String(v ?? "").trim());
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const log = (msg) => console.log(`[telegram] ${msg}`);
+const notice = (msg) => console.log(`::notice title=Telegram::${msg}`);
+
+async function github(pathname, { method = "GET", body, accept } = {}) {
+  const res = await fetch(`https://api.github.com${pathname}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${env("GITHUB_TOKEN")}`,
+      Accept: accept ?? "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GitHub ${method} ${pathname}: ${res.status} ${await res.text()}`);
+  return accept === "application/octet-stream" ? Buffer.from(await res.arrayBuffer()) : res.json();
+}
+
+async function telegram(method, payload) {
+  const token = env("TELEGRAM_BOT_TOKEN");
+  const isForm = payload instanceof FormData;
+  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: "POST",
+    headers: isForm ? undefined : { "Content-Type": "application/json" },
+    body: isForm ? payload : JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!data.ok) {
+    const err = new Error(`Telegram ${method}: ${data.description ?? res.status}`);
+    err.description = data.description ?? "";
+    throw err;
+  }
+  return data.result;
+}
+
+async function findRelease(repo, tag) {
+  if (/^v\d/.test(tag)) return github(`/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`);
+  return github(`/repos/${repo}/releases/latest`);
+}
+
+/** Latest Docker build of the tag: "success", "failure", "pending" or null. */
+async function dockerBuildState(repo, tag) {
+  const runs = await github(
+    `/repos/${repo}/actions/workflows/build-docker.yml/runs?branch=${encodeURIComponent(tag)}&event=push&per_page=1`,
+  );
+  const run = runs?.workflow_runs?.[0];
+  if (!run) return null;
+  if (run.status !== "completed") return "pending";
+  return run.conclusion === "success" ? "success" : "failure";
+}
+
+function writeSummary(markdown) {
+  const file = env("GITHUB_STEP_SUMMARY");
+  if (file) fs.appendFileSync(file, `${markdown}\n`);
+}
+
+export async function main() {
+  const repo = env("GITHUB_REPOSITORY");
+  const [owner] = repo.split("/");
+  const appName = env("APP_NAME", "BoxTeam");
+  const force = truthy(env("FORCE"));
+  const dryRun = truthy(env("DRY_RUN"));
+  const uploadPattern = new RegExp(env("UPLOAD_PATTERN", "\\.exe$"), "i");
+  const notesWait = Number(env("NOTES_WAIT_SECONDS", "900"));
+
+  if (!dryRun && (!env("TELEGRAM_BOT_TOKEN") || !env("TELEGRAM_CHAT_ID"))) {
+    notice("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID secret missing: nothing posted.");
+    return;
+  }
+
+  let release = await findRelease(repo, env("RELEASE_TAG"));
+  if (!release) {
+    notice(`No release for "${env("RELEASE_TAG") || "latest"}" yet.`);
+    return;
+  }
+  const tag = release.tag_name;
+  log(`release ${tag} (${release.html_url})`);
+
+  // Without an explicit tag (e.g. a manual Windows re-run from main) only a
+  // recent release is announced, so an old one never gets posted by surprise.
+  const explicitTag = /^v\d/.test(env("RELEASE_TAG"));
+  const ageDays = (Date.now() - Date.parse(release.published_at ?? release.created_at)) / 86_400_000;
+  if (!explicitTag && !force && ageDays > 3) {
+    notice(`${tag} is ${Math.floor(ageDays)} days old and no tag was given: skipped.`);
+    return;
+  }
+
+  if (release.draft || release.prerelease) {
+    if (!force) {
+      notice(`${tag} is a draft or prerelease: skipped.`);
+      return;
+    }
+  }
+  if ((release.body ?? "").includes(SENT_MARKER) && !force && !dryRun) {
+    notice(`${tag} was already posted to Telegram.`);
+    return;
+  }
+
+  // Complete? Windows and Linux attach files; Docker doesn't, so check its run.
+  const missing = missingAssets(release.assets ?? []);
+  const docker = await dockerBuildState(repo, tag).catch((e) => {
+    log(`could not read Docker build: ${e.message}`);
+    return null;
+  });
+  if (!force && (missing.length || docker === "pending")) {
+    const waiting = [...missing, ...(docker === "pending" ? ["Docker"] : [])];
+    notice(`${tag}: waiting for ${waiting.join(", ")}. Will post when the last build finishes.`);
+    return;
+  }
+
+  // Notes are often added while builds run: give them a while.
+  const deadline = Date.now() + notesWait * 1000;
+  while (!stripComments(release.body ?? "").trim() && !force && Date.now() < deadline) {
+    log("release has no notes yet; waiting 30 s…");
+    await sleep(30_000);
+    release = await findRelease(repo, tag);
+  }
+  if (!stripComments(release.body ?? "").trim() && !force) {
+    throw new Error(
+      `${tag} still has no notes after ${notesWait} s. Add them and run "Telegram release" manually with the tag.`,
+    );
+  }
+
+  const repoInfo = await github(`/repos/${repo}`);
+  const isPublic = repoInfo && !repoInfo.private;
+  const dockerYaml = (() => {
+    try {
+      return fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".github/workflows/build-docker.yml"), "utf8");
+    } catch {
+      return "";
+    }
+  })();
+
+  const uploads = (release.assets ?? [])
+    .filter((a) => uploadPattern.test(a.name))
+    .filter((a) => {
+      if (a.size > UPLOAD_LIMIT_BYTES) {
+        notice(`${a.name} is ${(a.size / 1048576).toFixed(0)} MB, over Telegram's 50 MB bot upload limit: not uploaded.`);
+        return false;
+      }
+      return true;
+    })
+    .map((a) => ({ ...a, label: uploadLabel(a.name) }));
+
+  const message = buildReleaseMessage({
+    appName,
+    tag,
+    notes: release.body ?? "",
+    // Private repo: GitHub links are useless to channel members.
+    releaseUrl: isPublic ? release.html_url : null,
+    dockerImage: docker === "success" ? dockerImageFromWorkflow(dockerYaml, owner) : null,
+    uploads,
+  });
+
+  writeSummary(
+    `### Telegram message for ${tag}\n\n${dryRun ? "_Dry run: not sent._\n\n" : ""}` +
+      "```html\n" + message + "\n```\n\n" +
+      `Files: ${uploads.map((u) => `\`${u.name}\``).join(", ") || "none"}`,
+  );
+  log(`message (${visibleLength(message)} chars):\n${message}`);
+
+  if (dryRun) {
+    notice(`Dry run: the ${tag} message is in the job summary. Nothing was sent.`);
+    return;
+  }
+
+  const chatId = env("TELEGRAM_CHAT_ID");
+  let sent;
+  try {
+    sent = await telegram("sendMessage", {
+      chat_id: chatId,
+      text: message,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+    });
+  } catch (e) {
+    if (!/parse entities|can't parse/i.test(e.description ?? "")) throw e;
+    // If Telegram rejects the HTML, plain text beats no post at all.
+    log(`HTML rejected (${e.description}); sending plain text`);
+    sent = await telegram("sendMessage", {
+      chat_id: chatId,
+      text: message.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&"),
+      link_preview_options: { is_disabled: true },
+    });
+  }
+  log(`message sent (id ${sent.message_id})`);
+
+  for (const asset of uploads) {
+    log(`downloading ${asset.name}…`);
+    const bytes = await github(`/repos/${repo}/releases/assets/${asset.id}`, { accept: "application/octet-stream" });
+    const form = new FormData();
+    form.append("chat_id", chatId);
+    form.append("caption", uploadCaption({ appName, tag, name: asset.name }));
+    form.append("reply_parameters", JSON.stringify({ message_id: sent.message_id, allow_sending_without_reply: true }));
+    form.append("document", new Blob([bytes]), asset.name);
+    await telegram("sendDocument", form);
+    log(`uploaded ${asset.name}`);
+  }
+
+  // Hidden marker so the same release is never announced twice.
+  if (!(release.body ?? "").includes(SENT_MARKER)) {
+    const fresh = await findRelease(repo, tag);
+    await github(`/repos/${repo}/releases/${release.id}`, {
+      method: "PATCH",
+      body: { body: `${(fresh?.body ?? release.body ?? "").trimEnd()}\n\n${SENT_MARKER}\n` },
+    });
+  }
+  notice(`${tag} posted to Telegram${uploads.length ? ` with ${uploads.map((u) => u.name).join(", ")}` : ""}.`);
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  main().catch((e) => {
+    console.error(`::error title=Telegram::${e.message}`);
+    process.exit(1);
+  });
+}
