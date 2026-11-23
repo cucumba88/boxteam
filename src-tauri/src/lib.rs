@@ -423,6 +423,15 @@ pub fn run() {
                         }
                     }
                 }
+                // One-shot repair: titles that fell back to a category folder
+                // ("Peliculas") or were cut at a word-like tag ("¿Por Qué…").
+                // Runs after the seed steps so it also fixes seeded rows; the
+                // metadata refresh below re-matches the rows it unmatched.
+                match db.repair_misparsed_titles() {
+                    Ok(n) if n > 0 => println!("Repaired {n} mis-parsed title(s)"),
+                    Ok(_) => {}
+                    Err(e) => eprintln!("repair_misparsed_titles failed: {e}"),
+                }
                 commands::restore_download_queue(db.clone(), queue.clone());
                 commands::restore_upload_queue(db.clone(), handle.state::<uploads::SharedUploadQueue>().inner().clone());
 

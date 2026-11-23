@@ -1407,6 +1407,92 @@ impl Db {
         Ok(fixed)
     }
 
+    /// One-shot data repair for titles mangled by two parser bugs:
+    ///  - a library *category* folder used as the title fallback ("Peliculas",
+    ///    "Series HD") — then matched to some random TMDB entry;
+    ///  - a word-like tag in title case cutting the title short ("Por" read as
+    ///    the POR language code, "Real", "Cat", …).
+    ///
+    /// Re-parses every row and fixes only those whose stored title is a generic
+    /// category name, or a strict word-prefix of the new title, when the new
+    /// parse differs. Non-manual rows also drop their TMDB match so the next
+    /// metadata refresh re-matches them; manually matched rows keep their match
+    /// (the person already chose it) and only get the corrected title/year.
+    /// Runs once per install. Returns the number of rows fixed.
+    pub fn repair_misparsed_titles(&self) -> Result<usize, String> {
+        let migration_id = "data:repair-misparsed-titles:v1";
+        {
+            let conn = self.conn.lock().unwrap();
+            if Self::migration_applied(&conn, migration_id)? {
+                return Ok(0);
+            }
+        }
+
+        let rows: Vec<(i64, String, String, String, i64, String)> = {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, ftp_path, filename, COALESCE(title, ''), COALESCE(manual_match, 0),
+                            COALESCE(tmdb_title, '')
+                     FROM media_items",
+                )
+                .map_err(|e| e.to_string())?;
+            let mut out = Vec::new();
+            let mut rowset = stmt.query([]).map_err(|e| e.to_string())?;
+            while let Some(row) = rowset.next().map_err(|e| e.to_string())? {
+                out.push((
+                    row.get(0).map_err(|e| e.to_string())?,
+                    row.get(1).map_err(|e| e.to_string())?,
+                    row.get(2).map_err(|e| e.to_string())?,
+                    row.get(3).map_err(|e| e.to_string())?,
+                    row.get(4).map_err(|e| e.to_string())?,
+                    row.get(5).map_err(|e| e.to_string())?,
+                ));
+            }
+            out
+        };
+
+        let mut fixed = 0usize;
+        for (id, ftp_path, filename, stored, manual, tmdb_title) in rows {
+            let parsed = crate::parser::parse_media_path(&ftp_path, &filename);
+            let new_title = parsed.title.trim();
+            if !needs_title_repair(&stored, new_title) {
+                continue;
+            }
+            let conn = self.conn.lock().unwrap();
+            // Keep the match when the person chose it, or when TMDB already
+            // agrees with the corrected title (it was matched despite the bug).
+            let keep_match = manual != 0 || titles_equivalent(&tmdb_title, new_title);
+            let n = if keep_match {
+                conn.execute(
+                    "UPDATE media_items SET title = ?2, year = COALESCE(?3, year) WHERE id = ?1",
+                    params![id, new_title, parsed.year],
+                )
+            } else {
+                conn.execute(
+                    "UPDATE media_items SET
+                        title = ?2,
+                        year = COALESCE(?3, year),
+                        tmdb_id = NULL, imdb_id = NULL, tmdb_type = NULL,
+                        tmdb_title = NULL, tmdb_title_en = NULL, tmdb_year = NULL,
+                        tmdb_release_date = NULL, tmdb_overview = NULL, tmdb_overview_en = NULL,
+                        tmdb_poster = NULL, tmdb_poster_en = NULL, tmdb_rating = NULL,
+                        tmdb_genres = NULL, metadata_at = NULL, metadata_checked_at = NULL
+                     WHERE id = ?1",
+                    params![id, new_title, parsed.year],
+                )
+            }
+            .map_err(|e| e.to_string())?;
+            fixed += n;
+        }
+
+        {
+            let conn = self.conn.lock().unwrap();
+            Self::mark_migration_applied(&conn, migration_id)?;
+        }
+        Ok(fixed)
+    }
+
     pub fn prepare_for_app_version(&self, current_version: &str) -> Result<Option<String>, String> {
         let previous_version = self.load_app_value("last_app_version")?;
         match previous_version.as_deref() {
@@ -3834,6 +3920,52 @@ impl Db {
     }
 }
 
+/// Case- and accent-insensitive title comparison, ignoring punctuation.
+fn titles_equivalent(a: &str, b: &str) -> bool {
+    let norm = |s: &str| -> String {
+        s.to_lowercase()
+            .chars()
+            .map(|c| match c {
+                'á' | 'à' | 'ä' | 'â' => 'a',
+                'é' | 'è' | 'ë' | 'ê' => 'e',
+                'í' | 'ì' | 'ï' | 'î' => 'i',
+                'ó' | 'ò' | 'ö' | 'ô' => 'o',
+                'ú' | 'ù' | 'ü' | 'û' => 'u',
+                'ñ' => 'n',
+                other => other,
+            })
+            .filter(|c| c.is_alphanumeric())
+            .collect()
+    };
+    let (a, b) = (norm(a), norm(b));
+    !a.is_empty() && a == b
+}
+
+/// Whether a stored title is a known mis-parse that the current parser fixes:
+/// a generic category name, or a title cut short at a word-like tag.
+fn needs_title_repair(stored: &str, new_title: &str) -> bool {
+    let stored = stored.trim();
+    if new_title.is_empty() || stored.eq_ignore_ascii_case(new_title) {
+        return false;
+    }
+    if crate::parser::is_generic_category_title(new_title) {
+        return false;
+    }
+    if crate::parser::is_generic_category_title(stored) {
+        return true;
+    }
+    let s = stored.to_lowercase();
+    let n = new_title.to_lowercase();
+    // Title cut short right before a word-like tag ("Lo Que" ← "Lo Que Por Amor").
+    if s.is_empty() || n.len() <= s.len() || !n.starts_with(&s) {
+        return false;
+    }
+    n[s.len()..]
+        .split_whitespace()
+        .next()
+        .is_some_and(crate::parser::is_wordlike_tag)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4532,6 +4664,70 @@ mod tests {
 
         // One-shot: a second run is a no-op.
         assert_eq!(db.clear_leading_year_mismatches().expect("migration 2"), 0);
+    }
+
+    // ── category-folder / word-like-tag title repair ─────────────────────
+
+    #[test]
+    fn repair_misparsed_titles_fixes_generic_and_truncated_titles() {
+        let db = in_memory_db();
+        {
+            let conn = db.conn.lock().unwrap();
+            // Category folder used as title, matched to a garbage TMDB entry.
+            conn.execute(
+                "INSERT INTO media_items (id, ftp_path, filename, title, year, tmdb_id, tmdb_type, tmdb_title, media_type, manual_match)
+                 VALUES (1, '/Peliculas WEB DL Micro 1080p/¿Por Qué Me Casé Otra Vez (2026) WEB-DL MicroHD 1080p.mkv',
+                         '¿Por Qué Me Casé Otra Vez (2026) WEB-DL MicroHD 1080p.mkv', 'Peliculas', 2026, 999, 'movie', 'Películas', 'movie', 0)",
+                [],
+            ).expect("insert generic row");
+            // Same bug but manually matched: keep the match, fix the title.
+            conn.execute(
+                "INSERT INTO media_items (id, ftp_path, filename, title, year, tmdb_id, tmdb_title, media_type, manual_match)
+                 VALUES (2, '/Series HD 1080p/Por cuatro perras (2026) S01E01.mkv',
+                         'Por cuatro perras (2026) S01E01.mkv', 'Series HD', 2026, 304597, 'Por cuatro perras', 'tv', 1)",
+                [],
+            ).expect("insert manual row");
+            // Title cut at a title-case word-like tag.
+            conn.execute(
+                "INSERT INTO media_items (id, ftp_path, filename, title, year, tmdb_id, tmdb_title, media_type, manual_match)
+                 VALUES (3, '/Peliculas/Lo Que Por Amor (2020) 1080p.mkv',
+                         'Lo Que Por Amor (2020) 1080p.mkv', 'Lo Que', 2020, 555, 'Lo que', 'movie', 0)",
+                [],
+            ).expect("insert truncated row");
+            // Healthy row: untouched.
+            conn.execute(
+                "INSERT INTO media_items (id, ftp_path, filename, title, year, tmdb_id, tmdb_title, media_type, manual_match)
+                 VALUES (4, '/Peliculas/Dune (2021) 1080p.mkv', 'Dune (2021) 1080p.mkv', 'Dune', 2021, 438631, 'Dune', 'movie', 0)",
+                [],
+            ).expect("insert good row");
+            // Truncated title but TMDB already matched correctly: keep it.
+            conn.execute(
+                "INSERT INTO media_items (id, ftp_path, filename, title, year, tmdb_id, tmdb_title, media_type, manual_match)
+                 VALUES (5, '/Peliculas/Guardaespaldas por Navidad (2026) WEB DL 1080p.mkv',
+                         'Guardaespaldas por Navidad (2026) WEB DL 1080p.mkv', 'Guardaespaldas', 2026, 777, 'Guardaespaldas por navidad', 'movie', 0)",
+                [],
+            ).expect("insert already-matched truncated row");
+        }
+
+        assert_eq!(db.repair_misparsed_titles().expect("migration"), 4);
+
+        let conn = db.conn.lock().unwrap();
+        let row = |id: i64| -> (String, Option<i64>) {
+            conn.query_row(
+                "SELECT title, tmdb_id FROM media_items WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(row(1), ("Por Qué Me Casé Otra Vez".to_string(), None));
+        assert_eq!(row(2), ("Por cuatro perras".to_string(), Some(304597)));
+        assert_eq!(row(3), ("Lo Que Por Amor".to_string(), None));
+        assert_eq!(row(4), ("Dune".to_string(), Some(438631)));
+        assert_eq!(row(5), ("Guardaespaldas por Navidad".to_string(), Some(777)));
+        drop(conn);
+
+        assert_eq!(db.repair_misparsed_titles().expect("migration 2"), 0);
     }
 
     // ── watchlist QA (type-aware join, latest-season scope, profile migration) ──

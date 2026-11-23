@@ -567,7 +567,7 @@ fn parse_stem(ftp_path: Option<&str>, without_ext: &str) -> ParsedMedia {
 
     let season = filename_season.or(path_season);
 
-    let tag_pos = TAG_RE.find(&clean).map(|m| m.start()).unwrap_or(clean.len());
+    let tag_pos = first_tag_pos(&clean);
     // A "[...]" block after the title ("Cars 2 [BluRay 1080p][Castellano]") ends it.
     let bracket_pos = clean
         .char_indices()
@@ -683,7 +683,9 @@ fn parse_stem(ftp_path: Option<&str>, without_ext: &str) -> ParsedMedia {
 
     let release_type_from_filename = parse_release_type(&clean);
     let release_group = parse_release_group(without_ext).or(leading_group);
-    let languages = parse_languages(&clean);
+    // Language codes only count after the title: "¿Por Qué Me Casé…" must not
+    // yield POR (Portuguese) from the word "Por".
+    let languages = parse_languages(clean.get(title_end..).unwrap_or(&clean));
 
     // Build a list of ancestor folder names (immediate parent first, then
     // grandparent, etc.) so that tech tags found in a category folder like
@@ -797,6 +799,12 @@ fn tidy_title(raw: &str) -> String {
         let before = t.clone();
         t = t
             .trim()
+            // Spanish opening "¿" / "¡" (their closing pair is already gone with
+            // the trailing punctuation) and stray leading separators / quotes.
+            .trim_start_matches(|c: char| {
+                matches!(c, '¿' | '¡' | '-' | '–' | '—' | '"' | '\'' | '«' | '»' | '“' | '”')
+                    || c.is_whitespace()
+            })
             .trim_end_matches(|c: char| !c.is_alphanumeric() && c != ')')
             .trim()
             .to_string();
@@ -818,12 +826,92 @@ fn tidy_title(raw: &str) -> String {
 }
 
 fn normalize_generic(title: &str) -> String {
-    title
-        .to_lowercase()
-        .replace(['í', 'é'], "i")
+    fold_accents(&title.to_lowercase())
         .chars()
         .filter(|c| c.is_alphanumeric())
         .collect()
+}
+
+/// Lower-case ASCII folding of the Spanish accented vowels / ñ / ü.
+fn fold_accents(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'á' | 'à' | 'â' | 'ä' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'ô' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ñ' => 'n',
+            'Á' | 'À' | 'Â' | 'Ä' => 'A',
+            'É' | 'È' | 'Ê' | 'Ë' => 'E',
+            'Í' | 'Ì' | 'Î' | 'Ï' => 'I',
+            'Ó' | 'Ò' | 'Ô' | 'Ö' => 'O',
+            'Ú' | 'Ù' | 'Û' | 'Ü' => 'U',
+            'Ñ' => 'N',
+            other => other,
+        })
+        .collect()
+}
+
+/// Tech-tag tokens that are also ordinary words in titles ("¿Por Qué…",
+/// "Real Steel", "Cat People", "Stan & Ollie"). They only end a title when
+/// written in upper case, which is how release names spell the tag.
+const WORDLIKE_TAGS: &[&str] = &[
+    "POR", "REAL", "CAT", "CAM", "STAN", "SHO", "ITA", "LAT", "ARA", "CHI", "GER", "FRE",
+    "SPA", "ENG", "KOR", "RUS", "JPN", "DC", "DV", "NF", "SCR", "DSR", "SDR", "DD", "PROPER",
+];
+
+/// True when `word` is one of the word-like tags ("Por", "Real", "Cat", …).
+pub fn is_wordlike_tag(word: &str) -> bool {
+    WORDLIKE_TAGS.contains(&word.to_uppercase().as_str())
+}
+
+/// Byte offset of the first tech tag in `clean`, skipping word-like tags that
+/// are not upper case.
+fn first_tag_pos(clean: &str) -> usize {
+    TAG_RE
+        .find_iter(clean)
+        .find(|m| {
+            let text = m.as_str();
+            let upper = text.to_uppercase();
+            !(WORDLIKE_TAGS.contains(&upper.as_str()) && text != upper)
+        })
+        .map(|m| m.start())
+        .unwrap_or(clean.len())
+}
+
+/// Words that make up library *category* folder names ("Peliculas WEB DL
+/// Micro 1080p", "Series 4K", "Documentales Castellano"). Such a folder never
+/// names a movie or show, so it must not be used as a title fallback.
+const CATEGORY_WORDS: &[&str] = &[
+    "peliculas", "pelicula", "pelis", "movies", "films", "cine", "series", "serie", "tv",
+    "shows", "tvshows", "documentales", "documental", "documentaries", "documentary", "docus",
+    "anime", "animacion", "infantil", "infantiles", "kids", "conciertos", "musica", "music",
+    "videos", "estrenos", "colecciones", "coleccion", "sagas", "biblioteca", "library", "media",
+    "multimedia", "descargas", "downloads", "compartida",
+];
+
+/// Qualifier words that may follow a category word in a category folder name.
+const CATEGORY_QUALIFIERS: &[&str] = &[
+    "web", "dl", "webdl", "webrip", "micro", "microhd", "hd", "fullhd", "uhd", "4k", "1080p",
+    "720p", "2160p", "bdrip", "bluray", "remux", "x264", "x265", "hevc", "castellano",
+    "espanol", "latino", "vose", "vos", "dual", "multi", "y", "de", "and", "&", "hdr", "dv",
+    "nuevas", "nuevos", "antiguas", "clasicas", "clasicos", "animadas", "es", "en",
+];
+
+/// True when `title` is just a library category name ("Peliculas",
+/// "Series 4K", "Películas Castellano") rather than a real movie/show title.
+pub fn is_generic_category_title(title: &str) -> bool {
+    let folded = fold_accents(&title.to_lowercase());
+    let tokens: Vec<&str> = folded
+        .split(|c: char| c.is_whitespace() || c == '-' || c == '_' || c == '.')
+        .filter(|t| !t.is_empty())
+        .collect();
+    !tokens.is_empty()
+        && tokens.iter().any(|t| CATEGORY_WORDS.contains(t))
+        && tokens
+            .iter()
+            .all(|t| CATEGORY_WORDS.contains(t) || CATEGORY_QUALIFIERS.contains(t))
 }
 
 /// Walk up from the file's parent folder and return the first folder name that
@@ -837,7 +925,10 @@ fn title_from_folders(ftp_path: &str) -> Option<String> {
                 .to_string();
             if !NON_TITLE_FOLDER_RE.is_match(&spaced) {
                 let parsed = parse_stem(None, name);
-                if parsed.title.chars().any(char::is_alphanumeric) {
+                if parsed.title.chars().any(char::is_alphanumeric)
+                    && !is_generic_category_title(&parsed.title)
+                    && !is_generic_category_title(&spaced)
+                {
                     return Some(parsed.title);
                 }
             }
@@ -1518,4 +1609,74 @@ mod tests {
         assert_eq!(parse_media_path("", "Magnum.Opus.2019.1080p.WEB-DL.x264.mkv").title, "Magnum Opus");
         assert_eq!(parse_media_path("", "The.Bear.S03E01.1080p.HULU.WEB-DL.DDP5.1.H.264-NTb.mkv").title, "The Bear");
     }
+
+    // ── Spanish punctuation / word-like tags / category folders ───────────
+
+    #[test]
+    fn leading_inverted_question_mark_and_por_keep_the_real_title() {
+        let f = "¿Por Qué Me Casé Otra Vez (2026) WEB-DL MicroHD 1080p (2026.WEB-DL.1080P.AVC.SPA.ENG.EAC3 5.1.EAC3 5.1.SUBS).mkv";
+        let p = parse_media_path(&format!("/Peliculas WEB DL Micro 1080p/{f}"), f);
+        assert_eq!(p.title, "Por Qué Me Casé Otra Vez");
+        assert_eq!(p.year, Some(2026));
+        assert!(!p.languages.contains(&"POR".to_string()), "{:?}", p.languages);
+        assert!(p.languages.contains(&"SPA".to_string()));
+    }
+
+    #[test]
+    fn leading_inverted_exclamation_is_stripped() {
+        let f = "¡Que Viva México! (2023) 1080p WEB-DL.mkv";
+        let p = parse_media_path(&format!("/Peliculas 1080p/{f}"), f);
+        assert_eq!(p.title, "Que Viva México");
+        assert_eq!(p.year, Some(2023));
+    }
+
+    #[test]
+    fn title_case_wordlike_tags_do_not_cut_the_title() {
+        let p = parse_media_path("/Peliculas/Real Steel (2011) 1080p.mkv", "Real Steel (2011) 1080p.mkv");
+        assert_eq!(p.title, "Real Steel");
+        let p = parse_media_path("/Peliculas/Cat People (1942) 1080p.mkv", "Cat People (1942) 1080p.mkv");
+        assert_eq!(p.title, "Cat People");
+        let p = parse_media_path("", "Stan & Ollie (2018) 1080p.mkv");
+        assert_eq!(p.title, "Stan & Ollie");
+        let p = parse_media_path("", "Lo Que Por Amor (2020).mkv");
+        assert_eq!(p.title, "Lo Que Por Amor");
+    }
+
+    #[test]
+    fn upper_case_wordlike_tags_still_end_the_title() {
+        let p = parse_media_path("", "Some.Movie.SPA.ENG.1080p.mkv");
+        assert_eq!(p.title, "Some Movie");
+        assert!(p.languages.contains(&"SPA".to_string()));
+        let p = parse_media_path("", "Another.Film.REAL.PROPER.720p.mkv");
+        assert_eq!(p.title, "Another Film");
+    }
+
+    #[test]
+    fn category_folder_is_never_used_as_title() {
+        // Filename with no usable title inside a category folder: never
+        // "Peliculas"; keep whatever the filename itself says.
+        let p = parse_media_path("/Peliculas WEB DL Micro 1080p/1080p.mkv", "1080p.mkv");
+        assert_ne!(p.title, "Peliculas");
+        let p = parse_media_path("/Series 4K/Season 1/01.mkv", "01.mkv");
+        assert_ne!(p.title, "Series");
+        // A real show folder below a category folder still wins.
+        let p = parse_media_path("/Series 4K/Breaking Bad/Season 1/01.mkv", "01.mkv");
+        assert_eq!(p.title, "Breaking Bad");
+        let p = parse_media_path("/Películas Castellano/Dune (2021)/movie.mkv", "movie.mkv");
+        assert_eq!(p.title, "Dune");
+    }
+
+    #[test]
+    fn generic_category_title_detection() {
+        assert!(is_generic_category_title("Peliculas"));
+        assert!(is_generic_category_title("Películas"));
+        assert!(is_generic_category_title("Peliculas WEB DL Micro 1080p"));
+        assert!(is_generic_category_title("Series 4K"));
+        assert!(is_generic_category_title("Documentales Castellano"));
+        assert!(!is_generic_category_title("Por Qué Me Casé Otra Vez"));
+        assert!(!is_generic_category_title("Series of Unfortunate Events"));
+        assert!(!is_generic_category_title("Cinema Paradiso"));
+        assert!(!is_generic_category_title(""));
+    }
+
 }
