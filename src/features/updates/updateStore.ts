@@ -129,12 +129,27 @@ export async function checkForUpdate({ manual = false } = {}): Promise<void> {
     );
   } catch (error) {
     pending = null;
+    if (isMissingPlatformError(error)) {
+      // The release is out but this platform's package isn't attached yet
+      // (macOS is added from a Mac after publishing): nothing to install yet.
+      set({ status: "upToDate", version: null, notes: null, error: null, lastChecked: Date.now() });
+      return;
+    }
     set({
       status: manual ? "error" : "idle",
       error: manual ? errorText(error) : null,
       lastChecked: Date.now(),
     });
   }
+}
+
+/**
+ * The updater's error when latest.json has no entry for this platform, e.g.
+ * `None of the fallback platforms ["darwin-aarch64-app","darwin-aarch64"]
+ * were found in the response platforms object`.
+ */
+export function isMissingPlatformError(error: unknown): boolean {
+  return /fallback platforms|platform\b.*\bnot found|were found in the response platforms/i.test(errorText(error));
 }
 
 /** Downloads and installs the pending update, then restarts the app. */

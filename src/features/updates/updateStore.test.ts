@@ -2,7 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn(async () => {}) }));
 
-import { __resetUpdateStore, downloadPercent, getUpdateState, installUpdate } from "./updateStore";
+import {
+  __resetUpdateStore,
+  downloadPercent,
+  getUpdateState,
+  installUpdate,
+  isMissingPlatformError,
+} from "./updateStore";
 
 describe("downloadPercent", () => {
   it("is null until the size is known", () => {
@@ -52,5 +58,20 @@ describe("installUpdate", () => {
       version: "9.9.9",
       error: "signature mismatch",
     });
+  });
+});
+
+describe("isMissingPlatformError", () => {
+  it("recognises a release that has no package for this platform yet", () => {
+    expect(
+      isMissingPlatformError(
+        'None of the fallback platforms `["darwin-aarch64-app", "darwin-aarch64"]` were found in the response `platforms` object',
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves real failures alone", () => {
+    expect(isMissingPlatformError(new Error("error sending request for url"))).toBe(false);
+    expect(isMissingPlatformError("signature verification failed")).toBe(false);
   });
 });
