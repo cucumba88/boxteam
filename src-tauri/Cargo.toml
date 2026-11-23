@@ -1,6 +1,6 @@
 [package]
 name = "boxteam"
-version = "0.19.0"
+version = "0.20.0"
 description = "BoxTeam — visual media library client for FTP servers"
 authors = ["you"]
 edition = "2021"
