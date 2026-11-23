@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Announces a GitHub release on Telegram: one message with the highlights
-// (built from the release notes) and, right below it, the Windows installer
-// uploaded as a file (the repo is private, so GitHub links are no use to the
-// channel).
+// (built from the release notes), direct download links to the installers
+// and a link to the release page.
 //
 // Run by .github/workflows/telegram-release.yml whenever a build of a v* tag
 // finishes. It only posts once the release is complete (.exe and Linux
@@ -14,7 +13,6 @@
 //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID   (repo secrets)
 //   RELEASE_TAG      tag to announce; empty or not v* = latest release
 //   APP_NAME         app name in the message (default BoxTeam)
-//   UPLOAD_PATTERN   regex of assets uploaded to Telegram (default \.exe$)
 //   FORCE=true       post even if already posted or builds are missing
 //   DRY_RUN=true     send nothing; print the message to the log and job summary
 //   EDIT_MESSAGE_ID  rewrite an already posted announcement (that message id)
@@ -26,9 +24,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Telegram limits: 4096 chars per message, counted in UTF-16 units over the
-// visible text (tags stripped). Bots can upload files up to 50 MB.
+// visible text (tags stripped).
 export const MESSAGE_LIMIT = 4096;
-export const UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024;
 export const SENT_MARKER = "<!-- telegram: publicado -->";
 
 // ---------------------------------------------------------------------------
@@ -169,18 +166,21 @@ export function buildReleaseMessage({
   appName,
   tag,
   notes,
-  uploads = [],
+  downloads = [],
+  releaseUrl = null,
   limit = MESSAGE_LIMIT,
 }) {
   const version = versionFromTag(tag);
   const header = `🚀 <b>${escapeHtml(appName)} ${escapeHtml(version)} ya disponible</b>`;
 
   const footer = [];
-  if (uploads.length) {
-    const names = uploads.map((u) => u.label).join(" y ");
-    footer.push(`📥 <b>${escapeHtml(names[0].toUpperCase() + names.slice(1))}</b>: aquí abajo 👇`);
+  if (downloads.length) {
+    footer.push(
+      ["📥 <b>Descargas</b>", ...downloads.map((d) => `• <a href="${escapeAttr(d.url)}">${escapeHtml(d.label)}</a>`)].join("\n"),
+    );
   }
-  const footerHtml = footer.join("\n");
+  if (releaseUrl) footer.push(`🔗 <a href="${escapeAttr(releaseUrl)}">Notas completas en GitHub</a>`);
+  const footerHtml = footer.join("\n\n");
 
   const override = extractTelegramOverride(notes);
   let blocks = override
@@ -205,21 +205,31 @@ export function buildReleaseMessage({
   return compose([], true);
 }
 
-/** Spanish label for an uploaded asset. */
-export function uploadLabel(name) {
-  if (/setup\.exe$|\.exe$/i.test(name)) return "el instalador de Windows";
-  if (/portable.*\.zip$/i.test(name)) return "la versión portable de Windows";
-  if (/\.AppImage$/i.test(name)) return "el AppImage de Linux";
-  if (/\.deb$/i.test(name)) return "el paquete .deb";
-  if (/\.rpm$/i.test(name)) return "el paquete .rpm";
-  return name;
+function escapeAttr(url) {
+  return escapeHtml(url).replace(/"/g, "&quot;");
 }
 
-export function uploadCaption({ appName, tag, name }) {
-  const version = versionFromTag(tag);
-  if (/\.exe$/i.test(name)) return `🪟 ${appName} ${version} para Windows (instalador)`;
-  if (/portable.*\.zip$/i.test(name)) return `🪟 ${appName} ${version} para Windows (portable)`;
-  return `${appName} ${version} · ${name}`;
+/** Installers worth linking, in the order they are listed in the message. */
+const DOWNLOAD_KINDS = [
+  { test: /-setup\.exe$/i, label: "Windows (instalador)" },
+  { test: /portable.*\.zip$/i, label: "Windows (portable)" },
+  { test: /\.dmg$/i, label: "macOS (Apple Silicon)" },
+  { test: /\.AppImage$/, label: "Linux (AppImage)" },
+  { test: /\.deb$/i, label: "Linux (.deb)" },
+  { test: /\.rpm$/i, label: "Linux (.rpm)" },
+];
+
+/**
+ * Direct download links for the release's installers: [{ label, url }].
+ * Signatures, latest.json and the updater tarballs are left out.
+ */
+export function downloadLinks(assets) {
+  const links = [];
+  for (const kind of DOWNLOAD_KINDS) {
+    const asset = assets.find((a) => kind.test.test(a.name));
+    if (asset?.browser_download_url) links.push({ label: kind.label, url: asset.browser_download_url });
+  }
+  return links;
 }
 
 /** Which platform builds have not attached their files yet. */
@@ -330,11 +340,9 @@ async function explainChatError(chatId) {
 
 export async function main() {
   const repo = env("GITHUB_REPOSITORY");
-  const [owner] = repo.split("/");
   const appName = env("APP_NAME", "BoxTeam");
   const force = truthy(env("FORCE"));
   const dryRun = truthy(env("DRY_RUN"));
-  const uploadPattern = new RegExp(env("UPLOAD_PATTERN", "\\.exe$"), "i");
   const notesWait = Number(env("NOTES_WAIT_SECONDS", "900"));
 
   if (!dryRun && (!env("TELEGRAM_BOT_TOKEN") || !env("TELEGRAM_CHAT_ID"))) {
@@ -397,30 +405,17 @@ export async function main() {
   }
 
 
-  const uploads = (release.assets ?? [])
-    .filter((a) => uploadPattern.test(a.name))
-    .filter((a) => {
-      if (a.size > UPLOAD_LIMIT_BYTES) {
-        notice(`${a.name} is ${(a.size / 1048576).toFixed(0)} MB, over Telegram's 50 MB bot upload limit: not uploaded.`);
-        return false;
-      }
-      return true;
-    })
-    .map((a) => ({ ...a, label: uploadLabel(a.name) }));
-
   const message = buildReleaseMessage({
     appName,
     tag,
     notes: release.body ?? "",
-    // No GitHub links or Docker image: both would show the owner's account
-    // name, which must not appear in the group.
-    uploads,
+    downloads: downloadLinks(release.assets ?? []),
+    releaseUrl: release.html_url,
   });
 
   writeSummary(
     `### Telegram message for ${tag}\n\n${dryRun ? "_Dry run: not sent._\n\n" : ""}` +
-      "```html\n" + message + "\n```\n\n" +
-      `Files: ${uploads.map((u) => `\`${u.name}\``).join(", ") || "none"}`,
+      "```html\n" + message + "\n```",
   );
   log(`message (${visibleLength(message)} chars):\n${message}`);
 
@@ -482,18 +477,6 @@ export async function main() {
     return;
   }
 
-  for (const asset of uploads) {
-    log(`downloading ${asset.name}…`);
-    const bytes = await github(`/repos/${repo}/releases/assets/${asset.id}`, { accept: "application/octet-stream" });
-    const form = new FormData();
-    form.append("chat_id", chatId);
-    form.append("caption", uploadCaption({ appName, tag, name: asset.name }));
-    form.append("reply_parameters", JSON.stringify({ message_id: sent.message_id, allow_sending_without_reply: true }));
-    form.append("document", new Blob([bytes]), asset.name);
-    await telegram("sendDocument", form);
-    log(`uploaded ${asset.name}`);
-  }
-
   // Hidden marker so the same release is never announced twice.
   if (!(release.body ?? "").includes(SENT_MARKER)) {
     const fresh = await findRelease(repo, tag);
@@ -502,7 +485,7 @@ export async function main() {
       body: { body: `${(fresh?.body ?? release.body ?? "").trimEnd()}\n\n${SENT_MARKER}\n` },
     });
   }
-  notice(`${tag} posted to Telegram${uploads.length ? ` with ${uploads.map((u) => u.name).join(", ")}` : ""}.`);
+  notice(`${tag} posted to Telegram.`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
