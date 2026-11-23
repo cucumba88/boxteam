@@ -1,9 +1,14 @@
 #!/bin/bash
-# Builds BoxTeam for macOS on this Mac and adds it to an already published
-# GitHub release, so the in-app updater also offers that version on Mac
-# (CI only builds Windows and Linux).
+# Builds BoxTeam for macOS on this Mac and adds it to the GitHub release of
+# a tag, so the in-app updater also offers that version on Mac (CI only
+# builds Windows and Linux).
 #
 #   scripts/release-mac.sh v0.21.0
+#
+# Run it while the Release workflow is still building (the release is a
+# draft by then): the publish job then writes latest.json with macOS in it.
+# After publishing it works too, but replacing latest.json on a published
+# release lets GitHub's CDN serve the old copy (without macOS) for a while.
 #
 # Needs: the updater signing key (scripts/updater-key.sh), `gh` logged in to
 # the account that owns the repo, and the checkout at that tag.

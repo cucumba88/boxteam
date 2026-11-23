@@ -90,7 +90,7 @@ node --test scripts/*.test.mjs
 1. `npm run release:patch` (o `:minor` / `:major`): sube la versión en `package.json`, `package-lock.json` y `src-tauri/Cargo.toml` y pasa build, `cargo check` y tests. No hace commit ni tag.
 2. Commit, merge a `main` y tag `vX.Y.Z`.
 3. El tag lanza `.github/workflows/release.yml`: comprueba la versión, crea la release como borrador, pasa la CI, compila Linux (deb, rpm, AppImage) y Windows (NSIS + zip portable), publica la imagen Docker y `latest.json`, y publica la release. Si algo falla, queda en borrador y basta con relanzar los trabajos fallidos.
-4. macOS no se compila en la CI. En un Mac con la clave de firma: `git checkout vX.Y.Z && scripts/release-mac.sh vX.Y.Z` (sube el `.dmg`, el `.app.tar.gz` + `.sig` y añade macOS a `latest.json`).
+4. macOS no se compila en la CI. En un Mac con la clave de firma, en cuanto exista el borrador (mientras la CI compila): `git checkout vX.Y.Z && scripts/release-mac.sh vX.Y.Z`. Sube el `.dmg` y el `.app.tar.gz` con su `.sig`, y así el `latest.json` que se publica ya incluye macOS.
 
 ### Actualizaciones de la app
 
