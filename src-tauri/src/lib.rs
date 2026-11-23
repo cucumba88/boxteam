@@ -116,6 +116,18 @@ fn visible_main_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
     }
 }
 
+/// Background jobs only stream their per-item events (`index:progress`,
+/// `index:update`, `index:complete`…) to a *visible* main window. When the app
+/// sits in the tray or is minimised, the library rows change in SQLite but the
+/// already-loaded frontend never hears about it and keeps showing the old list
+/// until a restart. After a run that had no window to talk to, send this one
+/// cheap event to the (hidden) main window so it reloads the list from the DB.
+fn notify_library_refreshed(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        window.emit("library:refreshed", serde_json::json!({})).ok();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -439,8 +451,11 @@ pub fn run() {
                 {
                     let db_clone = db.clone();
                     let window = visible_main_window(&handle);
+                    let handle_clone = handle.clone();
                     tauri::async_runtime::spawn(async move {
+                        let silent = window.is_none();
                         commands::refresh_all_ratings_internal(db_clone, window, commands::RatingsRefreshMode::Auto).await.ok();
+                        if silent { notify_library_refreshed(&handle_clone); }
                     });
                 }
                 // Auto-backfill streaming-platform availability for any
@@ -450,8 +465,11 @@ pub fn run() {
                 {
                     let db_clone = db.clone();
                     let window = visible_main_window(&handle);
+                    let handle_clone = handle.clone();
                     tauri::async_runtime::spawn(async move {
+                        let silent = window.is_none();
                         commands::refresh_watch_providers_internal(db_clone, window).await.ok();
+                        if silent { notify_library_refreshed(&handle_clone); }
                     });
                 }
                 let last_indexed_at = db.load_last_indexed_at().ok().flatten();
@@ -466,9 +484,11 @@ pub fn run() {
                     let window = visible_main_window(&handle);
                     // Skip if a manual index (desktop or web) already runs.
                     if let Some(guard) = commands::IndexingGuard::try_acquire() {
+                        let silent = window.is_none();
                         commands::start_indexing_internal(db.clone(), window.clone(), Some(queue.clone())).await.ok();
                         drop(guard);
                         commands::refresh_all_metadata_internal(db.clone(), window, commands::MetadataRefreshMode::Auto).await.ok();
+                        if silent { notify_library_refreshed(&handle); }
                     }
                 } else if let Some(value) = last_indexed_at
                     .as_deref()
@@ -517,25 +537,33 @@ pub fn run() {
                     let Some(guard) = commands::IndexingGuard::try_acquire() else {
                         continue;
                     };
+                    let silent = window.is_none();
                     commands::start_indexing_internal(db.clone(), window.clone(), Some(queue.clone())).await.ok();
                     drop(guard);
                     commands::refresh_all_metadata_internal(db.clone(), window.clone(), commands::MetadataRefreshMode::Auto).await.ok();
+                    if silent { notify_library_refreshed(&handle); }
                     // Top up missing IMDb / TVDB ratings on every cycle.
                     // The internal guard prevents this from stacking if a
                     // previous tick is still running.
                     {
                         let db_clone = db.clone();
                         let win_clone = window.clone();
+                        let handle_clone = handle.clone();
                         tauri::async_runtime::spawn(async move {
+                            let silent = win_clone.is_none();
                             commands::refresh_all_ratings_internal(db_clone, win_clone, commands::RatingsRefreshMode::Auto).await.ok();
+                            if silent { notify_library_refreshed(&handle_clone); }
                         });
                     }
                     // Top up missing watch-providers on every cycle too.
                     {
                         let db_clone = db.clone();
                         let win_clone = window;
+                        let handle_clone = handle.clone();
                         tauri::async_runtime::spawn(async move {
+                            let silent = win_clone.is_none();
                             commands::refresh_watch_providers_internal(db_clone, win_clone).await.ok();
+                            if silent { notify_library_refreshed(&handle_clone); }
                         });
                     }
                 }
