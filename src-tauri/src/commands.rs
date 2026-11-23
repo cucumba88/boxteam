@@ -1646,7 +1646,27 @@ pub async fn start_indexing(
         Some(queue_state.inner().clone()),
     ).await;
     crate::INDEXING_RUNNING.store(false, Ordering::SeqCst);
+    if result.is_ok() {
+        spawn_post_index_topups(state.inner().clone(), Some(window));
+    }
     result
+}
+
+/// After a manual index, run the same top-ups as the automatic 15-minute
+/// cycle in `lib.rs`: missing metadata first, then IMDb/TVDB ratings and
+/// streaming platforms. This is what lets the library header offer a single
+/// "Refresh" button instead of one menu entry per job. Fire-and-forget;
+/// each job no-ops when nothing is missing and swallows its own errors
+/// (e.g. an API key not configured).
+pub fn spawn_post_index_topups(db: crate::db::Db, window: Option<tauri::WebviewWindow>) {
+    tauri::async_runtime::spawn(async move {
+        refresh_all_metadata_internal(db.clone(), window.clone()).await.ok();
+        let (db_r, win_r) = (db.clone(), window.clone());
+        tauri::async_runtime::spawn(async move {
+            refresh_all_ratings_internal(db_r, win_r, false).await.ok();
+        });
+        refresh_watch_providers_internal(db, window).await.ok();
+    });
 }
 
 #[tauri::command]

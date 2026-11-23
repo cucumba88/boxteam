@@ -37,36 +37,14 @@ const messages = {
   "library.cancel": { es: "Cancelar", en: "Cancel" },
   "library.fixMatch": { es: "Corregir coincidencia", en: "Fix Match" },
   "library.refresh": { es: "Actualizar librería", en: "Refresh Library" },
-  "library.refreshAllMetadata": {
-    es: "Actualizar metadatos faltantes",
-    en: "Refresh Missing Metadata",
+  "library.refreshShort": { es: "Actualizar", en: "Refresh" },
+  "library.refreshHelp": {
+    es: "Busca archivos nuevos en el FTP y completa carátulas, notas y plataformas que falten",
+    en: "Scans the FTP for new files and fills in missing posters, ratings and platforms",
   },
-  "library.rematchAll": { es: "Rehacer todas las coincidencias", en: "Re-Match All" },
-  "library.clearAllMetadata": {
-    es: "Limpiar metadatos",
-    en: "Clear All Metadata",
-  },
-  "library.clearing": { es: "Limpiando metadatos…", en: "Clearing metadata…" },
   "library.refreshing": {
     es: "Actualizando librería…",
     en: "Refreshing library…",
-  },
-  "library.refreshingMetadata": {
-    es: "Actualizando metadatos…",
-    en: "Refreshing metadata…",
-  },
-  "library.refreshWatchProviders": {
-    es: "Actualizar plataformas de streaming",
-    en: "Refresh Streaming Platforms",
-  },
-  "library.refreshingWatchProviders": {
-    es: "Actualizando plataformas…",
-    en: "Refreshing platforms…",
-  },
-  "library.matching": { es: "Rehaciendo coincidencias…", en: "Re-matching…" },
-  "library.rematchAllPlex": {
-    es: "Rehacer coincidencias (flujo Plex)",
-    en: "Re-Match All (Plex Flow)",
   },
   "library.page": { es: "Página", en: "Page" },
   "library.of": { es: "de", en: "of" },
@@ -133,7 +111,6 @@ const messages = {
     es: "Sin permiso de escritura en el FTP",
     en: "No write permission on the FTP server",
   },
-  "library.actions": { es: "Acciones de librería", en: "Library actions" },
   "library.openSettings": { es: "Abrir ajustes", en: "Open Settings" },
   "library.noMediaStarting": {
     es: "Aún no hay nada indexado. Actualiza la librería para escanear el FTP.",
@@ -1281,18 +1258,6 @@ const messages = {
     es: "Actualizando puntuaciones · {done}/{total}",
     en: "Refreshing ratings · {done}/{total}",
   },
-  "library.refreshRatings": {
-    es: "Actualizar puntuaciones",
-    en: "Refresh ratings",
-  },
-  "library.refreshingRatings": {
-    es: "Actualizando puntuaciones…",
-    en: "Refreshing ratings…",
-  },
-  "library.refreshRatingsHelp": {
-    es: "Vuelve a pedir las puntuaciones de IMDb (OMDb) y TVDB para todo el catálogo. Funciona en segundo plano.",
-    en: "Re-fetch IMDb (via OMDb) and TVDB ratings for the whole catalog. Runs in the background.",
-  },
 
   // Watchlist
   "watchlist.addToWatchlist": {
@@ -1647,6 +1612,93 @@ const messages = {
     en: "Web interface settings",
   },
   "reset.working": { es: "Borrando…", en: "Deleting…" },
+
+  "reset.metadataTitle": {
+    es: "Borrar metadatos y volver a buscarlos",
+    en: "Clear metadata and fetch it again",
+  },
+  "reset.metadataDescription": {
+    es: "Quita carátulas, sinopsis y notas de toda la biblioteca y vuelve a emparejar cada título con TMDB. Útil si muchos datos se han quedado mal.",
+    en: "Removes posters, overviews and ratings from the whole library and matches every title with TMDB again. Useful when a lot of data went wrong.",
+  },
+  "reset.metadataButton": { es: "Borrar metadatos", en: "Clear metadata" },
+  "reset.metadataConfirmTitle": {
+    es: "¿Borrar los metadatos de toda la biblioteca?",
+    en: "Clear metadata for the whole library?",
+  },
+  "reset.metadataConfirmDescription": {
+    es: "Después se vuelven a buscar todos en TMDB. Mientras tanto verás títulos sin carátula. Tarda unos 4 minutos por cada 1.000 títulos.",
+    en: "Everything is fetched from TMDB again afterwards. Meanwhile titles will show without posters. It takes about 4 minutes per 1,000 titles.",
+  },
+  "reset.removesMetadata": {
+    es: "Carátulas, sinopsis, notas, géneros y plataformas",
+    en: "Posters, overviews, ratings, genres and platforms",
+  },
+  "reset.keepsManualMatches": {
+    es: "Las coincidencias que corregiste a mano",
+    en: "Matches you fixed by hand",
+  },
+  "reset.keepsIndex": {
+    es: "El índice de archivos (no se vuelve a escanear el FTP)",
+    en: "The file index (the FTP is not scanned again)",
+  },
+  "reset.metadataStarted": {
+    es: "Metadatos borrados. Se están volviendo a buscar en segundo plano.",
+    en: "Metadata cleared. It's being fetched again in the background.",
+  },
+
+  "maintenance.title": {
+    es: "Mantenimiento de la biblioteca",
+    en: "Library maintenance",
+  },
+  "maintenance.description": {
+    es: "BoxTeam hace esto solo al arrancar y cada 15 minutos. Úsalo si no quieres esperar.",
+    en: "BoxTeam does this on its own at startup and every 15 minutes. Use it if you don't want to wait.",
+  },
+  "maintenance.metadataTitle": {
+    es: "Completar metadatos que faltan",
+    en: "Fill in missing metadata",
+  },
+  "maintenance.metadataDescription": {
+    es: "Busca en TMDB los títulos sin emparejar y los que no tienen carátula, sinopsis, fecha o nota.",
+    en: "Looks up unmatched titles on TMDB and those missing a poster, overview, date or rating.",
+  },
+  "maintenance.providersTitle": {
+    es: "Actualizar plataformas de streaming",
+    en: "Refresh streaming platforms",
+  },
+  "maintenance.providersDescription": {
+    es: "Descarga de TMDB en qué plataformas está cada título que aún no tenga ese dato.",
+    en: "Fetches from TMDB which platforms carry each title that doesn't have that data yet.",
+  },
+  "maintenance.rematchTitle": {
+    es: "Volver a buscar todas las coincidencias",
+    en: "Re-match every title",
+  },
+  "maintenance.rematchDescription": {
+    es: "Empareja otra vez cada título con TMDB (y Plex, si lo tienes) y sobrescribe sus datos. No toca los que corregiste a mano.",
+    en: "Matches every title with TMDB again (and Plex, if set up) and overwrites its data. Titles you fixed by hand are left alone.",
+  },
+  "maintenance.rematchConfirmTitle": {
+    es: "¿Volver a buscar todas las coincidencias?",
+    en: "Re-match every title?",
+  },
+  "maintenance.rematchConfirmDescription": {
+    es: "Se repite la búsqueda de cada título y se sobrescriben sus datos. Tarda unos 4 minutos por cada 1.000 títulos.",
+    en: "Every title is looked up again and its data overwritten. It takes about 4 minutes per 1,000 titles.",
+  },
+  "maintenance.removesAutoMatches": {
+    es: "Las coincidencias automáticas actuales, si TMDB devuelve otra",
+    en: "Current automatic matches, if TMDB returns a different one",
+  },
+  "maintenance.run": { es: "Ejecutar", en: "Run" },
+  "maintenance.rematchButton": { es: "Volver a buscar", en: "Re-match" },
+  "maintenance.running": { es: "En curso…", en: "Running…" },
+  "maintenance.done": { es: "Hecho.", en: "Done." },
+  "maintenance.started": {
+    es: "En marcha en segundo plano. Puede tardar unos minutos.",
+    en: "Running in the background. It may take a few minutes.",
+  },
 } as const;
 
 export function t(

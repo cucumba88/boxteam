@@ -87,10 +87,10 @@ function ResetRow({ title, description, buttonLabel, disabled, onClick }: ResetR
  * to find; every action goes through a ConfirmDialog.
  */
 export default function DangerZone({ language, onLibraryReset }: DangerZoneProps) {
-  const { busy, error, clearError, resetLibrary, factoryReset } = useAppReset({
-    onLibraryReset,
-  });
+  const { busy, error, clearError, resetLibrary, clearMetadata, factoryReset } =
+    useAppReset({ onLibraryReset });
   const [dialog, setDialog] = useState<ResetKind | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const close = () => {
     if (busy) return;
@@ -99,6 +99,13 @@ export default function DangerZone({ language, onLibraryReset }: DangerZoneProps
   };
 
   const confirm = async () => {
+    if (dialog === "metadata") {
+      if (await clearMetadata()) {
+        setDialog(null);
+        setNotice(t(language, "reset.metadataStarted"));
+      }
+      return;
+    }
     const ok =
       dialog === "library" ? await resetLibrary() : await factoryReset();
     if (ok && dialog === "library") setDialog(null);
@@ -151,6 +158,28 @@ export default function DangerZone({ language, onLibraryReset }: DangerZoneProps
       </div>
 
       <ResetRow
+        title={t(language, "reset.metadataTitle")}
+        description={t(language, "reset.metadataDescription")}
+        buttonLabel={t(language, "reset.metadataButton")}
+        disabled={busy !== null}
+        onClick={() => {
+          setNotice(null);
+          setDialog("metadata");
+        }}
+      />
+      {notice && (
+        <div
+          role="status"
+          style={{
+            fontSize: 12,
+            color: "var(--color-success)",
+            padding: "0 0 12px",
+          }}
+        >
+          {notice}
+        </div>
+      )}
+      <ResetRow
         title={t(language, "reset.libraryTitle")}
         description={t(language, "reset.libraryDescription")}
         buttonLabel={t(language, "reset.libraryButton")}
@@ -165,6 +194,24 @@ export default function DangerZone({ language, onLibraryReset }: DangerZoneProps
         onClick={() => setDialog("factory")}
       />
 
+      <ConfirmDialog
+        open={dialog === "metadata"}
+        title={t(language, "reset.metadataConfirmTitle")}
+        description={t(language, "reset.metadataConfirmDescription")}
+        removes={[t(language, "reset.removesMetadata")]}
+        keeps={[
+          t(language, "reset.keepsManualMatches"),
+          t(language, "reset.keepsIndex"),
+          t(language, "reset.keepsSettings"),
+        ]}
+        confirmLabel={t(language, "reset.metadataButton")}
+        busyLabel={t(language, "reset.working")}
+        cancelLabel={t(language, "common.cancel")}
+        busy={busy === "metadata"}
+        error={dialog === "metadata" ? error : null}
+        onConfirm={confirm}
+        onCancel={close}
+      />
       <ConfirmDialog
         open={dialog === "library"}
         title={t(language, "reset.libraryConfirmTitle")}

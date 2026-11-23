@@ -13,7 +13,6 @@ import {
   LayoutGrid,
   List,
   Menu,
-  MoreHorizontal,
   Pencil,
   Plus,
   Trash2,
@@ -545,11 +544,7 @@ export default function Library({
       return next;
     });
   const [showBulkFix, setShowBulkFix] = useState(false);
-  const [rematching, setRematching] = useState(false);
-  const [clearingAll, setClearingAll] = useState(false);
   const [refreshingLibrary, setRefreshingLibrary] = useState(false);
-  const [refreshingMetadata, setRefreshingMetadata] = useState(false);
-  const [refreshingWatchProviders, setRefreshingWatchProviders] = useState(false);
   const [tvShow, setTvShow] = useState<MediaItem | null>(null);
   const [fixMatchRequest, setFixMatchRequest] = useState<{
     itemIds: number[];
@@ -605,7 +600,6 @@ export default function Library({
   // user scrolling takes over quickly.
   const [pinnedLetter, setPinnedLetter] = useState<string | null>(null);
   const pinTimerRef = useRef<number | null>(null);
-  const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [showMobileNavMenu, setShowMobileNavMenu] = useState(false);
   const mobileNavMenuRef = useRef<HTMLDivElement>(null);
   const [language, setLanguage] = useState<AppLanguage>("es");
@@ -627,7 +621,6 @@ export default function Library({
     >
   >({});
   const [badgeRefreshTick, setBadgeRefreshTick] = useState(0);
-  const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const hasStartedInitialIndexRef = useRef(false);
   const badgeRequestIdRef = useRef(0);
@@ -861,93 +854,19 @@ export default function Library({
     );
   };
 
-  const runRematchAll = async () => {
-    setRematching(true);
-    setShowActionsMenu(false);
-    try {
-      await call("rematch_all");
-    } catch (error) {
-      console.error("Failed to re-match metadata:", error);
-    } finally {
-      setRematching(false);
-    }
-  };
-
-  const runRefreshRatings = async () => {
-    setShowActionsMenu(false);
-    try {
-      await call("refresh_all_ratings");
-    } catch (error) {
-      console.error("Failed to refresh ratings:", error);
-    }
-  };
-
-  const runRematchAllPlex = async () => {
-    setRematching(true);
-    setShowActionsMenu(false);
-    try {
-      // Uses the backend rematch flow, which now tries Plex->IMDb->TMDB fallback.
-      await call("rematch_all");
-    } catch (error) {
-      console.error("Failed to run Plex-assisted rematch:", error);
-    } finally {
-      setRematching(false);
-    }
-  };
-
+  // Manual refresh runs the same cycle as the automatic 15-minute one: the
+  // backend re-indexes, then tops up missing metadata, ratings and
+  // streaming platforms (see `start_indexing`).
+  const libraryBusy = isIndexing || refreshingLibrary;
   const refreshLibrary = async () => {
+    if (libraryBusy) return;
     setRefreshingLibrary(true);
-    setShowActionsMenu(false);
     try {
       await call("start_indexing");
     } catch (error) {
       console.error("Failed to refresh library:", error);
     } finally {
       setRefreshingLibrary(false);
-    }
-  };
-
-  const clearAllMetadata = async () => {
-    if (
-      !confirm(
-        "Clear ALL TMDB metadata for every item in your library? Metadata will be re-fetched on next rematch.",
-      )
-    )
-      return;
-    setClearingAll(true);
-    setShowActionsMenu(false);
-    try {
-      await call("clear_all_metadata");
-      await call("rematch_all");
-    } catch (error) {
-      console.error("Failed to clear/rematch metadata:", error);
-    } finally {
-      setClearingAll(false);
-    }
-  };
-
-  const refreshAllMetadata = async () => {
-    setRefreshingMetadata(true);
-    setShowActionsMenu(false);
-    try {
-      await call("refresh_all_metadata");
-    } catch (error) {
-      console.error("Failed to refresh missing metadata:", error);
-    } finally {
-      setRefreshingMetadata(false);
-    }
-  };
-
-  const refreshWatchProviders = async () => {
-    setRefreshingWatchProviders(true);
-    if (showDevLog) setShowLog(true);
-    setShowActionsMenu(false);
-    try {
-      await call("refresh_watch_providers");
-    } catch (error) {
-      console.error("Failed to refresh watch providers:", error);
-    } finally {
-      setRefreshingWatchProviders(false);
     }
   };
 
@@ -1527,9 +1446,6 @@ export default function Library({
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
-      if (!actionsMenuRef.current?.contains(event.target as Node)) {
-        setShowActionsMenu(false);
-      }
       if (!mobileNavMenuRef.current?.contains(event.target as Node)) {
         setShowMobileNavMenu(false);
       }
@@ -1630,11 +1546,6 @@ export default function Library({
           setTvShow(null);
           return;
         }
-        if (showActionsMenu) {
-          event.preventDefault();
-          setShowActionsMenu(false);
-          return;
-        }
         if (selecting) {
           event.preventDefault();
           exitSelect();
@@ -1664,7 +1575,6 @@ export default function Library({
     fixMatchRequest,
     selected,
     selecting,
-    showActionsMenu,
     showLog,
     showSettings,
     tvShow,
@@ -3442,309 +3352,35 @@ export default function Library({
                     />
                     {!isMobile && t(language, "library.select")}
                   </button>
-                  <div ref={actionsMenuRef} style={{ position: "relative" }}>
-                    <button
-                      onClick={() => setShowActionsMenu((open) => !open)}
-                      title={t(language, "library.actions")}
-                      aria-label={t(language, "library.actions")}
-                      aria-expanded={showActionsMenu}
-                      style={{ ...ghostBtn, padding: "7px 11px" }}
-                    >
-                      <MoreHorizontal
-                        size={16}
-                        strokeWidth={2.2}
-                        aria-hidden="true"
-                        style={{ display: "block", flexShrink: 0 }}
-                      />
-                    </button>
-
-                    {showActionsMenu && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: "calc(100% + 8px)",
-                          right: 0,
-                          minWidth: 220,
-                          padding: 6,
-                          borderRadius: "var(--radius-lg)",
-                          border:
-                            "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
-                          background:
-                            "color-mix(in srgb, var(--color-surface) 96%, transparent)",
-                          boxShadow:
-                            "0 16px 34px color-mix(in srgb, black 26%, transparent)",
-                          zIndex: 30,
-                        }}
-                      >
-                        <button
-                          onClick={refreshLibrary}
-                          disabled={
-                            isIndexing ||
-                            refreshingLibrary ||
-                            rematching ||
-                            clearingAll ||
-                            refreshingMetadata
-                          }
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "var(--radius)",
-                            border: "none",
-                            background: "transparent",
-                            color: "var(--color-text)",
-                            textAlign: "left",
-                            cursor:
-                              isIndexing ||
-                              refreshingLibrary ||
-                              rematching ||
-                              clearingAll ||
-                              refreshingMetadata
-                                ? "default"
-                                : "pointer",
-                            opacity:
-                              isIndexing ||
-                              refreshingLibrary ||
-                              rematching ||
-                              clearingAll ||
-                              refreshingMetadata
-                                ? 0.5
-                                : 1,
-                            fontSize: 13,
-                            fontWeight: 600,
-                          }}
-                        >
-                          {isIndexing || refreshingLibrary
-                            ? t(language, "library.refreshing")
-                            : t(language, "library.refresh")}
-                        </button>
-                        <button
-                          onClick={refreshAllMetadata}
-                          disabled={
-                            refreshingMetadata ||
-                            rematching ||
-                            clearingAll ||
-                            refreshingLibrary ||
-                            isIndexing
-                          }
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "var(--radius)",
-                            border: "none",
-                            background: "transparent",
-                            color: "var(--color-text)",
-                            textAlign: "left",
-                            cursor:
-                              refreshingMetadata ||
-                              rematching ||
-                              clearingAll ||
-                              refreshingLibrary ||
-                              isIndexing
-                                ? "default"
-                                : "pointer",
-                            opacity:
-                              refreshingMetadata ||
-                              rematching ||
-                              clearingAll ||
-                              refreshingLibrary ||
-                              isIndexing
-                                ? 0.5
-                                : 1,
-                            fontSize: 13,
-                            fontWeight: 600,
-                          }}
-                        >
-                          {refreshingMetadata
-                            ? t(language, "library.refreshingMetadata")
-                            : t(language, "library.refreshAllMetadata")}
-                        </button>
-                        <button
-                          onClick={refreshWatchProviders}
-                          disabled={
-                            refreshingWatchProviders ||
-                            refreshingMetadata ||
-                            rematching ||
-                            clearingAll ||
-                            refreshingLibrary ||
-                            isIndexing
-                          }
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "var(--radius)",
-                            border: "none",
-                            background: "transparent",
-                            color: "var(--color-text)",
-                            textAlign: "left",
-                            cursor:
-                              refreshingWatchProviders ||
-                              refreshingMetadata ||
-                              rematching ||
-                              clearingAll ||
-                              refreshingLibrary ||
-                              isIndexing
-                                ? "default"
-                                : "pointer",
-                            opacity:
-                              refreshingWatchProviders ||
-                              refreshingMetadata ||
-                              rematching ||
-                              clearingAll ||
-                              refreshingLibrary ||
-                              isIndexing
-                                ? 0.5
-                                : 1,
-                            fontSize: 13,
-                            fontWeight: 600,
-                          }}
-                        >
-                          {refreshingWatchProviders
-                            ? t(language, "library.refreshingWatchProviders")
-                            : t(language, "library.refreshWatchProviders")}
-                        </button>
-                        <button
-                          onClick={runRematchAll}
-                          disabled={
-                            rematching ||
-                            clearingAll ||
-                            refreshingLibrary ||
-                            refreshingMetadata
-                          }
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "var(--radius)",
-                            border: "none",
-                            background: "transparent",
-                            color: "var(--color-text)",
-                            textAlign: "left",
-                            cursor:
-                              rematching ||
-                              clearingAll ||
-                              refreshingLibrary ||
-                              refreshingMetadata
-                                ? "default"
-                                : "pointer",
-                            opacity:
-                              rematching ||
-                              clearingAll ||
-                              refreshingLibrary ||
-                              refreshingMetadata
-                                ? 0.5
-                                : 1,
-                            fontSize: 13,
-                            fontWeight: 600,
-                          }}
-                        >
-                          {rematching
-                            ? t(language, "library.matching")
-                            : t(language, "library.rematchAll")}
-                        </button>
-                        <button
-                          onClick={runRematchAllPlex}
-                          disabled={
-                            rematching ||
-                            clearingAll ||
-                            refreshingLibrary ||
-                            refreshingMetadata
-                          }
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "var(--radius)",
-                            border: "none",
-                            background: "transparent",
-                            color: "var(--color-text)",
-                            textAlign: "left",
-                            cursor:
-                              rematching ||
-                              clearingAll ||
-                              refreshingLibrary ||
-                              refreshingMetadata
-                                ? "default"
-                                : "pointer",
-                            opacity:
-                              rematching ||
-                              clearingAll ||
-                              refreshingLibrary ||
-                              refreshingMetadata
-                                ? 0.5
-                                : 1,
-                            fontSize: 13,
-                            fontWeight: 600,
-                          }}
-                        >
-                          {rematching
-                            ? t(language, "library.matching")
-                            : t(language, "library.rematchAllPlex")}
-                        </button>
-                        <button
-                          onClick={runRefreshRatings}
-                          disabled={ratingsRefresh.state === "running"}
-                          title={t(language, "library.refreshRatingsHelp")}
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "var(--radius)",
-                            border: "none",
-                            background: "transparent",
-                            color: "var(--color-text)",
-                            textAlign: "left",
-                            cursor:
-                              ratingsRefresh.state === "running"
-                                ? "default"
-                                : "pointer",
-                            opacity:
-                              ratingsRefresh.state === "running" ? 0.7 : 1,
-                            fontSize: 13,
-                            fontWeight: 600,
-                          }}
-                        >
-                          {ratingsRefresh.state === "running"
-                            ? `${t(language, "library.refreshingRatings")} (${ratingsRefresh.done}/${ratingsRefresh.total})`
-                            : t(language, "library.refreshRatings")}
-                        </button>
-                        <button
-                          onClick={clearAllMetadata}
-                          disabled={
-                            clearingAll ||
-                            rematching ||
-                            refreshingLibrary ||
-                            refreshingMetadata
-                          }
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "var(--radius)",
-                            border: "none",
-                            background: "transparent",
-                            color: "var(--color-danger)",
-                            textAlign: "left",
-                            cursor:
-                              clearingAll ||
-                              rematching ||
-                              refreshingLibrary ||
-                              refreshingMetadata
-                                ? "default"
-                                : "pointer",
-                            opacity:
-                              clearingAll ||
-                              rematching ||
-                              refreshingLibrary ||
-                              refreshingMetadata
-                                ? 0.5
-                                : 1,
-                            fontSize: 13,
-                            fontWeight: 600,
-                          }}
-                        >
-                          {clearingAll
-                            ? t(language, "library.clearing")
-                            : t(language, "library.clearAllMetadata")}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  <button
+                    onClick={refreshLibrary}
+                    disabled={libraryBusy}
+                    title={t(language, "library.refreshHelp")}
+                    aria-label={t(language, "library.refresh")}
+                    aria-busy={libraryBusy}
+                    style={{
+                      ...ghostBtn,
+                      opacity: libraryBusy ? 0.6 : 1,
+                      cursor: libraryBusy ? "default" : "pointer",
+                    }}
+                  >
+                    <RefreshCw
+                      size={14}
+                      strokeWidth={2.2}
+                      aria-hidden="true"
+                      style={{
+                        display: "block",
+                        flexShrink: 0,
+                        animation: libraryBusy
+                          ? "spin 1s linear infinite"
+                          : undefined,
+                      }}
+                    />
+                    {!isMobile &&
+                      (libraryBusy
+                        ? t(language, "library.refreshing")
+                        : t(language, "library.refreshShort"))}
+                  </button>
                 </>
               )}
             </div>

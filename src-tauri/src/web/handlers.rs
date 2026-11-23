@@ -528,8 +528,9 @@ pub async fn clear_item_metadata_handler(
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
+/// Admin only: wipes every automatic TMDB match in the library.
 pub async fn clear_all_metadata_handler(
-    AuthUser(_u): AuthUser,
+    AdminUser(_admin): AdminUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Value>> {
     state.db.clear_all_metadata().map_err(ApiError::from)?;
@@ -684,14 +685,21 @@ pub async fn start_indexing_handler(
     let window = state.app_handle.get_webview_window("main");
     tauri::async_runtime::spawn(async move {
         crate::INDEXING_RUNNING.store(true, Ordering::SeqCst);
-        crate::commands::start_indexing_internal(db.clone(), window.clone(), Some(queue)).await.ok();
+        let ok = crate::commands::start_indexing_internal(db.clone(), window.clone(), Some(queue))
+            .await
+            .is_ok();
         crate::INDEXING_RUNNING.store(false, Ordering::SeqCst);
+        if ok {
+            crate::commands::spawn_post_index_topups(db, window);
+        }
     });
     Ok(Json(serde_json::json!({"running": true, "message": "Indexing started"})))
 }
 
+/// Admin only: re-matches (and overwrites) every automatic match — long
+/// running and hammers the TMDB quota.
 pub async fn rematch_all_handler(
-    AuthUser(_u): AuthUser,
+    AdminUser(_admin): AdminUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Value>> {
     let db = state.db.clone();

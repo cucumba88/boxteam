@@ -15,6 +15,7 @@ import {
   Palette,
   Server,
   SlidersHorizontal,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import AppIcon from "../components/AppIcon";
@@ -60,6 +61,7 @@ import {
 import { SORT_OPTIONS } from "../components/FilterBar";
 import FtpTlsFields from "../components/FtpTlsFields";
 import DangerZone from "../features/reset/DangerZone";
+import LibraryMaintenance from "../features/maintenance/LibraryMaintenance";
 import { TelegramBotGuide } from "../features/uploads/TelegramBotGuide";
 import FtpPermissionsPanel, {
   FTP_CONFIG_SAVED_EVENT,
@@ -4540,6 +4542,17 @@ export default function Settings({
                     )}
                   </div>
                 )}
+              </SectionCard>
+            )}
+
+            {(isTauri() || (user && user.role === "admin")) && (
+              <SectionCard
+                icon={Wrench}
+                title={t(language, "maintenance.title")}
+                description={t(language, "maintenance.description")}
+                defaultOpen={false}
+              >
+                <LibraryMaintenance language={language} />
               </SectionCard>
             )}
 
