@@ -326,7 +326,37 @@ export function useIndexing() {
       },
     );
 
+    // Background runs (tray / minimised window) don't stream per-item events;
+    // the backend sends one `library:refreshed` when such a run finishes.
+    // Reload the list from the DB then — or, if the window is still hidden,
+    // as soon as it is shown again, so several runs collapse into one fetch.
+    let staleWhileHidden = false;
+    const reloadFromDb = () => {
+      staleWhileHidden = false;
+      invalidateMedia();
+      call<MediaItem[]>("get_all_media")
+        .then((loaded) => {
+          rebuildIndex(loaded);
+          setItems(loaded);
+        })
+        .catch(console.error);
+    };
+    const unRefreshed = listen("library:refreshed", () => {
+      if (document.visibilityState === "visible") reloadFromDb();
+      else staleWhileHidden = true;
+    });
+    const onVisible = () => {
+      if (staleWhileHidden && document.visibilityState === "visible") {
+        reloadFromDb();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+
     return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      unRefreshed.then((f) => f());
       unProgress.then((f) => f());
       unUpdate.then((f) => f());
       unError.then((f) => f());
