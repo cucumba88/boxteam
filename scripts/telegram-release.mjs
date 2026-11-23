@@ -250,6 +250,16 @@ export function missingAssets(assets) {
 }
 
 /**
+ * The other form of a group id to try on "chat not found": Telegram Web shows
+ * supergroups as -N while the Bot API wants -100N, and a basic group's id
+ * (-N) must not get the -100 prefix. null when the id isn't numeric.
+ */
+export function alternateChatId(chatId) {
+  if (!/^-\d+$/.test(chatId)) return null;
+  return chatId.startsWith("-100") && chatId.length > 5 ? `-${chatId.slice(4)}` : `-100${chatId.slice(1)}`;
+}
+
+/**
  * Cleans up a chat id pasted into the secret: surrounding quotes/spaces, a
  * leading "#", or a whole Telegram Web URL (https://web.telegram.org/k/#-123).
  */
@@ -448,14 +458,12 @@ export async function main() {
         link_preview_options: { is_disabled: true },
       });
     } catch (e) {
-      // A basic group that became a supergroup gets a new -100… id; and
-      // Telegram Web K shows supergroups as #-N, while the Bot API wants -100N.
+      // A basic group that became a supergroup gets a new -100… id; and the
+      // id may have been pasted with or without the -100 prefix by mistake.
       const migrated = e.parameters?.migrate_to_chat_id;
-      const supergroupId = /chat not found/i.test(e.description ?? "") && /^-\d+$/.test(chatId) && !chatId.startsWith("-100")
-        ? `-100${chatId.slice(1)}`
-        : null;
-      if (!migrated && !supergroupId) throw e;
-      chatId = String(migrated ?? supergroupId);
+      const alternate = /chat not found/i.test(e.description ?? "") ? alternateChatId(chatId) : null;
+      if (!migrated && !alternate) throw e;
+      chatId = String(migrated ?? alternate);
       log(`retrying with chat id ${chatId}`);
       sent = await telegram(editMessageId ? "editMessageText" : "sendMessage", {
         chat_id: chatId,
