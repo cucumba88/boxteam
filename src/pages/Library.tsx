@@ -65,6 +65,8 @@ import UploadsTab from "../features/uploads/UploadsTab";
 import { useUploads } from "../features/uploads/useUploads";
 import Toaster, { pushToast } from "../components/Toaster";
 import IndexErrorToast from "../components/IndexErrorToast";
+import UpdateToast from "../features/updates/UpdateToast";
+import { useAutoUpdateCheck } from "../features/updates/useAutoUpdateCheck";
 import { useQuitHandler } from "../hooks/useQuitHandler";
 import VirtualMediaGrid, {
   type JumpRequest,
@@ -398,6 +400,7 @@ export default function Library({
    *  so we must NOT push "/" first or history gets duplicate entries. */
   onLeaveUsers?: () => void;
 }) {
+  useAutoUpdateCheck();
   const showDevLog = import.meta.env.DEV;
   const {
     items,
@@ -3755,6 +3758,7 @@ export default function Library({
         language={language}
         onGoToDownloads={() => switchTab("downloads")}
       >
+        <UpdateToast language={language} />
         {indexError && (
           <IndexErrorToast
             message={indexError}

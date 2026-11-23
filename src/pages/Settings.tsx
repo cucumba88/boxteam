@@ -15,6 +15,7 @@ import {
   Palette,
   Server,
   SlidersHorizontal,
+  Sparkles,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -63,6 +64,7 @@ import { SORT_OPTIONS } from "../components/FilterBar";
 import FtpTlsFields from "../components/FtpTlsFields";
 import DangerZone from "../features/reset/DangerZone";
 import LibraryMaintenance from "../features/maintenance/LibraryMaintenance";
+import AppUpdatesSection from "../features/updates/AppUpdatesSection";
 import { TelegramBotGuide } from "../features/uploads/TelegramBotGuide";
 import TelegramSetupWizard from "../features/notifications/TelegramSetupWizard";
 import {
@@ -4549,6 +4551,18 @@ export default function Settings({
                 defaultOpen={false}
               >
                 <LibraryMaintenance language={language} />
+              </SectionCard>
+            )}
+
+            {isTauri() && (
+              <SectionCard
+                group="system"
+                keywords="actualizar actualizaciones version nueva instalar update updates new version install"
+                icon={Sparkles}
+                title={t(language, "updates.title")}
+                description={t(language, "updates.description")}
+              >
+                <AppUpdatesSection language={language} currentVersion={appVersion} />
               </SectionCard>
             )}
 
