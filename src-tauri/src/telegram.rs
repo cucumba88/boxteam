@@ -37,12 +37,16 @@ pub async fn send_message(token: &str, chat_id: &str, text: &str) -> Result<(), 
     if !response.status().is_success() {
         let status = response.status();
         let body_text = response.text().await.unwrap_or_default();
-        let description = serde_json::from_str::<serde_json::Value>(&body_text)
-            .ok()
+        let parsed = serde_json::from_str::<serde_json::Value>(&body_text).ok();
+        let migrate_to = parsed
+            .as_ref()
+            .and_then(|v| v["parameters"]["migrate_to_chat_id"].as_i64());
+        let description = parsed
+            .as_ref()
             .and_then(|v| v["description"].as_str().map(str::to_string))
             .unwrap_or(body_text);
         eprintln!("[telegram] sendMessage failed (status={status}): {description}");
-        return Err(humanize_error(status.as_u16(), &description));
+        return Err(humanize_send_error(status.as_u16(), &description, chat_id, migrate_to));
     }
 
     Ok(())
@@ -56,6 +60,10 @@ pub fn humanize_error(status: u16, description: &str) -> String {
         "El token del bot no es válido. Cópialo de nuevo desde @BotFather.".to_string()
     } else if d.contains("chat not found") {
         "Telegram no encuentra ese chat. Revisa el Chat ID y que el bot esté dentro del canal o grupo.".to_string()
+    } else if d.contains("upgraded to a supergroup") {
+        "Ese grupo se convirtió en supergrupo y ahora tiene otro Chat ID. Pulsa Detectar o usa el ID que empieza por -100.".to_string()
+    } else if d.contains("chat_write_forbidden") || d.contains("have no rights to send") {
+        "El bot está en el grupo pero no tiene permiso para escribir. Hazlo administrador del grupo (o deja que los miembros envíen mensajes) y vuelve a probar.".to_string()
     } else if d.contains("not a member") || d.contains("need administrator rights") || d.contains("not enough rights") {
         "El bot no puede publicar ahí. Añádelo al canal como administrador con permiso para publicar.".to_string()
     } else if d.contains("bot was blocked") {
@@ -67,6 +75,45 @@ pub fn humanize_error(status: u16, description: &str) -> String {
     } else {
         format!("Telegram ha respondido con un error ({status}): {description}")
     }
+}
+
+/// Like [`humanize_error`] but with the context of the failed send, so the
+/// message can point at the exact Chat ID to use instead.
+fn humanize_send_error(status: u16, description: &str, chat_id: &str, migrate_to: Option<i64>) -> String {
+    if let Some(new_id) = migrate_to {
+        return format!(
+            "Ese grupo se convirtió en supergrupo y su Chat ID ha cambiado. Usa {new_id}."
+        );
+    }
+    let base = humanize_error(status, description);
+    if description.to_lowercase().contains("chat not found") {
+        if let Some(fixed) = supergroup_id_hint(chat_id) {
+            return format!(
+                "{base} Si es un supergrupo o un canal, el ID para bots lleva el prefijo -100: prueba con {fixed}."
+            );
+        }
+    }
+    base
+}
+
+/// Telegram Web shows supergroups and channels as `#-1234567890`, but the Bot
+/// API id is `-100` + that number. Returns the `-100…` form when `chat_id`
+/// looks like the web-client variant (negative, numeric, no `-100` prefix and
+/// long enough not to be a legacy basic-group id).
+fn supergroup_id_hint(chat_id: &str) -> Option<String> {
+    let digits = chat_id.trim().strip_prefix('-')?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if digits.starts_with("100") && digits.len() >= 13 {
+        return None;
+    }
+    // Basic groups have ids below 10 digits in practice; supergroup/channel
+    // internal ids are 10 digits.
+    if digits.len() < 10 {
+        return None;
+    }
+    Some(format!("-100{digits}"))
 }
 
 /// Calls `getUpdates` on the given bot token and returns the chat_id of the most
@@ -128,7 +175,13 @@ fn chat_from_update(upd: &serde_json::Value) -> Option<DetectedChat> {
     ];
     KEYS.iter().find_map(|k| {
         let chat = &upd[*k]["chat"];
-        let id = chat["id"].as_i64()?;
+        let mut id = chat["id"].as_i64()?;
+        // A basic group upgraded to a supergroup leaves a service message
+        // in the old chat pointing at the new id; the old one stops working.
+        let migrated = upd[*k]["migrate_to_chat_id"].as_i64();
+        if let Some(new_id) = migrated {
+            id = new_id;
+        }
         let title = chat["title"]
             .as_str()
             .map(str::to_string)
@@ -138,13 +191,31 @@ fn chat_from_update(upd: &serde_json::Value) -> Option<DetectedChat> {
         Some(DetectedChat {
             id: id.to_string(),
             title,
-            kind: chat["type"].as_str().unwrap_or("").to_string(),
+            kind: if migrated.is_some() {
+                "supergroup".to_string()
+            } else {
+                chat["type"].as_str().unwrap_or("").to_string()
+            },
         })
     })
 }
 
-/// Latest chat that interacted with the bot (newest update first). Used by
-/// Settings → "Detectar" so admins don't have to call getUpdates by hand.
+/// Picks the chat to suggest from a batch of updates (oldest first, as
+/// Telegram returns them). Groups and channels win over private chats: the
+/// admin usually also talks to the bot in private, and that newer private
+/// message used to hide the group they actually wanted.
+fn pick_detected_chat(updates: &[serde_json::Value]) -> Option<DetectedChat> {
+    let chats: Vec<DetectedChat> = updates.iter().rev().filter_map(chat_from_update).collect();
+    chats
+        .iter()
+        .find(|c| c.kind != "private")
+        .or_else(|| chats.first())
+        .cloned()
+}
+
+/// Latest group/channel that interacted with the bot, or the latest private
+/// chat if there is none. Used by Settings → "Detectar" so admins don't have
+/// to call getUpdates by hand.
 pub async fn detect_latest_chat(token: &str) -> Result<Option<DetectedChat>, String> {
     if token.is_empty() {
         return Err("Token de bot vacío".to_string());
@@ -169,7 +240,7 @@ pub async fn detect_latest_chat(token: &str) -> Result<Option<DetectedChat>, Str
     }
     Ok(json["result"]
         .as_array()
-        .and_then(|arr| arr.iter().rev().find_map(chat_from_update)))
+        .and_then(|arr| pick_detected_chat(arr)))
 }
 
 /// Telegram caption hard limit for `sendPhoto`. `sendMessage` allows 4096
@@ -299,6 +370,44 @@ mod tests {
         assert!(humanize_error(401, "Unauthorized").contains("token"));
         assert!(humanize_error(403, "Forbidden: bot is not a member of the channel chat").contains("administrador"));
         assert!(humanize_error(400, "Bad Request: something new").contains("something new"));
+    }
+
+    #[test]
+    fn humanizes_write_forbidden_and_migration() {
+        assert!(humanize_error(400, "Bad Request: CHAT_WRITE_FORBIDDEN").contains("administrador"));
+        assert!(humanize_send_error(400, "Bad Request: group chat was upgraded to a supergroup chat", "-4242", Some(-1004242))
+            .contains("-1004242"));
+    }
+
+    #[test]
+    fn chat_not_found_suggests_minus_100_prefix() {
+        let msg = humanize_send_error(400, "Bad Request: chat not found", "-1234567890", None);
+        assert!(msg.contains("-1001234567890"), "{msg}");
+        // Already prefixed, a basic group or a username: no hint.
+        assert_eq!(supergroup_id_hint("-1001234567890"), None);
+        assert_eq!(supergroup_id_hint("-4242"), None);
+        assert_eq!(supergroup_id_hint("@canal"), None);
+        assert_eq!(supergroup_id_hint("123456789"), None);
+    }
+
+    #[test]
+    fn detect_prefers_group_over_newer_private_chat() {
+        let updates = vec![
+            serde_json::json!({"update_id": 1, "my_chat_member": {"chat": {"id": -1001234567890_i64, "title": "Subidas", "type": "supergroup"}}}),
+            serde_json::json!({"update_id": 2, "message": {"chat": {"id": 123456789, "first_name": "Alex", "type": "private"}}}),
+        ];
+        assert_eq!(pick_detected_chat(&updates).map(|c| c.id), Some("-1001234567890".to_string()));
+        assert_eq!(pick_detected_chat(&updates[1..]).map(|c| c.kind), Some("private".to_string()));
+    }
+
+    #[test]
+    fn detect_follows_group_migration() {
+        let upd = serde_json::json!({
+            "update_id": 5,
+            "message": {"chat": {"id": -4242, "title": "Familia", "type": "group"}, "migrate_to_chat_id": -1004242_i64}
+        });
+        let c = chat_from_update(&upd).expect("chat");
+        assert_eq!((c.id.as_str(), c.kind.as_str()), ("-1004242", "supergroup"));
     }
 
     #[test]

@@ -4052,7 +4052,7 @@ export default function Settings({
                               disabled={
                                 telegramDetecting || !form.telegram_bot_token
                               }
-                              title="Busca el último canal, grupo o chat que ha escrito al bot"
+                              title="Busca el último canal o grupo que ha escrito al bot (si no hay ninguno, tu chat privado)"
                               style={{
                                 ...ghostBtn,
                                 flexShrink: 0,
@@ -4066,8 +4066,10 @@ export default function Settings({
                             </button>
                           </div>
                           <span style={subtextStyle}>
-                            Añade el bot al canal como administrador (o al
-                            grupo), publica cualquier mensaje y pulsa Detectar.
+                            Añade el bot al canal o grupo como administrador,
+                            publica un mensaje (en un grupo, menciona al bot)
+                            y pulsa Detectar. Si copias el ID de Telegram Web,
+                            añade -100 delante: #-1234567890 es -1001234567890.
                           </span>
                         </div>
                         <div
