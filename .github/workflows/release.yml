@@ -8,7 +8,8 @@ name: Release
 #   3. linux, windows  installers, attached to the draft
 #   4. docker   image (vX.Y.Z, X.Y, latest); after the installers, so `latest`
 #               never moves to a release that failed
-#   5. publish  draft → published release (latest)
+#   5. publish  latest.json for the in-app updater, then draft → published
+#               release (latest)
 #
 # If any step fails the release stays a draft (invisible to users), nothing is
 # announced on Telegram (telegram-release.yml runs only after a successful
@@ -65,12 +66,16 @@ jobs:
   linux:
     needs: checks
     uses: ./.github/workflows/build-linux.yml
+    # The updater signing key (TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]).
+    secrets: inherit
     permissions:
       contents: write
 
   windows:
     needs: checks
     uses: ./.github/workflows/build-windows.yml
+    # The updater signing key (TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]).
+    secrets: inherit
     permissions:
       contents: write
 
@@ -99,6 +104,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # Before publishing: releases/latest/download/latest.json must never
+      # point at a release without it.
+      - name: Updater manifest (latest.json)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node _release/scripts/release-assets.mjs updater-manifest "${{ github.ref_name }}"
 
       - name: Publish the release
         env:

@@ -10,6 +10,9 @@
 //       Attaches the files, replacing assets with the same name.
 //   node scripts/release-assets.mjs publish <tag>
 //       Turns the draft into a published release marked as latest.
+//   node scripts/release-assets.mjs updater-manifest <tag>
+//       Builds latest.json for the in-app updater from the release's
+//       installers + their .sig files and attaches it to the release.
 //
 // Uses the REST API with fetch (no gh CLI needed on the runner). Drafts are
 // invisible to GET /releases/tags/{tag}, so the release is found by listing.
@@ -55,6 +58,40 @@ export function versionMismatches(tag, { packageJson, cargoToml }) {
 /** The release of a tag among a page of releases (drafts included). */
 export function findRelease(releases, tag) {
   return releases.find((r) => r.tag_name === tag) ?? null;
+}
+
+
+/**
+ * Updater platform of a release asset (Tauri `latest.json` keys), or null
+ * when the asset isn't something the in-app updater installs.
+ */
+export function updaterPlatform(assetName) {
+  if (/-setup\.exe$/i.test(assetName)) return "windows-x86_64";
+  if (/\.AppImage$/.test(assetName)) return "linux-x86_64";
+  if (/_aarch64\.app\.tar\.gz$/.test(assetName)) return "darwin-aarch64";
+  if (/_x64\.app\.tar\.gz$/.test(assetName)) return "darwin-x86_64";
+  return null;
+}
+
+/**
+ * The `latest.json` the Tauri updater reads. `signatures` maps an asset name
+ * to the contents of its `<name>.sig`; installers without a signature are
+ * left out (the updater would reject them anyway).
+ */
+export function buildUpdaterManifest({ repo, tag, notes, pubDate, assetNames, signatures }) {
+  const version = versionFromTag(tag);
+  if (!version) throw new Error(`«${tag}» no es un tag de release (vX.Y.Z)`);
+  const platforms = {};
+  for (const name of assetNames) {
+    const platform = updaterPlatform(name);
+    const signature = signatures[name];
+    if (!platform || !signature) continue;
+    platforms[platform] = {
+      signature: signature.trim(),
+      url: `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(name)}`,
+    };
+  }
+  return { version, notes: notes ?? "", pub_date: pubDate, platforms };
 }
 
 // ---------------------------------------------------------------------------
@@ -153,14 +190,54 @@ async function publish(repo, tag) {
   console.log(`[release] ${tag} publicada`);
 }
 
+
+async function downloadAsset(repo, asset) {
+  const res = await fetch(`${API}/repos/${repo}/releases/assets/${asset.id}`, {
+    headers: {
+      Authorization: `Bearer ${env("GITHUB_TOKEN")}`,
+      Accept: "application/octet-stream",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+  if (!res.ok) throw new Error(`descarga de ${asset.name} → ${res.status}`);
+  return res.text();
+}
+
+async function updaterManifest(repo, tag) {
+  const release = await requireRelease(repo, tag);
+  const names = release.assets.map((a) => a.name);
+  const signatures = {};
+  for (const asset of release.assets) {
+    if (!asset.name.endsWith(".sig")) continue;
+    const target = asset.name.slice(0, -".sig".length);
+    if (updaterPlatform(target)) signatures[target] = await downloadAsset(repo, asset);
+  }
+  const manifest = buildUpdaterManifest({
+    repo,
+    tag,
+    notes: release.body,
+    pubDate: new Date().toISOString(),
+    assetNames: names,
+    signatures,
+  });
+  const platforms = Object.keys(manifest.platforms);
+  if (!platforms.length) throw new Error(`${tag} no tiene instaladores firmados (.sig) para el actualizador`);
+  const dir = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || process.env.TMPDIR || "/tmp", "updater-"));
+  const file = path.join(dir, "latest.json");
+  fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+  await upload(repo, tag, [file]);
+  console.log(`[release] ${tag}: latest.json con ${platforms.join(", ")}`);
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const [command, tag, ...files] = argv;
-  if (!tag) throw new Error("uso: release-assets.mjs <check-version|ensure-draft|upload|publish> <tag> [archivos…]");
+  if (!tag) throw new Error("uso: release-assets.mjs <check-version|ensure-draft|upload|publish|updater-manifest> <tag> [archivos…]");
   if (command === "check-version") return checkVersion(tag);
   const repo = env("GITHUB_REPOSITORY");
   if (command === "ensure-draft") return ensureDraft(repo, tag);
   if (command === "upload") return upload(repo, tag, files);
   if (command === "publish") return publish(repo, tag);
+  if (command === "updater-manifest") return updaterManifest(repo, tag);
   throw new Error(`comando desconocido: ${command}`);
 }
 

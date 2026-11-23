@@ -26,7 +26,8 @@ cd "$(dirname "$0")/.."
 
 npm install
 
-npm run tauri build
+source scripts/updater-key.sh
+npm run tauri build -- "${TAURI_BUILD_FLAGS[@]}"
 
 echo ""
 echo "DMG:"
