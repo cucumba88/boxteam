@@ -500,6 +500,11 @@ export default function Library({
   const [showSettings, setShowSettings] = useState<boolean>(
     () => !isTauri() && typeof window !== "undefined" && window.location.pathname === "/ajustes",
   );
+  // Section Settings should open on (e.g. the Uploads tab's Telegram guide).
+  const [settingsFocus, setSettingsFocus] = useState<"telegram" | null>(null);
+  useEffect(() => {
+    if (!showSettings) setSettingsFocus(null);
+  }, [showSettings]);
   const [showLog, setShowLog] = useState(false);
   const [selected, setSelected] = useState<MediaItem | null>(null);
   const [selectedGroupedView, setSelectedGroupedView] = useState(false);
@@ -2870,6 +2875,8 @@ export default function Library({
           <Suspense fallback={null}>
             <Settings
               language={language}
+              canUpload={uploadsTabVisible}
+              focusSection={settingsFocus}
               onClose={() => setShowSettings(false)}
               onLibraryReset={() => {
                 resetItems();
@@ -3918,6 +3925,10 @@ export default function Library({
                 onRetryAllFailed={retryAllFailed}
                 onDelete={deleteUpload}
                 onClearCompleted={clearCompletedUploads}
+                onOpenTelegramSettings={() => {
+                  setSettingsFocus("telegram");
+                  setShowSettings(true);
+                }}
               />
             ) : activeTab === "downloads" ? (
               <DownloadsTab

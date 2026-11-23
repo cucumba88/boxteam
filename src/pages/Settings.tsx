@@ -3,6 +3,7 @@ import {
   AppWindow,
   ArchiveRestore,
   Bell,
+  CircleHelp,
   Download,
   FolderCog,
   FolderTree,
@@ -59,6 +60,7 @@ import {
 import { SORT_OPTIONS } from "../components/FilterBar";
 import FtpTlsFields from "../components/FtpTlsFields";
 import DangerZone from "../features/reset/DangerZone";
+import { TelegramBotGuide } from "../features/uploads/TelegramBotGuide";
 import FtpPermissionsPanel, {
   FTP_CONFIG_SAVED_EVENT,
 } from "../components/FtpPermissionsPanel";
@@ -278,12 +280,15 @@ function SectionCard({
   description,
   children,
   defaultOpen = true,
+  anchor,
 }: {
   icon: LucideIcon;
   title: string;
   description: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
+  /** Stable handle so other screens can deep-link to this section. */
+  anchor?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const sectionId = `settings-section-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
@@ -300,6 +305,7 @@ function SectionCard({
     <section
       id={sectionId}
       data-settings-section={title}
+      data-settings-anchor={anchor}
       style={{ ...sectionCardStyle, scrollMarginTop: 12 }}
     >
       <button
@@ -793,9 +799,15 @@ export default function Settings({
   language,
   onClose,
   onLibraryReset,
+  canUpload = false,
+  focusSection = null,
 }: {
   language: AppLanguage;
   onClose: () => void;
+  /** FTP write probe passed: shows the Telegram bot setup guide. */
+  canUpload?: boolean;
+  /** Section to open and scroll to on mount. */
+  focusSection?: "telegram" | null;
   /** Library wiped from the danger zone: clear the grid and re-index. */
   onLibraryReset?: () => void;
 }) {
@@ -883,6 +895,7 @@ export default function Settings({
 
   // Personal subscription state
   const [notifTab, setNotifTab] = useState<"bot" | "personal">("bot");
+  const [showBotGuide, setShowBotGuide] = useState(false);
   const [personalSub, setPersonalSub] = useState<TelegramSub | null>(null);
   const [notifLinkState, setNotifLinkState] =
     useState<NotifLinkState>("unlinked");
@@ -995,6 +1008,21 @@ export default function Settings({
   useEffect(() => {
     if (!canWrite) setNotifTab("personal");
   }, [canWrite]);
+
+  // Deep link (Uploads tab → "Abrir Ajustes de Telegram"): once the form has
+  // rendered, open the Notifications card on the announcement-channel tab.
+  const focusedRef = useRef(false);
+  const formReady = form !== null;
+  useEffect(() => {
+    if (focusSection !== "telegram" || !formReady || focusedRef.current) return;
+    focusedRef.current = true;
+    if (canWrite) setNotifTab("bot");
+    const id = panelRef.current?.querySelector<HTMLElement>(
+      '[data-settings-anchor="telegram"]',
+    )?.id;
+    if (id) jumpToSection(id);
+    // One-shot (ref): jumpToSection is recreated on every render.
+  }, [focusSection, formReady, canWrite]);
 
 
   const changeDbPath = async () => {
@@ -3860,6 +3888,7 @@ export default function Settings({
             {isTauri() && (
               <SectionCard
                 icon={Bell}
+                anchor="telegram"
                 title="Notificaciones"
                 description={
                   canWrite
@@ -3926,6 +3955,62 @@ export default function Settings({
                     )}
                     {canWrite && (
                       <>
+                        {canUpload && (
+                          <div
+                            style={{
+                              borderRadius: "var(--radius)",
+                              border:
+                                "1px solid color-mix(in srgb, var(--color-primary) 30%, var(--color-border))",
+                              background:
+                                "color-mix(in srgb, var(--color-primary) 6%, transparent)",
+                              padding: "0.6rem 0.8rem",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 12,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              aria-expanded={showBotGuide}
+                              onClick={() => setShowBotGuide((v) => !v)}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                background: "none",
+                                border: "none",
+                                padding: 0,
+                                cursor: "pointer",
+                                textAlign: "left",
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: "var(--color-primary)",
+                              }}
+                            >
+                              <CircleHelp size={15} aria-hidden="true" />
+                              <span style={{ flex: 1 }}>
+                                {showBotGuide
+                                  ? t(language, "telegramGuide.toggleHide")
+                                  : t(language, "telegramGuide.toggleShow")}
+                              </span>
+                              <span
+                                aria-hidden="true"
+                                style={{
+                                  display: "flex",
+                                  transform: showBotGuide
+                                    ? "rotate(0deg)"
+                                    : "rotate(-90deg)",
+                                  transition: "transform 0.15s ease",
+                                }}
+                              >
+                                <AppIcon name="chevron-down" size={14} />
+                              </span>
+                            </button>
+                            {showBotGuide && (
+                              <TelegramBotGuide language={language} />
+                            )}
+                          </div>
+                        )}
                         <div style={fieldStyle}>
                           <label style={labelStyle} htmlFor="settings-field-28">
                             Token del bot de Telegram

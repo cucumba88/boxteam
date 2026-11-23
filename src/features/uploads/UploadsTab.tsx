@@ -6,6 +6,7 @@ import {
   Clock,
   Loader2,
   RefreshCw,
+  Send,
   Trash2,
   Upload,
   X,
@@ -23,6 +24,7 @@ import {
 } from "../transfers/TransferUI";
 import UploadCard from "./UploadCard";
 import UploadPrepareModal from "./UploadPrepareModal";
+import TelegramGuideDialog from "./TelegramBotGuide";
 import type { UploadItem } from "./types";
 import type { AppLanguage } from "../../utils/mediaLanguage";
 import { t } from "../../utils/i18n";
@@ -38,6 +40,8 @@ interface UploadsTabProps {
   onRetryAllFailed?: () => Promise<unknown>;
   onDelete: (id: number, deleteRemote?: boolean) => void;
   onClearCompleted: () => void;
+  /** Opens Settings on the Telegram announcement channel. */
+  onOpenTelegramSettings?: () => void;
 }
 
 export default function UploadsTab({
@@ -50,8 +54,10 @@ export default function UploadsTab({
   onRetryAllFailed,
   onDelete,
   onClearCompleted,
+  onOpenTelegramSettings,
 }: UploadsTabProps) {
   const [showModal, setShowModal] = useState(false);
+  const [showTelegramGuide, setShowTelegramGuide] = useState(false);
   const [ffprobeAvailable, setFfprobeAvailable] = useState(false);
   const checkingWrite = writeOk === null;
 
@@ -138,6 +144,15 @@ export default function UploadsTab({
         }
         right={
           <>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={Send}
+              onClick={() => setShowTelegramGuide(true)}
+              title={t(language, "telegramGuide.title")}
+            >
+              {t(language, "telegramGuide.button")}
+            </Button>
             {errors > 0 && onRetryAllFailed && (
               <Button
                 size="sm"
@@ -315,6 +330,19 @@ export default function UploadsTab({
             onQueued={() => setShowModal(false)}
           />
         )}
+        <TelegramGuideDialog
+          open={showTelegramGuide}
+          language={language}
+          onClose={() => setShowTelegramGuide(false)}
+          onOpenSettings={
+            onOpenTelegramSettings
+              ? () => {
+                  setShowTelegramGuide(false);
+                  onOpenTelegramSettings();
+                }
+              : undefined
+          }
+        />
       </TransferBody>
     </div>
   );

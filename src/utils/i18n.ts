@@ -1502,6 +1502,79 @@ const messages = {
   "telegram.ok": { es: "Mensaje enviado", en: "Message sent" },
   "telegram.error": { es: "Error al enviar", en: "Send failed" },
 
+  // Telegram bot setup guide (Uploads tab + Settings → Notificaciones)
+  "telegramGuide.button": { es: "Avisos de Telegram", en: "Telegram notices" },
+  "telegramGuide.title": {
+    es: "Cómo configurar el bot de Telegram",
+    en: "How to set up the Telegram bot",
+  },
+  "telegramGuide.intro": {
+    es: "Cuando termina una subida, BoxTeam la anuncia en un canal o grupo de Telegram con el póster, la calidad, el audio y los subtítulos. Para eso necesitas un bot tuyo. Se configura una sola vez y tardas unos 5 minutos.",
+    en: "When an upload finishes, BoxTeam announces it in a Telegram channel or group with the poster, quality, audio and subtitles. You need your own bot for that. It's a one-time setup that takes about 5 minutes.",
+  },
+  "telegramGuide.toggleShow": {
+    es: "¿Cómo configuro el bot? Ver la guía paso a paso",
+    en: "How do I set up the bot? See the step-by-step guide",
+  },
+  "telegramGuide.toggleHide": { es: "Ocultar la guía", en: "Hide the guide" },
+  "telegramGuide.step1Title": { es: "Crea el bot", en: "Create the bot" },
+  "telegramGuide.step1Body": {
+    es: "Abre Telegram, busca @BotFather (la cuenta oficial, con la marca azul) y envíale /newbot. Ponle un nombre y un usuario que termine en «bot», por ejemplo MisSubidasBot.",
+    en: "Open Telegram, search for @BotFather (the official account, with the blue check) and send it /newbot. Give it a name and a username ending in “bot”, for example MyUploadsBot.",
+  },
+  "telegramGuide.step2Title": { es: "Copia el token", en: "Copy the token" },
+  "telegramGuide.step2Body": {
+    es: "BotFather te responde con un token parecido a «1234567890:ABCdef…». Cópialo entero y no lo compartas: quien lo tenga puede escribir en nombre de tu bot.",
+    en: "BotFather replies with a token like “1234567890:ABCdef…”. Copy all of it and keep it private: anyone who has it can post as your bot.",
+  },
+  "telegramGuide.step3Title": {
+    es: "Añade el bot al canal o grupo",
+    en: "Add the bot to the channel or group",
+  },
+  "telegramGuide.step3Body": {
+    es: "En un canal: Administradores → Añadir administrador → busca tu bot y deja activado «Publicar mensajes». En un grupo basta con añadirlo como miembro.",
+    en: "In a channel: Administrators → Add administrator → find your bot and keep “Post messages” enabled. In a group, adding it as a member is enough.",
+  },
+  "telegramGuide.step4Title": {
+    es: "Pega el token en BoxTeam",
+    en: "Paste the token into BoxTeam",
+  },
+  "telegramGuide.step4Body": {
+    es: "Ve a Ajustes → Notificaciones → Canal de anuncios y pégalo en «Token del bot de Telegram».",
+    en: "Go to Settings → Notifications → Announcement channel and paste it into “Telegram bot token”.",
+  },
+  "telegramGuide.step5Title": { es: "Detecta el chat", en: "Detect the chat" },
+  "telegramGuide.step5Body": {
+    es: "Publica cualquier mensaje en el canal o grupo y pulsa «Detectar»: BoxTeam rellena el Chat ID solo. En canales y supergrupos empieza por -100. Si no lo encuentra, publica otro mensaje y vuelve a pulsar.",
+    en: "Post any message in the channel or group and press “Detect”: BoxTeam fills in the Chat ID for you. For channels and supergroups it starts with -100. If it isn't found, post another message and press it again.",
+  },
+  "telegramGuide.step6Title": { es: "Prueba y guarda", en: "Test and save" },
+  "telegramGuide.step6Body": {
+    es: "Pulsa «Enviar ejemplo de subida» para ver cómo quedará el aviso y después guarda los cambios. A partir de ahí, cada subida terminada se anuncia sola.",
+    en: "Press “Send upload sample” to see what the notice looks like, then save your changes. From then on, every finished upload is announced automatically.",
+  },
+  "telegramGuide.tipsTitle": { es: "Bueno saberlo", en: "Good to know" },
+  "telegramGuide.tipBatch": {
+    es: "Si subes una temporada entera, los episodios se anuncian juntos en un único mensaje cuando termina el último.",
+    en: "If you upload a whole season, the episodes are announced together in a single message when the last one finishes.",
+  },
+  "telegramGuide.tipDisable": {
+    es: "Para dejar de enviar avisos, borra el token y guarda.",
+    en: "To stop sending notices, clear the token and save.",
+  },
+  "telegramGuide.tipWebhook": {
+    es: "Si «Detectar» dice que el bot tiene un webhook activo, ese bot ya lo usa otro servicio: crea uno nuevo o escribe el Chat ID a mano.",
+    en: "If “Detect” says the bot has an active webhook, another service is already using that bot: create a new one or type the Chat ID by hand.",
+  },
+  "telegramGuide.tipPersonal": {
+    es: "¿Quieres avisos solo para ti? En la pestaña «Mis avisos» puedes vincular un bot personal: créalo igual con @BotFather, envíale un mensaje y pega su token.",
+    en: "Want notices just for you? In the “My notices” tab you can link a personal bot: create it the same way with @BotFather, send it a message and paste its token.",
+  },
+  "telegramGuide.openSettings": {
+    es: "Abrir Ajustes de Telegram",
+    en: "Open Telegram settings",
+  },
+
   "reset.sectionTitle": { es: "Zona de peligro", en: "Danger zone" },
   "reset.sectionDescription": {
     es: "Acciones que borran datos de BoxTeam. Los archivos del FTP nunca se tocan.",
