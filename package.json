@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "vite",
     "webui:watch": "vite build --watch",
-    "verify:seed-db": "node ./scripts/verify-seed-sanitized.mjs",
-    "build": "npm run verify:seed-db && tsc && vite build",
+    "build": "tsc && vite build",
     "build:portable:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-portable-windows.ps1",
     "preview": "vite preview",
     "docker:build": "bash ./scripts/docker.sh build",
@@ -17,8 +16,6 @@
     "docker:logs": "bash ./scripts/docker.sh logs",
     "tauri": "tauri",
     "app:dev": "tauri dev",
-    "seed-db": "node ./scripts/update-starter-db.mjs",
-    "seed-sync": "node ./scripts/sync-local-db-from-seed.mjs",
     "release": "node ./scripts/publish.mjs",
     "release:patch": "node ./scripts/publish.mjs patch",
     "release:minor": "node ./scripts/publish.mjs minor",
