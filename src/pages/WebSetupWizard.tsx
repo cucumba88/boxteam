@@ -201,7 +201,7 @@ function StepFTP({
 
           <div>
             <label style={labelStyle}>Ruta raíz</label>
-            <input style={inputStyle} value={form.ftp_root} onChange={set("ftp_root")} placeholder="/Compartida" required />
+            <input style={inputStyle} value={form.ftp_root} onChange={set("ftp_root")} placeholder="/" required />
           </div>
 
           <FtpTlsFields
@@ -346,7 +346,7 @@ export default function WebSetupWizard({ onComplete }: WebSetupWizardProps) {
     ftp_port: 21,
     ftp_user: "",
     ftp_pass: "",
-    ftp_root: "/Compartida",
+    ftp_root: "/",
     ftp_tls: false,
     ftp_tls_accept_invalid_certs: false,
   });

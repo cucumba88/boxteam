@@ -183,7 +183,7 @@ export default function StepFTP({
               style={wizardInput}
               value={form.ftp_root}
               onChange={set("ftp_root")}
-              placeholder="/Compartida"
+              placeholder="/"
               spellCheck={false}
             />
             <span style={wizardSubtext}>{t(language, "wizard.rootPathHelp")}</span>
