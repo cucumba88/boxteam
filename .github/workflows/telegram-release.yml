@@ -1,7 +1,8 @@
 name: Telegram release
 
 # Announces each release on Telegram: a message with the highlights from the
-# release notes, followed by the Windows installer (.exe) uploaded as a file.
+# release notes, direct download links to the installers and a link to the
+# release page.
 #
 # Runs after a successful Release run (release.yml) of a v* tag: by then every
 # check and build has passed and the release has been published. The script
@@ -53,7 +54,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.LINUX_RUNNER_LABELS || '["self-hosted", "linux", "x64", "unraid"]') }}
     timeout-minutes: 30
     permissions:
-      contents: write # read the release, download the .exe, add the "posted" marker
+      contents: write # read the release, add the "posted" marker
       actions: read # check the Docker build of the tag
 
     steps:
