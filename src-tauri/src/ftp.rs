@@ -480,11 +480,21 @@ pub async fn list_raw_sub(
 /// within), every discovered sub-directory is pushed back to the shared queue,
 /// so all N workers stay busy at every depth level.  This gives an O(N× depth)
 /// speed-up on wide server libraries.
+/// Result of a full FTP crawl. `failed_dirs` lists the directories whose
+/// listing failed (even after a reconnect) or that no worker could reach:
+/// their contents are unknown, so callers must not treat media under them
+/// as deleted from the server.
+#[derive(Debug, Default)]
+pub struct FtpCrawl {
+    pub files: Vec<FtpFile>,
+    pub failed_dirs: Vec<String>,
+}
+
 pub async fn list_files(
     ep: &FtpEndpoint,
     root: &str,
     on_log: Arc<dyn Fn(String) + Send + Sync>,
-) -> Result<Vec<FtpFile>, String> {
+) -> Result<FtpCrawl, String> {
     const MAX_WORKERS: usize = 8;
     reject_control_chars("Ruta raíz", root)?;
 
@@ -507,6 +517,8 @@ pub async fn list_files(
         Arc::new(tokio::sync::Mutex::new(top_dirs.into()));
     let all_files: Arc<tokio::sync::Mutex<Vec<FtpFile>>> =
         Arc::new(tokio::sync::Mutex::new(root_files));
+    let failed_dirs: Arc<tokio::sync::Mutex<Vec<String>>> =
+        Arc::new(tokio::sync::Mutex::new(Vec::new()));
     // Number of workers currently holding an item from the queue.
     // When queue is empty AND busy == 0, the crawl is complete.
     let busy = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -519,6 +531,7 @@ pub async fn list_files(
     for _ in 0..MAX_WORKERS {
         let queue = queue.clone();
         let all_files = all_files.clone();
+        let failed_dirs = failed_dirs.clone();
         let busy = busy.clone();
         let wake = wake.clone();
         let log = on_log.clone();
@@ -613,7 +626,10 @@ pub async fn list_files(
 
                         all_files.lock().await.extend(files);
                     }
-                    Err(e) => log(format!("⚠ {e}")),
+                    Err(e) => {
+                        log(format!("⚠ {e}"));
+                        failed_dirs.lock().await.push(dir);
+                    }
                 }
 
                 busy.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
@@ -631,13 +647,33 @@ pub async fn list_files(
     let result = Arc::try_unwrap(all_files)
         .map_err(|_| "Internal error: Arc still shared after crawl".to_string())?
         .into_inner();
+    let mut failed = Arc::try_unwrap(failed_dirs)
+        .map_err(|_| "Internal error: Arc still shared after crawl".to_string())?
+        .into_inner();
+    // Directories still queued were never listed (e.g. every worker failed
+    // to connect because the server caps simultaneous logins).
+    failed.extend(queue.lock().await.drain(..));
 
     if result.is_empty() {
+        if !failed.is_empty() {
+            return Err(format!(
+                "No se pudo listar {} carpeta(s) del FTP; revisa la conexión e inténtalo de nuevo.",
+                failed.len()
+            ));
+        }
         return Err("FTP crawl returned 0 media files. Check your Root Path setting.".into());
     }
 
-    on_log(format!("Crawl complete — {} media files found", result.len()));
-    Ok(result)
+    if failed.is_empty() {
+        on_log(format!("Crawl complete — {} media files found", result.len()));
+    } else {
+        on_log(format!(
+            "⚠ Crawl incomplete — {} media files found, {} folder(s) could not be listed",
+            result.len(),
+            failed.len()
+        ));
+    }
+    Ok(FtpCrawl { files: result, failed_dirs: failed })
 }
 
 /// CWD into `path` then LIST it, returning (subdirectories, media files).

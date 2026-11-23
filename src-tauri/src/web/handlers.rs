@@ -9,7 +9,7 @@ use serde_json::Value;
 use tauri::Manager;
 
 use crate::web::{
-    auth::{AdminUser, ApiError, ApiResult, AuthUser, generate_otp, hash_password,
+    auth::{AdminUser, ApiError, ApiResult, AuthUser, EditorUser, generate_otp, hash_password,
            new_session_token, verify_password},
     client_ip::client_ip,
     dto::*,
@@ -676,19 +676,19 @@ pub async fn start_indexing_handler(
     AuthUser(_u): AuthUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Value>> {
-    use std::sync::atomic::Ordering;
-    if crate::INDEXING_RUNNING.load(Ordering::SeqCst) {
+    // Take the flag before spawning so two quick requests can't both start
+    // a pass (the old load-then-store left a window between them).
+    let Some(guard) = crate::commands::IndexingGuard::try_acquire() else {
         return Ok(Json(serde_json::json!({"running": true, "message": "Already in progress"})));
-    }
+    };
     let db = state.db.clone();
     let queue = state.queue.clone();
     let window = state.app_handle.get_webview_window("main");
     tauri::async_runtime::spawn(async move {
-        crate::INDEXING_RUNNING.store(true, Ordering::SeqCst);
         let ok = crate::commands::start_indexing_internal(db.clone(), window.clone(), Some(queue))
             .await
             .is_ok();
-        crate::INDEXING_RUNNING.store(false, Ordering::SeqCst);
+        drop(guard);
         if ok {
             crate::commands::spawn_post_index_topups(db, window);
         }
@@ -717,7 +717,7 @@ pub async fn refresh_all_metadata_handler(
     let db = state.db.clone();
     let window = state.app_handle.get_webview_window("main");
     tauri::async_runtime::spawn(async move {
-        crate::commands::refresh_all_metadata_internal(db, window)
+        crate::commands::refresh_all_metadata_internal(db, window, crate::commands::MetadataRefreshMode::Manual)
             .await
             .ok();
     });
@@ -767,8 +767,10 @@ pub async fn get_settings(
     Ok(Json(cfg))
 }
 
+/// Admins and editors only: a plain user used to be able to rewrite every
+/// setting here, FTP host included, although the UI shows them read-only.
 pub async fn put_settings(
-    AuthUser(_u): AuthUser,
+    EditorUser(_u): EditorUser,
     State(state): State<AppState>,
     Json(mut config): Json<crate::db::AppConfig>,
 ) -> ApiResult<Json<Value>> {
@@ -782,10 +784,24 @@ pub async fn put_settings(
     let keep = |provided: &str, stored: fn(&crate::db::AppConfig) -> &String| {
         redact::preserve(provided, current.as_ref().map(stored).map_or("", String::as_str))
     };
-    config.ftp_pass = keep(&config.ftp_pass, |c| &c.ftp_pass);
+    // Secrets sent to a stored address stay bound to it (see
+    // redact::preserve_for_endpoint): moving the FTP host, Emby or Plex URL
+    // requires typing the credential again.
+    let stored = |f: fn(&crate::db::AppConfig) -> &String| {
+        current.as_ref().map(f).map_or("", String::as_str)
+    };
+    let same_ftp = current.as_ref().is_none_or(|c| {
+        c.ftp_host == config.ftp_host && c.ftp_port == config.ftp_port && c.ftp_user == config.ftp_user
+    });
+    let same_emby = current.as_ref().is_none_or(|c| c.emby_url == config.emby_url);
+    let same_plex = current.as_ref().is_none_or(|c| c.plex_url == config.plex_url);
+    config.ftp_pass = redact::preserve_for_endpoint(&config.ftp_pass, stored(|c| &c.ftp_pass), same_ftp, "la contraseña FTP")
+        .map_err(ApiError::bad_request)?;
+    config.emby_api_key = redact::preserve_for_endpoint(&config.emby_api_key, stored(|c| &c.emby_api_key), same_emby, "la clave de Emby")
+        .map_err(ApiError::bad_request)?;
+    config.plex_token = redact::preserve_for_endpoint(&config.plex_token, stored(|c| &c.plex_token), same_plex, "el token de Plex")
+        .map_err(ApiError::bad_request)?;
     config.tmdb_api_key = keep(&config.tmdb_api_key, |c| &c.tmdb_api_key);
-    config.emby_api_key = keep(&config.emby_api_key, |c| &c.emby_api_key);
-    config.plex_token = keep(&config.plex_token, |c| &c.plex_token);
     config.telegram_bot_token = keep(&config.telegram_bot_token, |c| &c.telegram_bot_token);
     config.omdb_api_key = keep(&config.omdb_api_key, |c| &c.omdb_api_key);
     config.tvdb_api_key = keep(&config.tvdb_api_key, |c| &c.tvdb_api_key);
@@ -918,12 +934,16 @@ pub async fn get_webgui_config_handler(
 }
 
 pub async fn put_webgui_config_handler(
-    AuthUser(_u): AuthUser,
+    EditorUser(_u): EditorUser,
     State(state): State<AppState>,
     Json(mut config): Json<crate::db::WebGuiConfig>,
 ) -> ApiResult<Json<Value>> {
     let current = state.db.load_webgui_config().map_err(ApiError::from)?;
-    config.smtp_pass = redact::preserve(&config.smtp_pass, &current.smtp_pass);
+    let same_smtp = current.smtp_host == config.smtp_host
+        && current.smtp_port == config.smtp_port
+        && current.smtp_user == config.smtp_user;
+    config.smtp_pass = redact::preserve_for_endpoint(&config.smtp_pass, &current.smtp_pass, same_smtp, "la contraseña SMTP")
+        .map_err(ApiError::bad_request)?;
     state.db.save_webgui_config(&config).map_err(ApiError::from)?;
     Ok(Json(serde_json::json!({"ok": true, "note": "Restart required for bind changes to take effect"})))
 }

@@ -150,7 +150,7 @@ fn perf_bench_large_library() {
 
     let paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
     let t = Instant::now();
-    let removed = db.delete_media_missing_from_scan(&paths).expect("cleanup");
+    let removed = db.delete_media_missing_from_scan(&paths, &[]).expect("cleanup");
     let cleanup = ms(t);
 
     let rss_before = rss_kb().unwrap_or(0);

@@ -208,6 +208,17 @@ const LEGACY_DATA_DIR_NAME: &str = "oscata-tauri";
 pub const PORTABLE_MARKER: &str = ".boxteam-portable";
 const LEGACY_PORTABLE_MARKER: &str = ".oscata-portable";
 
+/// True when the RFC 3339 timestamp `raw` is less than `window` before `now`.
+pub(crate) fn checked_within(
+    raw: Option<&str>,
+    window: chrono::Duration,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    raw.and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
+        .map(|t| now - t.with_timezone(&chrono::Utc) < window)
+        .unwrap_or(false)
+}
+
 #[derive(Clone)]
 pub struct Db {
     conn: Arc<Mutex<Connection>>,
@@ -703,6 +714,10 @@ impl Db {
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN tvdb_id INTEGER;").ok();
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN tvdb_rating REAL;").ok();
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN ratings_fetched_at TEXT;").ok();
+        // Last time a TMDB lookup for this row got a definitive answer (a match
+        // or "no match"). Lets the background passes wait before asking again
+        // for titles TMDB doesn't know or has incomplete data for.
+        conn.execute_batch("ALTER TABLE media_items ADD COLUMN metadata_checked_at TEXT;").ok();
         // Streaming-platform availability: JSON array of TMDB watch-provider IDs
         // (flatrate / subscription) for the configured region. See tmdb::fetch_watch_providers.
         conn.execute_batch("ALTER TABLE media_items ADD COLUMN tmdb_watch_providers TEXT;").ok();
@@ -1377,7 +1392,7 @@ impl Db {
                         tmdb_title = NULL, tmdb_title_en = NULL, tmdb_year = NULL,
                         tmdb_release_date = NULL, tmdb_overview = NULL, tmdb_overview_en = NULL,
                         tmdb_poster = NULL, tmdb_poster_en = NULL, tmdb_rating = NULL,
-                        tmdb_genres = NULL, metadata_at = NULL, manual_match = 0
+                        tmdb_genres = NULL, metadata_at = NULL, metadata_checked_at = NULL, manual_match = 0
                      WHERE id = ?1",
                     params![id, parsed.title, parsed.year],
                 )
@@ -2564,9 +2579,49 @@ impl Db {
             .map_err(|e| e.to_string())
     }
 
+    /// Stamp `metadata_checked_at` on rows whose TMDB lookup got a definitive
+    /// answer (a match, or "no match"). Network errors must not call this, so
+    /// they are retried on the next cycle.
+    pub fn mark_metadata_checked(&self, ids: &[i64]) -> Result<(), String> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut stmt = conn
+            .prepare("UPDATE media_items SET metadata_checked_at = ?1 WHERE id = ?2")
+            .map_err(|e| e.to_string())?;
+        for id in ids {
+            stmt.execute(params![now, id]).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// `id → metadata_checked_at` for rows that have one.
+    pub fn metadata_checked_map(&self) -> Result<std::collections::HashMap<i64, String>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, metadata_checked_at FROM media_items WHERE metadata_checked_at IS NOT NULL")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<std::collections::HashMap<_, _>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+
+    /// Remove rows whose file was not seen by the latest FTP crawl.
+    ///
+    /// `unlisted_dirs` are folders the crawl could not list (timeout, dropped
+    /// connection…). Their contents are unknown, so rows under them are kept:
+    /// otherwise one failed LIST wiped every title in that folder — TMDB
+    /// matches, manual matches and ratings included — and the next scan had
+    /// to fetch it all again.
     pub fn delete_media_missing_from_scan(
         &self,
         current_paths: &[String],
+        unlisted_dirs: &[String],
     ) -> Result<usize, String> {
         let conn = self.conn.lock().unwrap();
 
@@ -2574,7 +2629,11 @@ impl Db {
             "CREATE TEMP TABLE IF NOT EXISTS current_scan_paths (
                 ftp_path TEXT PRIMARY KEY
              );
-             DELETE FROM current_scan_paths;",
+             DELETE FROM current_scan_paths;
+             CREATE TEMP TABLE IF NOT EXISTS unlisted_scan_dirs (
+                prefix TEXT PRIMARY KEY
+             );
+             DELETE FROM unlisted_scan_dirs;",
         )
         .map_err(|e| e.to_string())?;
 
@@ -2591,21 +2650,33 @@ impl Db {
                     .execute(params![path])
                     .map_err(|e| e.to_string())?;
             }
+            let mut dir_stmt = conn
+                .prepare("INSERT OR IGNORE INTO unlisted_scan_dirs (prefix) VALUES (?1)")
+                .map_err(|e| e.to_string())?;
+            for dir in unlisted_dirs {
+                let prefix = format!("{}/", dir.trim_end_matches('/'));
+                dir_stmt.execute(params![prefix]).map_err(|e| e.to_string())?;
+            }
         }
         conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
 
+        // substr() instead of LIKE: folder names may contain % or _.
         let deleted = conn
             .execute(
                 "DELETE FROM media_items
                  WHERE NOT EXISTS (
                      SELECT 1 FROM current_scan_paths scan
                      WHERE scan.ftp_path = media_items.ftp_path
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM unlisted_scan_dirs d
+                     WHERE substr(media_items.ftp_path, 1, length(d.prefix)) = d.prefix
                  )",
                 [],
             )
             .map_err(|e| e.to_string())?;
 
-        conn.execute("DELETE FROM current_scan_paths", [])
+        conn.execute_batch("DELETE FROM current_scan_paths; DELETE FROM unlisted_scan_dirs;")
             .map_err(|e| e.to_string())?;
 
         Ok(deleted)
@@ -2661,12 +2732,13 @@ impl Db {
             media_type: Option<String>,
             metadata_at: Option<String>,
             manual_match: i64,
+            metadata_checked_at: Option<String>,
         }
 
         // Primary lookup: exact ftp_path match (fast path).
         let mut existing = conn
             .query_row(
-                "SELECT title, year, season, episode, episode_end, media_type, metadata_at, COALESCE(manual_match, 0)
+                "SELECT title, year, season, episode, episode_end, media_type, metadata_at, COALESCE(manual_match, 0), metadata_checked_at
                  FROM media_items WHERE ftp_path = ?1 LIMIT 1",
                 params![path],
                 |r| {
@@ -2679,6 +2751,7 @@ impl Db {
                         media_type: r.get(5)?,
                         metadata_at: r.get(6)?,
                         manual_match: r.get(7)?,
+                        metadata_checked_at: r.get(8)?,
                     })
                 },
             )
@@ -2712,7 +2785,7 @@ impl Db {
                 // Now read it back as an existing row.
                 existing = conn
                     .query_row(
-                        "SELECT title, year, season, episode, episode_end, media_type, metadata_at, COALESCE(manual_match, 0)
+                        "SELECT title, year, season, episode, episode_end, media_type, metadata_at, COALESCE(manual_match, 0), metadata_checked_at
                          FROM media_items WHERE id = ?1",
                         params![id],
                         |r| {
@@ -2725,6 +2798,7 @@ impl Db {
                                 media_type: r.get(5)?,
                                 metadata_at: r.get(6)?,
                                 manual_match: r.get(7)?,
+                                metadata_checked_at: r.get(8)?,
                             })
                         },
                     )
@@ -2795,7 +2869,15 @@ impl Db {
                 // tmdb_id being NULL with metadata_at set means no match was found — don't retry.
                 // imdb_id is intentionally excluded: TV episodes and many TMDB items have no IMDb ID,
                 // so checking it caused every re-index to re-queue all existing items.
+                // A row TMDB had no match for keeps metadata_at NULL; it is retried
+                // once its metadata_checked_at is older than a day instead of on
+                // every 15-minute index.
                 row.metadata_at.is_none()
+                    && !checked_within(
+                        row.metadata_checked_at.as_deref(),
+                        chrono::Duration::days(1),
+                        chrono::Utc::now(),
+                    )
             })
             .unwrap_or(false);
 
@@ -2824,7 +2906,7 @@ impl Db {
                 "UPDATE media_items SET
                     tmdb_id=NULL, imdb_id=NULL, tmdb_type=NULL, tmdb_title=NULL, tmdb_year=NULL,
                     tmdb_title_en=NULL, tmdb_release_date=NULL, tmdb_overview=NULL, tmdb_overview_en=NULL, tmdb_poster=NULL, tmdb_poster_en=NULL,
-                    tmdb_rating=NULL, tmdb_genres=NULL, tmdb_watch_providers=NULL, metadata_at=NULL, manual_match=0
+                    tmdb_rating=NULL, tmdb_genres=NULL, tmdb_watch_providers=NULL, metadata_at=NULL, metadata_checked_at=NULL, manual_match=0
                  WHERE id=?1",
                 params![id],
             )
@@ -3133,7 +3215,7 @@ impl Db {
             "UPDATE media_items SET
                 tmdb_id=NULL, imdb_id=NULL, tmdb_type=NULL, tmdb_title=NULL, tmdb_year=NULL,
                 tmdb_title_en=NULL, tmdb_release_date=NULL, tmdb_overview=NULL, tmdb_overview_en=NULL, tmdb_poster=NULL, tmdb_poster_en=NULL,
-                tmdb_rating=NULL, tmdb_genres=NULL, metadata_at=NULL, manual_match=0
+                tmdb_rating=NULL, tmdb_genres=NULL, metadata_at=NULL, metadata_checked_at=NULL, manual_match=0
              WHERE id=?1",
             params![id],
         )
@@ -3147,7 +3229,7 @@ impl Db {
             "UPDATE media_items SET
                 tmdb_id=NULL, imdb_id=NULL, tmdb_type=NULL, tmdb_title=NULL, tmdb_year=NULL,
                 tmdb_title_en=NULL, tmdb_release_date=NULL, tmdb_overview=NULL, tmdb_overview_en=NULL, tmdb_poster=NULL, tmdb_poster_en=NULL,
-                tmdb_rating=NULL, tmdb_genres=NULL, tmdb_watch_providers=NULL, metadata_at=NULL
+                tmdb_rating=NULL, tmdb_genres=NULL, tmdb_watch_providers=NULL, metadata_at=NULL, metadata_checked_at=NULL
              WHERE COALESCE(manual_match, 0) = 0",
             [],
         )
@@ -3162,7 +3244,7 @@ impl Db {
             "UPDATE media_items SET
                 tmdb_id=NULL, imdb_id=NULL, tmdb_type=NULL, tmdb_title=NULL, tmdb_year=NULL,
                 tmdb_title_en=NULL, tmdb_release_date=NULL, tmdb_overview=NULL, tmdb_overview_en=NULL, tmdb_poster=NULL, tmdb_poster_en=NULL,
-                tmdb_rating=NULL, tmdb_genres=NULL, metadata_at=NULL, manual_match=0
+                tmdb_rating=NULL, tmdb_genres=NULL, metadata_at=NULL, metadata_checked_at=NULL, manual_match=0
              WHERE tmdb_id=?1",
             params![tmdb_id],
         )
@@ -4053,7 +4135,7 @@ mod tests {
             "/Compartida/Movies/keep2.mkv".to_string(),
         ];
         let removed = db
-            .delete_media_missing_from_scan(&current)
+            .delete_media_missing_from_scan(&current, &[])
             .expect("delete_missing");
 
         assert_eq!(removed, 1);
@@ -4082,7 +4164,7 @@ mod tests {
         .expect("upsert");
         db.commit_batch().expect("commit");
 
-        let removed = db.delete_media_missing_from_scan(&[]).expect("delete_missing");
+        let removed = db.delete_media_missing_from_scan(&[], &[]).expect("delete_missing");
         assert_eq!(removed, 1);
         assert_eq!(db.get_all_media().expect("get_all_media").len(), 0);
     }
@@ -4103,9 +4185,114 @@ mod tests {
         }
         db.commit_batch().expect("commit");
 
-        let removed = db.delete_media_missing_from_scan(&paths).expect("delete_missing");
+        let removed = db.delete_media_missing_from_scan(&paths, &[]).expect("delete_missing");
         assert_eq!(removed, 0);
         assert_eq!(db.get_all_media().expect("get_all_media").len(), 5);
+    }
+
+    #[test]
+    fn delete_missing_keeps_rows_under_unlisted_dirs() {
+        let db = in_memory_db();
+        let ftp_root = "/Compartida";
+        let paths = [
+            "/Compartida/Movies/kept.mkv",
+            "/Compartida/Movies/gone.mkv",
+            "/Compartida/Series/Show/S01/e1.mkv",
+            "/Compartida/Series/Show/S01/e2.mkv",
+            "/Compartida/Series 100%_x/e1.mkv",
+            "/Compartida/SeriesExtra/e1.mkv",
+        ];
+        db.begin_batch().expect("begin");
+        for path in &paths {
+            let filename = path.rsplit('/').next().unwrap();
+            db.upsert_media(path, filename, Some(1), &parsed(filename), Some("movie"), None, ftp_root)
+                .expect("upsert");
+        }
+        db.commit_batch().expect("commit");
+
+        // The crawl saw kept.mkv but could not list /Compartida/Series nor the
+        // folder with LIKE wildcards in its name.
+        let current = vec!["/Compartida/Movies/kept.mkv".to_string()];
+        let unlisted = vec![
+            "/Compartida/Series/".to_string(),
+            "/Compartida/Series 100%_x".to_string(),
+        ];
+        let removed = db
+            .delete_media_missing_from_scan(&current, &unlisted)
+            .expect("delete_missing");
+
+        // gone.mkv was in a listed folder and SeriesExtra only shares a prefix
+        // with the unlisted folder's name: both go. The rest stays.
+        assert_eq!(removed, 2);
+        let left: Vec<String> = db
+            .get_all_media()
+            .expect("get_all_media")
+            .into_iter()
+            .map(|i| i.ftp_path)
+            .collect();
+        assert_eq!(left.len(), 4);
+        assert!(!left.contains(&"/Compartida/Movies/gone.mkv".to_string()));
+        assert!(!left.contains(&"/Compartida/SeriesExtra/e1.mkv".to_string()));
+        assert!(left.contains(&"/Compartida/Series/Show/S01/e2.mkv".to_string()));
+        assert!(left.contains(&"/Compartida/Series 100%_x/e1.mkv".to_string()));
+    }
+
+    #[test]
+    fn unmatched_rows_are_not_requeued_for_tmdb_on_every_index() {
+        let db = in_memory_db();
+        let root = "/Compartida";
+        let path = "/Compartida/Movies/obscure.mkv";
+        let first = db
+            .upsert_media(path, "obscure.mkv", Some(1), &parsed("Obscure"), Some("movie"), None, root)
+            .expect("upsert");
+        assert!(first.needs_metadata, "new rows always go to TMDB");
+
+        // Without an answer (e.g. a network error) the next index retries it.
+        let again = db
+            .upsert_media(path, "obscure.mkv", Some(1), &parsed("Obscure"), Some("movie"), None, root)
+            .expect("upsert");
+        assert!(again.needs_metadata);
+
+        // TMDB answered "no match": the next 15-minute index leaves it alone.
+        db.mark_metadata_checked(&[first.id]).expect("mark");
+        let later = db
+            .upsert_media(path, "obscure.mkv", Some(1), &parsed("Obscure"), Some("movie"), None, root)
+            .expect("upsert");
+        assert!(!later.needs_metadata);
+        assert!(db.metadata_checked_map().expect("map").contains_key(&first.id));
+
+        // A day later it is retried.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE media_items SET metadata_checked_at = ?1 WHERE id = ?2",
+                params![(chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339(), first.id],
+            )
+            .unwrap();
+        }
+        let next_day = db
+            .upsert_media(path, "obscure.mkv", Some(1), &parsed("Obscure"), Some("movie"), None, root)
+            .expect("upsert");
+        assert!(next_day.needs_metadata);
+
+        // A renamed file (new parsed title) is looked up right away.
+        db.mark_metadata_checked(&[first.id]).expect("mark");
+        let renamed = db
+            .upsert_media(path, "obscure.mkv", Some(1), &parsed("Obscure Fixed"), Some("movie"), None, root)
+            .expect("upsert");
+        assert!(renamed.needs_metadata);
+        assert!(!db.metadata_checked_map().expect("map").contains_key(&first.id));
+    }
+
+    #[test]
+    fn checked_within_window() {
+        let now = chrono::Utc::now();
+        let recent = (now - chrono::Duration::hours(2)).to_rfc3339();
+        let old = (now - chrono::Duration::days(3)).to_rfc3339();
+        assert!(checked_within(Some(&recent), chrono::Duration::days(1), now));
+        assert!(!checked_within(Some(&old), chrono::Duration::days(1), now));
+        assert!(!checked_within(None, chrono::Duration::days(1), now));
+        assert!(!checked_within(Some("garbage"), chrono::Duration::days(1), now));
     }
 
     // ── watchlist grab-history ──────────────────────────────────────────────

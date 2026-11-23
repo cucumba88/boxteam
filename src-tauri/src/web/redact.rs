@@ -41,9 +41,42 @@ pub fn preserve(provided: &str, current: &str) -> String {
     }
 }
 
+/// Like [`preserve`], for a secret that is sent to an address stored next to
+/// it (FTP password → FTP host, SMTP password → SMTP host, Emby/Plex key →
+/// server URL). Echoing [`REDACTED`] while pointing that address somewhere
+/// else is refused: otherwise anyone allowed to save settings could aim the
+/// app at their own server and receive the stored secret on the next
+/// connection. Typing the secret again (or clearing it) is always accepted.
+pub fn preserve_for_endpoint(
+    provided: &str,
+    current: &str,
+    same_endpoint: bool,
+    field: &str,
+) -> Result<String, String> {
+    if provided == REDACTED && !same_endpoint && !current.is_empty() {
+        return Err(format!(
+            "Has cambiado el servidor: vuelve a escribir {field} para guardarlo."
+        ));
+    }
+    Ok(preserve(provided, current))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn endpoint_bound_secret_needs_retyping_when_the_server_changes() {
+        // Same server: the sentinel keeps the stored secret.
+        assert_eq!(preserve_for_endpoint(REDACTED, "pw", true, "x").unwrap(), "pw");
+        // New server + sentinel: refused, the stored secret never moves.
+        assert!(preserve_for_endpoint(REDACTED, "pw", false, "x").is_err());
+        // New server + retyped or cleared secret: fine.
+        assert_eq!(preserve_for_endpoint("new", "pw", false, "x").unwrap(), "new");
+        assert_eq!(preserve_for_endpoint("", "pw", false, "x").unwrap(), "");
+        // Nothing stored yet (first run): nothing to leak.
+        assert_eq!(preserve_for_endpoint(REDACTED, "", false, "x").unwrap(), "");
+    }
 
     #[test]
     fn mask_hides_any_secret_and_keeps_empty_empty() {

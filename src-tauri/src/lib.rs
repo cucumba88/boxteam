@@ -426,7 +426,7 @@ pub fn run() {
                 // so the app works correctly in background (tray) and headless mode.
                 commands::resume_pending_downloads(db.clone(), queue.clone(), visible_main_window(&handle)).await.ok();
                 commands::resume_pending_uploads(db.clone(), handle.state::<uploads::SharedUploadQueue>().inner().clone(), handle.clone()).await.ok();
-                commands::refresh_all_metadata_internal(db.clone(), visible_main_window(&handle)).await.ok();
+                commands::refresh_all_metadata_internal(db.clone(), visible_main_window(&handle), commands::MetadataRefreshMode::Auto).await.ok();
                 // Auto-enrich ratings (IMDb via OMDb + TVDB) for any rows that
                 // are missing them. The job is sequential, throttled per
                 // service, and skips items that already have both — so it's a
@@ -460,10 +460,12 @@ pub fn run() {
 
                 if should_run_now {
                     let window = visible_main_window(&handle);
-                    crate::INDEXING_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
-                    commands::start_indexing_internal(db.clone(), window.clone(), Some(queue.clone())).await.ok();
-                    crate::INDEXING_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
-                    commands::refresh_all_metadata_internal(db.clone(), window).await.ok();
+                    // Skip if a manual index (desktop or web) already runs.
+                    if let Some(guard) = commands::IndexingGuard::try_acquire() {
+                        commands::start_indexing_internal(db.clone(), window.clone(), Some(queue.clone())).await.ok();
+                        drop(guard);
+                        commands::refresh_all_metadata_internal(db.clone(), window, commands::MetadataRefreshMode::Auto).await.ok();
+                    }
                 } else if let Some(value) = last_indexed_at
                     .as_deref()
                     .and_then(|raw| chrono::DateTime::parse_from_rfc3339(raw).ok())
@@ -506,10 +508,14 @@ pub fn run() {
                     }
 
                     let window = visible_main_window(&handle);
-                    crate::INDEXING_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
+                    // A manual index is running right now: it updates
+                    // last_indexed_at when done, so just wait for the next tick.
+                    let Some(guard) = commands::IndexingGuard::try_acquire() else {
+                        continue;
+                    };
                     commands::start_indexing_internal(db.clone(), window.clone(), Some(queue.clone())).await.ok();
-                    crate::INDEXING_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
-                    commands::refresh_all_metadata_internal(db.clone(), window.clone()).await.ok();
+                    drop(guard);
+                    commands::refresh_all_metadata_internal(db.clone(), window.clone(), commands::MetadataRefreshMode::Auto).await.ok();
                     // Top up missing IMDb / TVDB ratings on every cycle.
                     // The internal guard prevents this from stacking if a
                     // previous tick is still running.

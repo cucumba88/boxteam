@@ -1745,16 +1745,19 @@ pub async fn start_indexing(
     queue_state: tauri::State<'_, crate::downloads::SharedQueue>,
     window: WebviewWindow,
 ) -> Result<(), String> {
-    use std::sync::atomic::Ordering;
-    // Shared with the web handler and the reset commands so a reset can't
-    // wipe the table under a running index pass.
-    crate::INDEXING_RUNNING.store(true, Ordering::SeqCst);
+    // Shared with the web handler, the 15-minute scheduler and the reset
+    // commands: one index pass at a time, and a reset can't wipe the table
+    // under a running one. A press while a pass is running just lets the
+    // UI follow that pass's events.
+    let Some(_guard) = IndexingGuard::try_acquire() else {
+        return Ok(());
+    };
     let result = start_indexing_internal(
         state.inner().clone(),
         Some(window.clone()),
         Some(queue_state.inner().clone()),
     ).await;
-    crate::INDEXING_RUNNING.store(false, Ordering::SeqCst);
+    drop(_guard);
     if result.is_ok() {
         spawn_post_index_topups(state.inner().clone(), Some(window));
     }
@@ -1769,7 +1772,7 @@ pub async fn start_indexing(
 /// (e.g. an API key not configured).
 pub fn spawn_post_index_topups(db: crate::db::Db, window: Option<tauri::WebviewWindow>) {
     tauri::async_runtime::spawn(async move {
-        refresh_all_metadata_internal(db.clone(), window.clone()).await.ok();
+        refresh_all_metadata_internal(db.clone(), window.clone(), MetadataRefreshMode::Auto).await.ok();
         let (db_r, win_r) = (db.clone(), window.clone());
         tauri::async_runtime::spawn(async move {
             refresh_all_ratings_internal(db_r, win_r, RatingsRefreshMode::Auto).await.ok();
@@ -1902,7 +1905,7 @@ pub async fn start_indexing_internal(
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAY_SECS: u64 = 5;
 
-    let files = {
+    let crate::ftp::FtpCrawl { files, failed_dirs } = {
         let mut attempt = 0u32;
         loop {
             match crate::ftp::list_files(
@@ -1912,7 +1915,7 @@ pub async fn start_indexing_internal(
             )
             .await
             {
-                Ok(files) => break files,
+                Ok(crawl) => break crawl,
                 Err(e) => {
                     attempt += 1;
                     if attempt >= MAX_RETRIES {
@@ -1929,7 +1932,7 @@ pub async fn start_indexing_internal(
 
     let total = files.len();
     let current_paths: Vec<String> = files.iter().map(|file| file.path.clone()).collect();
-    let mut metadata_tasks = Vec::new();
+    let mut metadata_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     let mut metadata_queued = 0usize;
     let mut new_items = 0usize;
 
@@ -1997,7 +2000,7 @@ pub async fn start_indexing_internal(
             _ => "movie",
         }.to_string();
 
-        let upsert = db.upsert_media(
+        let upsert = match db.upsert_media(
             &file.path,
             &file.filename,
             Some(file.size),
@@ -2005,7 +2008,23 @@ pub async fn start_indexing_internal(
             media_type_str,
             file.modified_at.as_deref(),
             &root,
-        )?;
+        ) {
+            Ok(upsert) => upsert,
+            Err(e) => {
+                // Close the batch transaction before bailing out. Left open,
+                // every later write from any part of the app (downloads,
+                // ratings, web handlers) piled into a transaction that was
+                // never committed, and the next index failed to BEGIN.
+                db.rollback_batch().ok();
+                for task in &metadata_tasks {
+                    task.abort();
+                }
+                let message = format!("Error guardando {}: {e}", file.path);
+                if let Some(ref w) = window { w.emit("index:error", serde_json::json!({ "message": message })).ok(); }
+                crate::ws_broadcast("index:error", serde_json::json!({ "message": message }));
+                return Err(message);
+            }
+        };
         let id = upsert.id;
 
         on_log(format!("⚙ Indexing [{}/{}]: {}", i + 1, total, parsed.title));
@@ -2072,6 +2091,7 @@ pub async fn start_indexing_internal(
                         Ok(Some((movie, actual_type))) => {
                             on_log_clone(format!("🌐 TMDB: {} → {}", title, movie.title));
                             db_clone.update_tmdb_auto(id, &movie, &actual_type).ok();
+                            db_clone.mark_metadata_checked(&[id]).ok();
                             let (omdb, tvdb) = match movie.imdb_id.as_deref() {
                                 Some(imdb) if !imdb.is_empty() =>
                                     enrich_extra_ratings_cached(&db_clone, &config_clone, id, imdb, window_clone.as_ref(), &lookups_clone).await,
@@ -2105,6 +2125,7 @@ pub async fn start_indexing_internal(
                         }
                         Ok(None) => {
                             on_log_clone(format!("⚠ TMDB: no match for \"{}\"", title));
+                            db_clone.mark_metadata_checked(&[id]).ok();
                         }
                         Err(e) => {
                             on_log_clone(format!("✗ TMDB error for \"{}\": {}", title, e));
@@ -2139,7 +2160,13 @@ pub async fn start_indexing_internal(
         }
     }
 
-    let removed_stale = db.delete_media_missing_from_scan(&current_paths)?;
+    if !failed_dirs.is_empty() {
+        on_log(format!(
+            "⚠ {} folder(s) could not be listed; their titles are kept until the next complete scan",
+            failed_dirs.len()
+        ));
+    }
+    let removed_stale = db.delete_media_missing_from_scan(&current_paths, &failed_dirs)?;
     if removed_stale > 0 {
         on_log(format!(
             "🧹 Cleanup removed {} stale item{} no longer present on FTP",
@@ -2575,6 +2602,30 @@ pub async fn clear_show_metadata(
     state.clear_show_metadata(tmdb_id)
 }
 
+/// Holds `INDEXING_RUNNING` for one index pass and clears it on drop, even
+/// on an early return or a panic. Every entry point (desktop button, web
+/// API, 15-minute scheduler) must go through this: two concurrent passes
+/// collided on the shared SQLite connection ("cannot start a transaction
+/// within a transaction") and the first one to finish cleared the flag
+/// while the other was still writing, re-enabling resets mid-index.
+pub(crate) struct IndexingGuard(());
+
+impl IndexingGuard {
+    pub(crate) fn try_acquire() -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        crate::INDEXING_RUNNING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| IndexingGuard(()))
+    }
+}
+
+impl Drop for IndexingGuard {
+    fn drop(&mut self) {
+        crate::INDEXING_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Refuse destructive resets while an index pass is writing to the library.
 pub(crate) fn ensure_not_indexing() -> Result<(), String> {
     if crate::INDEXING_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
@@ -2611,18 +2662,77 @@ pub async fn refresh_all_metadata(
     state: tauri::State<'_, crate::db::Db>,
     window: WebviewWindow,
 ) -> Result<(), String> {
-    refresh_all_metadata_internal(state.inner().clone(), Some(window)).await
+    refresh_all_metadata_internal(state.inner().clone(), Some(window), MetadataRefreshMode::Manual).await
+}
+
+/// Which rows a metadata refresh looks at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MetadataRefreshMode {
+    /// Background top-up (startup, the 15-minute cycle, after an index):
+    /// rows whose last definitive TMDB answer is recent are skipped.
+    Auto,
+    /// The Settings button: every incomplete row, ignoring the backoff.
+    Manual,
+}
+
+/// Guard so the startup pass, the post-index top-up and a manual press
+/// don't run the same refresh twice in parallel.
+static METADATA_REFRESH_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// True when an `Auto` metadata refresh should leave a row alone: TMDB gave
+/// a definitive answer for it recently. Unmatched rows (no release date) are
+/// retried daily; matched rows missing a poster, synopsis, genres… follow
+/// the ratings rule (daily for recent releases, weekly otherwise). Without
+/// this every 15-minute cycle searched TMDB again for every title it had
+/// no match for, and re-fetched every title whose TMDB entry has no
+/// synopsis or genres — forever.
+fn metadata_recently_checked(
+    checked_at: Option<&str>,
+    release_date: Option<&str>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    crate::db::checked_within(checked_at, ratings_retry_after(release_date, now), now)
 }
 
 pub async fn refresh_all_metadata_internal(
     db: crate::db::Db,
     window: Option<tauri::WebviewWindow>,
+    mode: MetadataRefreshMode,
 ) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    if METADATA_REFRESH_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err("Metadata refresh already running".to_string());
+    }
+    struct RunningGuard;
+    impl Drop for RunningGuard {
+        fn drop(&mut self) {
+            METADATA_REFRESH_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _guard = RunningGuard;
+
     let config = db.load_config()?;
     let items = db.get_all_media()?;
+    let checked = if mode == MetadataRefreshMode::Auto {
+        db.metadata_checked_map()?
+    } else {
+        std::collections::HashMap::new()
+    };
+    let now = chrono::Utc::now();
     let mut items: Vec<_> = items
         .into_iter()
         .filter(|item| {
+            if metadata_recently_checked(
+                checked.get(&item.id).map(String::as_str),
+                item.tmdb_release_date.as_deref(),
+                now,
+            ) {
+                return false;
+            }
             // Always include items that were never matched at all
             if item.tmdb_id.is_none() {
                 return true;
@@ -2711,6 +2821,7 @@ pub async fn refresh_all_metadata_internal(
             match lookups.tmdb_match(&config, &config.tmdb_api_key, &title, year, tmdb_search_type).await {
                 Ok(Some((movie, actual_type))) => {
                     db.update_tmdb_auto(item.id, &movie, &actual_type).ok();
+                    db.mark_metadata_checked(&[item.id]).ok();
                     let (omdb, tvdb) = match movie.imdb_id.as_deref() {
                         Some(imdb) if !imdb.is_empty() =>
                             enrich_extra_ratings_cached(&db, &config, item.id, imdb, window.as_ref(), &lookups).await,
@@ -2741,6 +2852,7 @@ pub async fn refresh_all_metadata_internal(
                 }
                 Ok(None) => {
                     emit_index_log(&window, format!("⚠ No TMDB match found for: {}", title));
+                    db.mark_metadata_checked(&[item.id]).ok();
                 }
                 Err(err) => {
                     emit_index_log(&window, format!("⚠ TMDB search failed for {}: {}", title, err));
@@ -2759,10 +2871,19 @@ pub async fn refresh_all_metadata_internal(
                     &media_type,
                     item.manual_match.unwrap_or(0) != 0,
                 )?;
+                db.mark_metadata_checked(&[item.id]).ok();
                 // Only enrich extra ratings when the row is missing them, to
                 // keep this 15-minute refresh pass cheap. New matches (the
                 // other branch) always enrich.
-                let needs_extra_ratings = item.imdb_rating.is_none() && item.tvdb_rating.is_none();
+                // Same backoff as the ratings top-up, so this pass doesn't
+                // re-ask OMDb (1 000 requests/day) for titles it just checked.
+                let needs_extra_ratings = item.imdb_rating.is_none()
+                    && item.tvdb_rating.is_none()
+                    && !ratings_recently_checked(
+                        item.ratings_fetched_at.as_deref(),
+                        item.tmdb_release_date.as_deref(),
+                        now,
+                    );
                 let (omdb, tvdb) = if needs_extra_ratings {
                     match movie.imdb_id.as_deref() {
                         Some(imdb) if !imdb.is_empty() =>
@@ -5526,5 +5647,40 @@ mod ratings_backoff_tests {
         let eight_days_ago = (now - Duration::days(8)).to_rfc3339();
         assert!(ratings_recently_checked(Some(&two_days_ago), Some("2019-05-01"), now));
         assert!(!ratings_recently_checked(Some(&eight_days_ago), Some("2019-05-01"), now));
+    }
+}
+
+#[cfg(test)]
+mod indexing_guard_tests {
+    use super::{ensure_not_indexing, IndexingGuard};
+
+    #[test]
+    fn only_one_index_pass_at_a_time_and_flag_clears_on_drop() {
+        let first = IndexingGuard::try_acquire().expect("first pass starts");
+        assert!(IndexingGuard::try_acquire().is_none(), "second pass must be refused");
+        assert!(ensure_not_indexing().is_err(), "resets blocked while indexing");
+        drop(first);
+        assert!(ensure_not_indexing().is_ok());
+        let again = IndexingGuard::try_acquire();
+        assert!(again.is_some(), "a new pass can start after the first ends");
+    }
+}
+
+#[cfg(test)]
+mod metadata_backoff_tests {
+    use super::metadata_recently_checked;
+
+    #[test]
+    fn unmatched_titles_wait_a_day_old_incomplete_titles_a_week() {
+        let now = chrono::Utc::now();
+        let ago = |h: i64| (now - chrono::Duration::hours(h)).to_rfc3339();
+        // Never checked → due.
+        assert!(!metadata_recently_checked(None, None, now));
+        // Unmatched (no release date): 1-day window.
+        assert!(metadata_recently_checked(Some(&ago(5)), None, now));
+        assert!(!metadata_recently_checked(Some(&ago(30)), None, now));
+        // Old release missing a synopsis: weekly.
+        assert!(metadata_recently_checked(Some(&ago(30)), Some("2001-05-01"), now));
+        assert!(!metadata_recently_checked(Some(&ago(24 * 8)), Some("2001-05-01"), now));
     }
 }

@@ -82,6 +82,26 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthUser {
     }
 }
 
+/// Admins and editors: the roles the Settings page lets save changes. Plain
+/// users are read-only and get 403.
+pub struct EditorUser(pub crate::db::WebUser);
+
+impl<S: Send + Sync> FromRequestParts<S> for EditorUser {
+    type Rejection = (StatusCode, Json<serde_json::Value>);
+
+    fn from_request_parts(parts: &mut Parts, _: &S) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
+        let result = match parts.extensions.get::<crate::db::WebUser>().cloned() {
+            None => Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"})))),
+            Some(user) if user.role != "admin" && user.role != "editor" => Err((
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "No tienes permiso para cambiar los ajustes"})),
+            )),
+            Some(user) => Ok(EditorUser(user)),
+        };
+        std::future::ready(result)
+    }
+}
+
 /// Like AuthUser but also rejects non-admin users with 403.
 pub struct AdminUser(pub crate::db::WebUser);
 
@@ -226,6 +246,23 @@ mod tests {
 
         let mut parts = parts_with(Some(user("user")));
         assert!(AuthUser::from_request_parts(&mut parts, &()).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn editor_user_allows_admins_and_editors_only() {
+        let mut parts = parts_with(None);
+        let err = EditorUser::from_request_parts(&mut parts, &()).await.err().expect("401");
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+
+        for role in ["user", "viewer"] {
+            let mut parts = parts_with(Some(user(role)));
+            let err = EditorUser::from_request_parts(&mut parts, &()).await.err().expect("403");
+            assert_eq!(err.0, StatusCode::FORBIDDEN);
+        }
+        for role in ["admin", "editor"] {
+            let mut parts = parts_with(Some(user(role)));
+            assert!(EditorUser::from_request_parts(&mut parts, &()).await.is_ok());
+        }
     }
 
     #[tokio::test]
