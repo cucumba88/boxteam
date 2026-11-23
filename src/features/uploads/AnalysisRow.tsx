@@ -1704,7 +1704,7 @@ export default function AnalysisRow({
                 value={dest}
                 onChange={(e) => handleDestChange(e.target.value)}
                 list={`dest-opts-${result.path.replace(/[^a-z0-9]/gi, "_")}`}
-                placeholder="/Compartida/Series HD 1080p"
+                placeholder="/Series HD 1080p"
                 style={{ ...inputStyle, flex: 1, fontFamily: "monospace" }}
               />
               <button

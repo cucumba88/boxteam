@@ -19,7 +19,7 @@ import {
 } from "../utils/folderTypes";
 import type { AppLanguage } from "../utils/mediaLanguage";
 
-const DEFAULT_FTP_ROOT = "/Compartida";
+const DEFAULT_FTP_ROOT = "/";
 
 type StepId = "ftp" | "tmdb" | "downloads" | "storage" | "confirm";
 
