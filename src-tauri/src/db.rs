@@ -1318,7 +1318,7 @@ impl Db {
     /// bug (see `parser.rs`). Rows indexed before that fix stored an empty title
     /// (e.g. "1975 El fin de una era (2025)" → year 1975, title "") and were then
     /// matched to an unrelated TMDB id — sometimes locked in with manual_match=1,
-    /// which both the auto re-matcher and the seed override deliberately leave
+    /// which the auto re-matcher deliberately leaves
     /// untouched, so they never self-heal.
     ///
     /// Re-parse every empty-title row with the corrected parser; where a real
