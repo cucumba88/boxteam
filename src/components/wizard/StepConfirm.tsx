@@ -99,12 +99,12 @@ export default function StepConfirm({
     setSaving(true);
     setErrorMsg("");
     try {
-      const seeded = await invoke<boolean>("seed_starter_library");
       await invoke("save_config", { config });
       await invoke("set_max_concurrent", {
         max: config.max_concurrent_downloads ?? 2,
       });
-      onComplete({ startIndexing: !seeded });
+      // A new install starts empty: the first index fills the library.
+      onComplete({ startIndexing: true });
     } catch (error: unknown) {
       setErrorMsg(String(error));
       setSaving(false);

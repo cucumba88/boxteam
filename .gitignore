@@ -32,3 +32,6 @@ docker/ftp-dev/media/
 
 # Claude Code workspace metadata (per-clone)
 .claude/
+
+# Never ship a library database with the app.
+src-tauri/resources/*.db*

@@ -159,7 +159,6 @@ pub fn run() {
             commands::init_webgui_now,
             commands::has_config,
             commands::get_applied_migrations,
-            commands::seed_starter_library,
             commands::export_library_backup,
             commands::import_library_backup,
             commands::get_db_path,
@@ -350,7 +349,6 @@ pub fn run() {
             // Spawn WEBGUI HTTP server if enabled in config
             web::spawn_if_enabled(db.clone(), queue.clone(), app.handle().clone());
             let current_version = app.package_info().version.to_string();
-            let seed_path = commands::resolve_seed_db_path(&app.handle().clone());
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -395,50 +393,9 @@ pub fn run() {
                         current_version, backup_path
                     );
                 }
-                if let Some(ref seed_path) = seed_path {
-                    match db.refresh_library_from_seed(seed_path, &current_version, &ftp_root) {
-                        Ok((inserted, merged)) if inserted > 0 || merged > 0 => {
-                            println!(
-                                "Refreshed user library from bundled seed (inserted {}, merged {})",
-                                inserted, merged
-                            );
-                        }
-                        Ok(_) => {}
-                        Err(error) => {
-                            eprintln!("Seed library refresh skipped: {error}");
-                        }
-                    }
-
-                    match db.backfill_imdb_ids_from_seed(seed_path, &current_version, &ftp_root) {
-                        Ok(updated) if updated > 0 => {
-                            println!(
-                                "Backfilled imdb_id for {} library items from bundled seed database",
-                                updated
-                            );
-                        }
-                        Ok(_) => {}
-                        Err(error) => {
-                            eprintln!("IMDb seed backfill skipped: {error}");
-                        }
-                    }
-
-                    match db.override_library_from_seed(seed_path, &current_version, &ftp_root) {
-                        Ok((inserted, overridden)) if inserted > 0 || overridden > 0 => {
-                            println!(
-                                "Seed override applied: inserted {}, overrode metadata for {} library items",
-                                inserted, overridden
-                            );
-                        }
-                        Ok(_) => {}
-                        Err(error) => {
-                            eprintln!("Seed override skipped: {error}");
-                        }
-                    }
-                }
                 // One-shot repair: titles that fell back to a category folder
                 // ("Peliculas") or were cut at a word-like tag ("¿Por Qué…").
-                // Runs after the seed steps so it also fixes seeded rows; the
-                // metadata refresh below re-matches the rows it unmatched.
+                // The metadata refresh below re-matches the rows it unmatched.
                 match db.repair_misparsed_titles() {
                     Ok(n) if n > 0 => println!("Repaired {n} mis-parsed title(s)"),
                     Ok(_) => {}

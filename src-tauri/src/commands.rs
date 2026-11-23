@@ -1576,60 +1576,6 @@ pub async fn get_applied_migrations(
     state.list_applied_migrations()
 }
 
-pub(crate) fn resolve_seed_db_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    let mut candidates = Vec::new();
-
-    if let Ok(path) = app
-        .path()
-        .resolve("library.seed.db", tauri::path::BaseDirectory::Resource)
-    {
-        candidates.push(path);
-    }
-
-    if let Ok(path) = app
-        .path()
-        .resolve("resources/library.seed.db", tauri::path::BaseDirectory::Resource)
-    {
-        candidates.push(path);
-    }
-
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            candidates.push(exe_dir.join("resources").join("library.seed.db"));
-        }
-    }
-
-    candidates.into_iter().find(|candidate| candidate.exists())
-}
-
-#[tauri::command]
-pub async fn seed_starter_library(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, crate::db::Db>,
-) -> Result<bool, String> {
-    if state.has_config()? {
-        return Ok(false);
-    }
-    if state.count_media_items()? > 0 {
-        return Ok(false);
-    }
-
-    let Some(seed_path) = resolve_seed_db_path(&app) else {
-        return Ok(false);
-    };
-
-    state.import_database_from(&seed_path.to_string_lossy())?;
-    state.clear_app_config()?;
-    state.save_last_indexed_at(&chrono::Utc::now().to_rfc3339())?;
-    // The seed DB predates v0.14.0 so its rows arrive without watch-provider
-    // data. Fill them in from the bundled JSON snapshot — NULL-only, so it
-    // won't touch anything that's somehow already populated.
-    if let Err(err) = state.apply_bundle_to_null_rows() {
-        eprintln!("[watch-providers-bundle] post-seed apply failed: {err}");
-    }
-    Ok(true)
-}
-
 #[tauri::command]
 pub async fn export_library_backup(
     state: tauri::State<'_, crate::db::Db>,
