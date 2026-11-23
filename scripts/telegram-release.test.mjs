@@ -9,6 +9,7 @@ import {
   downloadLinks,
   normalizeChatId,
   notesToBlocks,
+  skipsAnnouncement,
   visibleLength,
 } from "./telegram-release.mjs";
 
@@ -131,4 +132,13 @@ test("chat id pasted with extras is cleaned up", () => {
   assert.equal(normalizeChatId("#-4490499603"), "-4490499603");
   assert.equal(normalizeChatId("https://web.telegram.org/k/#-4490499603"), "-4490499603");
   assert.equal(normalizeChatId("@boxteam_canal"), "@boxteam_canal");
+});
+
+test("<!-- no-telegram --> in the notes skips the announcement", () => {
+  assert.equal(skipsAnnouncement(NOTES), false);
+  assert.equal(skipsAnnouncement(null), false);
+  assert.equal(skipsAnnouncement(`${NOTES}\n<!-- no-telegram -->`), true);
+  assert.equal(skipsAnnouncement("<!--no telegram-->"), true);
+  // The "already posted" marker is not an opt-out.
+  assert.equal(skipsAnnouncement("<!-- telegram: publicado -->"), false);
 });

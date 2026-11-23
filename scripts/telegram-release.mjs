@@ -8,6 +8,9 @@
 // packages attached, Docker build finished) and only once per release: after
 // posting it appends a hidden marker to the release notes.
 //
+// To skip the announcement for a release, put <!-- no-telegram --> anywhere
+// in its notes (GitHub doesn't show it). By default every release is posted.
+//
 // Environment:
 //   GITHUB_TOKEN, GITHUB_REPOSITORY        (set by GitHub Actions)
 //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID   (repo secrets)
@@ -27,6 +30,11 @@ import { fileURLToPath } from "node:url";
 // visible text (tags stripped).
 export const MESSAGE_LIMIT = 4096;
 export const SENT_MARKER = "<!-- telegram: publicado -->";
+
+/** True when the release notes ask not to announce it (<!-- no-telegram -->). */
+export function skipsAnnouncement(body) {
+  return /<!--\s*no[-_ ]?telegram\s*-->/i.test(body ?? "");
+}
 
 // ---------------------------------------------------------------------------
 // Formatting (pure, tested in telegram-release.test.mjs)
@@ -397,6 +405,10 @@ export async function main() {
     log("release has no notes yet; waiting 30 s…");
     await sleep(30_000);
     release = await findRelease(repo, tag);
+  }
+  if (skipsAnnouncement(release.body) && !force) {
+    notice(`${tag}: the notes contain <!-- no-telegram -->, so it is not announced.`);
+    return;
   }
   if (!stripComments(release.body ?? "").trim() && !force) {
     throw new Error(

@@ -104,6 +104,8 @@ EOF
 )"
 ```
 
+Every published release is announced on Telegram by default. To skip it for one release, put `<!-- no-telegram -->` anywhere in its notes (hidden on GitHub) before the Release workflow finishes.
+
 Release notes language is **Spain Spanish, informal "tú"**. Existing v0.10.x / v0.11.x releases set the tone and emoji conventions (🐛 fix, ⚡ perf, 🔴 critical security, 🟠 high, 🟡 medium).
 
 Watching the release (checks, builds, docker and publish are all jobs of one run):
