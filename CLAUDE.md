@@ -49,6 +49,8 @@ This repo uses a per-fix branch + `--no-ff` merge-into-main + tag-on-merge patte
 
 A `v*` tag push runs **`.github/workflows/release.yml`**, the only workflow that fires on tags. It gates the release: version check (tag = package.json = Cargo.toml) → creates the GitHub Release as a **draft** → full CI (`ci.yml`) → Build Linux + Build Windows (attach installers to the draft) → Build Docker (`latest` moves only now) → publishes the draft. If any job fails the release stays a draft, nothing is announced on Telegram, and "Re-run failed jobs" resumes it. Build Linux/Windows/Docker are `workflow_call` workflows (also runnable by hand with workflow_dispatch); CI also runs on every PR and every push to `main`. Assets are uploaded by `scripts/release-assets.mjs` (not softprops, which can't find drafts).
 
+The publish job also writes `latest.json` (in-app updater manifest, `release-assets.mjs updater-manifest`) from the signed installers' `.sig` files; the builds sign with the `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]` secrets (passed with `secrets: inherit`). CI has no macOS build: after publishing, `scripts/release-mac.sh vX.Y.Z` on the Mac adds the macOS update package and regenerates `latest.json`. Never change the `pubkey` in `tauri.conf.json` without a plan — installed apps only accept updates signed with the matching key.
+
 ### Standard release sequence
 
 ```bash
