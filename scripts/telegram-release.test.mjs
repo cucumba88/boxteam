@@ -6,6 +6,7 @@ import {
   extractTelegramOverride,
   inlineMarkdownToHtml,
   missingAssets,
+  alternateChatId,
   downloadLinks,
   normalizeChatId,
   notesToBlocks,
@@ -141,4 +142,10 @@ test("<!-- no-telegram --> in the notes skips the announcement", () => {
   assert.equal(skipsAnnouncement("<!--no telegram-->"), true);
   // The "already posted" marker is not an opt-out.
   assert.equal(skipsAnnouncement("<!-- telegram: publicado -->"), false);
+});
+
+test("on chat not found, the other form of the group id is tried", () => {
+  assert.equal(alternateChatId("-4490499603"), "-1004490499603");
+  assert.equal(alternateChatId("-1004490499603"), "-4490499603");
+  assert.equal(alternateChatId("@canal"), null);
 });
