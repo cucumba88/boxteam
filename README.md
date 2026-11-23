@@ -1,154 +1,49 @@
 # BoxTeam
 
-BoxTeam (formerly Oscata) is a desktop media-library browser built with Tauri, React, TypeScript, and Rust.
+BoxTeam convierte una biblioteca de películas, series y documentales guardada en un **servidor FTP** en algo que se navega como una plataforma de streaming: carátulas, sinopsis y notas de TMDB, filtros por calidad, lista de seguimiento y descargas con un clic.
 
-It connects to an FTP media source, indexes movie and TV files, enriches them with TMDB metadata, and presents everything in a polished desktop UI with downloads, badges, filters, bilingual metadata, and grouped browsing.
+Funciona como **app de escritorio** (Windows, macOS y Linux) y como **interfaz web** para NAS y servidores con Docker.
 
-## What the app does
+📖 **[Wiki de BoxTeam](https://github.com/cucumba88/boxteam/wiki)**: instalación, primeros pasos, Telegram, ajustes, preguntas frecuentes y solución de problemas.
 
-BoxTeam is designed for people who keep a remote FTP-based media library and want a desktop app that feels closer to a modern streaming/browser experience instead of a raw file listing.
+## Descargar
 
-Today the app can:
+Los instaladores de cada versión están en **[Releases](https://github.com/cucumba88/boxteam/releases/latest)**:
 
-- index media files from an FTP server
-- detect movies, TV episodes, documentaries, resolutions, HDR, codecs, and release types
-- match titles against TMDB and store metadata locally
-- keep both Spanish and English metadata fields
-- browse movies in grouped or file-level mode
-- browse TV by show or episode
-- paginate large libraries for better performance
-- queue, resume, retry, cancel, and delete downloads
-- show download state and presence badges
-- connect to Emby and Plex for library checks
-- preserve indexed data and metadata in a local SQLite database between runs
+| Sistema | Archivo |
+| --- | --- |
+| Windows | `BoxTeam_X.Y.Z_x64-setup.exe` (o el `.zip` portable) |
+| macOS (Apple Silicon) | `BoxTeam_X.Y.Z_aarch64.dmg` |
+| Linux | `.AppImage`, `.deb` o `.rpm` |
+| Docker / NAS | `ghcr.io/cucumba88/boxteam:latest` |
 
-## Main features
+La app de macOS no está firmada por Apple y el instalador de Windows no lleva firma de pago: la primera vez hay que permitirlos a mano. Los pasos están en la página [Instalación](https://github.com/cucumba88/boxteam/wiki/Instalación) del wiki.
 
-### Library indexing
+Desde la **v0.21.0** la app se **actualiza sola** (instalador de Windows, macOS y AppImage). Si vienes de una versión anterior, instala la nueva a mano una vez. Más en [Actualizaciones](https://github.com/cucumba88/boxteam/wiki/Actualizaciones).
 
-The backend scans the configured FTP root, parses media filenames, and stores results in SQLite. Indexed items are cached locally so the app does not need to start from zero every time.
+## Qué hace
 
-### Metadata enrichment
+- **Indexa el FTP** al arrancar y cada 15 minutos, y detecta películas, series, documentales, resolución, HDR/Dolby Vision, códecs y tipo de release.
+- **Metadatos** de TMDB en español o inglés, con notas opcionales de IMDb (OMDb) y TheTVDB, y plataformas de streaming. Las correcciones manuales se respetan.
+- **Búsqueda y filtros** por título, archivo, release group, resolución, códec, HDR, género y plataforma.
+- **Descargas** con cola persistente, reanudación, reintentos, hasta 5 a la vez y carpetas de destino ordenadas (A‑Z y reglas por género).
+- **Seguimiento** de títulos con auto-descarga según perfiles de calidad.
+- **Subidas** al FTP con análisis del archivo (ffprobe) y nombre bien formado, si tu usuario FTP puede escribir.
+- **Avisos de Telegram**: anuncio de cada subida en un canal o grupo, y avisos personales de contenido nuevo y descargas terminadas.
+- **Interfaz web** con usuarios y roles (administrador, editor, usuario), invitaciones y código por email opcional.
+- Comprobación de presencia en **Emby** y **Plex**.
+- **Ajustes por bloques** (General, Biblioteca, Conexión, Avisos y Sistema) con buscador, backups y restauración.
 
-BoxTeam uses TMDB to match titles and store posters, overviews, ratings, dates, genres, and localized metadata. Manual fixes are preserved and bulk refresh actions avoid overwriting manual matches.
+## Empezar en dos minutos
 
-### Downloads
+1. Instala BoxTeam ([wiki](https://github.com/cucumba88/boxteam/wiki/Instalación)).
+2. En el asistente, pon los datos de tu FTP. Si no sabes la ruta raíz, deja **`/`**.
+3. Pega tu clave de API de [TMDB](https://www.themoviedb.org/settings/api) (gratis).
+4. Elige la carpeta de descargas y listo.
 
-Downloads are handled from the app UI and support:
+Guía completa: [Primeros pasos](https://github.com/cucumba88/boxteam/wiki/Primeros-pasos).
 
-- persistent queue state
-- resume from partial files when possible
-- retry after failure
-- cancellation and delete actions
-- local destination folder mapping
-
-### Bilingual UI and metadata
-
-Spanish is the default language, with English available across the main UI and stored metadata.
-
-### Desktop-focused UX
-
-The interface uses a top-nav layout with filters, grouped browsing, detail panels, download feedback toasts, keyboard shortcuts, and app-style settings/download screens.
-
-## Tech stack
-
-- Tauri 2
-- React 19
-- TypeScript
-- Vite
-- Rust
-- SQLite via `rusqlite`
-- TMDB API
-- FTP via `suppaftp`
-
-## Project structure
-
-- `src/` — React UI, hooks, components, filters, pages, and localization
-- `src-tauri/` — Rust backend, FTP/indexing/download logic, SQLite persistence, and Tauri commands
-- `scripts/` — local release automation scripts
-
-## Requirements
-
-- Node.js 22
-- npm
-- Rust toolchain
-- Tauri development prerequisites for your platform
-
-On this project, frontend commands are typically run with Node 22:
-
-```bash
-source ~/.nvm/nvm.sh
-nvm use 22
-```
-
-## Local development
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Run the desktop app in dev mode:
-
-```bash
-npm run tauri dev
-```
-
-Frontend-only dev server:
-
-```bash
-npm run dev
-```
-
-Build the frontend bundle:
-
-```bash
-npm run build
-```
-
-## Configuration
-
-The app stores its runtime configuration in SQLite and exposes it through the in-app settings screen.
-
-Key settings include:
-
-- FTP host, port, user, password, and root path
-- TMDB API key
-- default language
-- download folder
-- max concurrent downloads
-- folder-type mapping
-- Emby and Plex connection details
-- backup export / restore actions
-
-## Data storage
-
-BoxTeam stores its local database in the user data directory under:
-
-```text
-boxteam/library.db
-```
-
-That database includes:
-
-- indexed media items
-- TMDB metadata
-- persisted downloads state
-- app configuration
-- timestamps such as the last successful indexing time
-
-This means local library state survives normal app restarts and rebuilds.
-
-You can also export the database from Settings and later import it into a fresh install.
-
-## Self-hosting with Docker (NAS / Synology / Unraid)
-
-Besides the desktop app, BoxTeam ships a headless Docker image that exposes the
-web UI on port `47860`. The official image (`ghcr.io/cucumba88/boxteam:latest`)
-is built for `linux/amd64`.
-
-Quick start:
+## Docker
 
 ```bash
 docker run -d --name boxteam --restart unless-stopped \
@@ -158,125 +53,53 @@ docker run -d --name boxteam --restart unless-stopped \
   ghcr.io/cucumba88/boxteam:latest
 ```
 
-- **Full Docker guide:** [`docker/README.md`](docker/README.md) — env vars, reverse proxy, persistent volumes.
-- **Synology (DS920+ and similar):** the J4125 CPU is `x86_64/amd64`, so the
-  image runs natively. Full step-by-step guide (four install methods, reverse
-  proxy, permissions, updates, backups, troubleshooting) in
-  [`docker/SYNOLOGY.md`](docker/SYNOLOGY.md). Quick start: the Container Manager
-  compose file [`docker/docker-compose.synology.yml`](docker/docker-compose.synology.yml)
-  or the SSH installer [`scripts/synology-install.sh`](scripts/synology-install.sh).
-- **Unraid:** community template at [`docker/unraid-template.xml`](docker/unraid-template.xml).
+Abre `http://IP-DEL-SERVIDOR:47860` y crea la cuenta de administrador. La imagen es `linux/amd64`.
 
-## Validation commands
+- Guía en el wiki: [Docker y NAS](https://github.com/cucumba88/boxteam/wiki/Docker-y-NAS).
+- Referencia de variables y proxy inverso: [`docker/README.md`](docker/README.md).
+- Synology: [`docker/SYNOLOGY.md`](docker/SYNOLOGY.md) y [`docker/docker-compose.synology.yml`](docker/docker-compose.synology.yml).
+- Unraid: [`docker/unraid-template.xml`](docker/unraid-template.xml).
 
-Useful validation commands while developing:
+---
+
+## Desarrollo
+
+Tauri 2 · React 19 · TypeScript · Vite · Rust · SQLite (`rusqlite`) · FTP con `suppaftp` · Axum para la interfaz web.
+
+- `src/`: interfaz React (organizada por funcionalidades en `src/features/`).
+- `src-tauri/`: backend en Rust (FTP, indexado, descargas, subidas, SQLite, Telegram y servidor web en `src-tauri/src/web/`).
+- `scripts/`: publicación, instaladores y utilidades.
+- `docker/`: imagen headless con la interfaz web.
+
+Antes de tocar código lee [`.github/copilot-instructions.md`](.github/copilot-instructions.md) (convenciones) y, para cualquier cambio en la web, autenticación o credenciales, [`docs/SECURITY.md`](docs/SECURITY.md).
+
+Requisitos: **Node.js 22**, Rust y los [requisitos de Tauri](https://tauri.app/start/prerequisites/) de tu sistema.
 
 ```bash
-npx tsc --noEmit
+npm install
+npm run tauri dev          # app de escritorio en modo desarrollo
+npm run build              # tsc + vite
 cargo check --manifest-path src-tauri/Cargo.toml
-npm run build
+cd src-tauri && cargo test # tests de Rust
+npm test                   # tests del frontend (Vitest)
+node --test scripts/*.test.mjs
 ```
 
-## Release / versioning workflow
+### Publicar una versión
 
-BoxTeam now uses `package.json` as the main app version source, and the local release script keeps Rust metadata in sync.
+1. `npm run release:patch` (o `:minor` / `:major`): sube la versión en `package.json`, `package-lock.json` y `src-tauri/Cargo.toml` y pasa build, `cargo check` y tests. No hace commit ni tag.
+2. Commit, merge a `main` y tag `vX.Y.Z`.
+3. El tag lanza `.github/workflows/release.yml`: comprueba la versión, crea la release como borrador, pasa la CI, compila Linux (deb, rpm, AppImage) y Windows (NSIS + zip portable), publica la imagen Docker y `latest.json`, y publica la release. Si algo falla, queda en borrador y basta con relanzar los trabajos fallidos.
+4. macOS no se compila en la CI. En un Mac con la clave de firma: `git checkout vX.Y.Z && scripts/release-mac.sh vX.Y.Z` (sube el `.dmg`, el `.app.tar.gz` + `.sig` y añade macOS a `latest.json`).
 
-Available commands:
+### Actualizaciones de la app
 
-```bash
-npm run release -- patch
-npm run release -- minor
-npm run release -- major
-npm run release -- 0.2.0
-```
+La app usa el updater de Tauri, que lee `https://github.com/cucumba88/boxteam/releases/latest/download/latest.json` (configurado en `src-tauri/tauri.conf.json`). Cada paquete va firmado y la app solo instala los que coinciden con la clave pública de `tauri.conf.json`. La clave privada es el secreto de Actions `TAURI_SIGNING_PRIVATE_KEY` (+ `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). **Guarda una copia fuera de línea**: si se pierde, las apps instaladas no podrán actualizarse y habrá que reinstalar a mano con una clave nueva.
 
-Shortcuts:
+### Datos locales
 
-```bash
-npm run release:patch
-npm run release:minor
-npm run release:major
-```
+La base de datos `library.db` está en la carpeta de datos de la app (`boxteam/` dentro de la carpeta de datos del sistema, `boxteam-data/` junto al ejecutable en el modo portable, o `/config/share/boxteam` en Docker). Cada cambio de versión deja una copia en `backups/`.
 
-What the release script does:
+## Licencia
 
-- bumps `package.json`
-- updates `package-lock.json`
-- syncs `src-tauri/Cargo.toml`
-- runs `npm run build`
-- runs `cargo check`
-
-Optional release build:
-
-```bash
-npm run release -- patch --build
-```
-
-That will also run:
-
-```bash
-npm run tauri build
-```
-
-Optional bundled starter database:
-
-```bash
-npm run seed-db
-npm run seed-db -- --from /path/to/library-backup.db
-npm run release -- patch --build --seed-db /path/to/library-backup.db
-```
-
-`npm run seed-db` copies the current local app database into `src-tauri/resources/library.seed.db`.
-
-If `src-tauri/resources/library.seed.db` is present in the build, fresh installs can auto-seed their local database from that bundled backup on first launch.
-
-### GitHub release installers
-
-Pushing a `v*` tag runs `.github/workflows/release.yml` on the self-hosted
-Linux runner: version check → release draft → CI → Linux (deb, rpm, AppImage,
-tar.gz) and Windows (NSIS installer + portable zip, cross-compiled) → Docker
-image → `latest.json` for the updater → the draft is published. If a job
-fails the release stays a draft; re-run the failed jobs to resume it.
-
-CI doesn't build macOS. Build it on a Mac with `scripts/build-dmg.sh`, or
-attach it to a published release with `scripts/release-mac.sh vX.Y.Z` (see
-below).
-
-## In-app updates
-
-The desktop app checks for a new version shortly after startup and every 6
-hours, and offers it in a toast (and in Settings → Sistema → Actualizaciones):
-one click downloads it, installs it and restarts the app. It uses the Tauri
-updater, which reads
-`https://github.com/<owner>/boxteam/releases/latest/download/latest.json`
-(the endpoint is in `src-tauri/tauri.conf.json`).
-
-- **Signing.** Every update package is signed; the app only installs packages
-  whose signature matches the public key in `tauri.conf.json`. The private key
-  is the Actions secret `TAURI_SIGNING_PRIVATE_KEY` (+
-  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). Keep an offline backup: if it is
-  lost, installed apps can't update anymore and need a manual reinstall with a
-  new key.
-- **What updates itself.** The macOS app, the Windows NSIS install and the
-  Linux AppImage. The Windows portable zip, the .deb/.rpm packages and Docker
-  are updated by replacing them; the app says so in Settings.
-- **macOS.** After the release is published, on a Mac with the key
-  (`~/.tauri/boxteam-updater.key`, password in the Keychain item
-  "BoxTeam updater signing key password"):
-
-  ```bash
-  git checkout vX.Y.Z && scripts/release-mac.sh vX.Y.Z
-  ```
-
-  It builds the app, uploads `BoxTeam_X.Y.Z_aarch64.app.tar.gz` (+ `.sig`) and
-  the DMG, and regenerates `latest.json` with the Mac entry.
-
-## Notes
-
-- The app currently uses scheduled indexing and cached metadata to avoid unnecessary full refreshes.
-- Downloads and library state are designed to persist locally between sessions.
-- The current desktop bundle identifier is `com.boxteam.media`.
-
-## License
-
-This repository currently does not define a license file.
+Este repositorio aún no tiene archivo de licencia.
