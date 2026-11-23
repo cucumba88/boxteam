@@ -123,6 +123,13 @@ async fn fetch_json_with_retry<T: DeserializeOwned>(url: &str, context: &str) ->
     Err(last_error)
 }
 
+/// OMDb "errors" that are about the account (quota, key) rather than the
+/// title being looked up.
+fn is_account_error(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("limit") || m.contains("api key") || m.contains("apikey")
+}
+
 /// Parses a free-form OMDb rating string (`"8.5"`, `"N/A"`, or missing).
 fn parse_imdb_rating(raw: Option<&str>) -> Option<f64> {
     let s = raw?.trim();
@@ -164,13 +171,21 @@ pub async fn fetch_by_imdb_id(api_key: &str, imdb_id: &str) -> Result<OmdbRating
         imdb_rating: Option<String>,
         #[serde(rename = "imdbVotes")]
         imdb_votes: Option<String>,
+        #[serde(rename = "Error")]
+        error: Option<String>,
     }
 
     let resp: OmdbResponse = fetch_json_with_retry(&url, "by-imdb-id request").await?;
 
-    // OMDb returns 200 OK + Response="False" when the ID is unknown or the key is bad.
-    // Treat as "no rating" rather than an error so enrichment continues for the rest.
+    // OMDb returns 200 OK + Response="False" when the ID is unknown — that's
+    // a real "no rating" answer. A bad key or an exhausted daily quota comes
+    // back the same way, though, and those must stay errors so the caller
+    // retries the title later instead of recording it as checked.
     if resp.response.as_deref().unwrap_or("True").eq_ignore_ascii_case("False") {
+        let error = resp.error.unwrap_or_default();
+        if is_account_error(&error) {
+            return Err(format!("OMDb: {error}"));
+        }
         return Ok(OmdbRating::default());
     }
 
@@ -263,6 +278,14 @@ pub async fn validate_api_key(api_key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_errors_are_not_treated_as_missing_ratings() {
+        assert!(is_account_error("Request limit reached!"));
+        assert!(is_account_error("Invalid API key!"));
+        assert!(!is_account_error("Incorrect IMDb ID."));
+        assert!(!is_account_error(""));
+    }
 
     #[test]
     fn parses_imdb_rating_strings() {

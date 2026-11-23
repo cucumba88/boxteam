@@ -39,6 +39,7 @@ import {
 import { call, isTauri, apiBase } from "../lib/transport";
 import {
   markRatingsRefreshError,
+  markRatingsRefreshRequested,
   useRatingsRefresh,
 } from "../lib/ratingsRefreshState";
 import { getConfig, invalidateConfig } from "../lib/configCache";
@@ -889,10 +890,12 @@ export default function Settings({
     ratingsRefresh.state === "running"
       ? `${t(language, "settings.refreshRatingsRunning")} (${ratingsRefresh.done}/${ratingsRefresh.total})`
       : ratingsRefresh.state === "done"
-        ? t(language, "settings.refreshRatingsDone").replace(
-            "{count}",
-            String(ratingsRefresh.total),
-          )
+        ? ratingsRefresh.total === 0
+          ? t(language, "settings.refreshRatingsUpToDate")
+          : t(language, "settings.refreshRatingsDone").replace(
+              "{count}",
+              String(ratingsRefresh.total),
+            )
         : ratingsRefresh.message;
 
   // Personal subscription state
@@ -1187,6 +1190,7 @@ export default function Settings({
   // after the user closes/reopens Settings mid-job.
   const runRatingsRefresh = async () => {
     try {
+      markRatingsRefreshRequested();
       await call<void>("refresh_all_ratings");
     } catch (error: unknown) {
       markRatingsRefreshError(String(error));

@@ -899,7 +899,7 @@ pub async fn refresh_ratings_handler(
     // Fire-and-forget: progress is broadcast over the WS channel, the HTTP
     // response just acknowledges the job started.
     tokio::spawn(async move {
-        if let Err(e) = crate::commands::refresh_all_ratings_internal(db, None, false).await {
+        if let Err(e) = crate::commands::refresh_all_ratings_internal(db, None, crate::commands::RatingsRefreshMode::Missing).await {
             eprintln!("[ratings] refresh job failed: {e}");
         }
     });

@@ -1058,9 +1058,9 @@ async fn enrich_extra_ratings(
     imdb_id: &str,
     log_window: Option<&tauri::WebviewWindow>,
 ) -> ExtraRatings {
-    let (omdb, tvdb) = fetch_extra_ratings(config, imdb_id, log_window).await;
-    persist_extra_ratings(db, item_id, &omdb, &tvdb, log_window);
-    (omdb, tvdb)
+    let fetched = fetch_extra_ratings(config, imdb_id, log_window).await;
+    persist_extra_ratings(db, item_id, &fetched, log_window);
+    (fetched.omdb, fetched.tvdb)
 }
 
 /// Same as `enrich_extra_ratings`, but every file sharing an IMDb id (all the
@@ -1075,29 +1075,48 @@ async fn enrich_extra_ratings_cached(
     cache: &LookupCache,
 ) -> ExtraRatings {
     let cell = cache.ratings_cell(imdb_id.trim());
-    let (omdb, tvdb) = cell
+    let fetched = cell
         .get_or_init(|| fetch_extra_ratings(config, imdb_id, log_window))
         .await
         .clone();
-    persist_extra_ratings(db, item_id, &omdb, &tvdb, log_window);
-    (omdb, tvdb)
+    persist_extra_ratings(db, item_id, &fetched, log_window);
+    (fetched.omdb, fetched.tvdb)
 }
 
+/// Persist whatever came back. `ratings_fetched_at` is only stamped when
+/// every configured service answered (`fetched.complete`): that timestamp is
+/// what the background refresh uses to wait days before asking again for a
+/// title that has no rating yet, so a network error or an exhausted OMDb
+/// quota must not start that wait.
 fn persist_extra_ratings(
     db: &crate::db::Db,
     item_id: i64,
-    omdb: &Option<crate::omdb::OmdbRating>,
-    tvdb: &Option<crate::tvdb::TvdbRating>,
+    fetched: &FetchedRatings,
     log_window: Option<&tauri::WebviewWindow>,
 ) {
-    if omdb.is_some() || tvdb.is_some() {
-        if let Err(e) = db.update_extra_ratings(item_id, omdb.as_ref(), tvdb.as_ref()) {
+    if fetched.omdb.is_some() || fetched.tvdb.is_some() || fetched.complete {
+        if let Err(e) = db.update_extra_ratings(
+            item_id,
+            fetched.omdb.as_ref(),
+            fetched.tvdb.as_ref(),
+            fetched.complete,
+        ) {
             emit_ratings_log(&log_window.cloned(), format!("✗ Persist id={item_id}: {e}"));
         }
     }
 }
 
 type ExtraRatings = (Option<crate::omdb::OmdbRating>, Option<crate::tvdb::TvdbRating>);
+
+/// Result of one OMDb + TVDB lookup. `complete` is true when every
+/// configured service returned a real answer (even "no rating yet"), and
+/// false when at least one of them failed (network, quota, bad key…).
+#[derive(Clone, Default)]
+struct FetchedRatings {
+    omdb: Option<crate::omdb::OmdbRating>,
+    tvdb: Option<crate::tvdb::TvdbRating>,
+    complete: bool,
+}
 type TmdbMatch = Option<(crate::tmdb::TmdbMovie, String)>;
 
 /// Memo of remote lookups for the duration of one indexing / refresh run.
@@ -1109,7 +1128,7 @@ type TmdbMatch = Option<(crate::tmdb::TmdbMovie, String)>;
 #[derive(Clone, Default)]
 pub(crate) struct LookupCache {
     tmdb: Arc<Mutex<std::collections::HashMap<String, Arc<tokio::sync::OnceCell<TmdbMatch>>>>>,
-    ratings: Arc<Mutex<std::collections::HashMap<String, Arc<tokio::sync::OnceCell<ExtraRatings>>>>>,
+    ratings: Arc<Mutex<std::collections::HashMap<String, Arc<tokio::sync::OnceCell<FetchedRatings>>>>>,
 }
 
 impl LookupCache {
@@ -1118,7 +1137,7 @@ impl LookupCache {
         map.entry(key).or_default().clone()
     }
 
-    fn ratings_cell(&self, imdb_id: &str) -> Arc<tokio::sync::OnceCell<ExtraRatings>> {
+    fn ratings_cell(&self, imdb_id: &str) -> Arc<tokio::sync::OnceCell<FetchedRatings>> {
         let mut map = self.ratings.lock().unwrap_or_else(|e| e.into_inner());
         map.entry(imdb_id.to_string()).or_default().clone()
     }
@@ -1173,16 +1192,16 @@ async fn fetch_extra_ratings(
     config: &crate::db::AppConfig,
     imdb_id: &str,
     log_window: Option<&tauri::WebviewWindow>,
-) -> ExtraRatings {
+) -> FetchedRatings {
     let imdb_id = imdb_id.trim();
     if imdb_id.is_empty() {
-        return (None, None);
+        return FetchedRatings::default();
     }
 
     let log_target: Option<tauri::WebviewWindow> = log_window.cloned();
     let omdb_fut = async {
         if config.omdb_api_key.trim().is_empty() {
-            None
+            (None, true)
         } else {
             match crate::omdb::fetch_by_imdb_id(&config.omdb_api_key, imdb_id).await {
                 Ok(r) => {
@@ -1201,18 +1220,18 @@ async fn fetch_extra_ratings(
                             ),
                         );
                     }
-                    Some(r)
+                    (Some(r), true)
                 }
                 Err(e) => {
                     emit_ratings_log(&log_target, format!("✗ OMDb {imdb_id}: {e}"));
-                    None
+                    (None, false)
                 }
             }
         }
     };
     let tvdb_fut = async {
         if config.tvdb_api_key.trim().is_empty() {
-            None
+            (None, true)
         } else {
             match crate::tvdb::fetch_by_imdb(&config.tvdb_api_key, imdb_id).await {
                 Ok(r) => {
@@ -1230,17 +1249,22 @@ async fn fetch_extra_ratings(
                             format!("• TVDB {imdb_id}: no remote-id match"),
                         ),
                     }
-                    Some(r)
+                    (Some(r), true)
                 }
                 Err(e) => {
                     emit_ratings_log(&log_target, format!("✗ TVDB {imdb_id}: {e}"));
-                    None
+                    (None, false)
                 }
             }
         }
     };
 
-    tokio::join!(omdb_fut, tvdb_fut)
+    let ((omdb, omdb_ok), (tvdb, tvdb_ok)) = tokio::join!(omdb_fut, tvdb_fut);
+    FetchedRatings {
+        omdb,
+        tvdb,
+        complete: omdb_ok && tvdb_ok,
+    }
 }
 
 /// Global guard so concurrent "Refresh ratings" presses (or a desktop press
@@ -1249,18 +1273,61 @@ async fn fetch_extra_ratings(
 pub static RATINGS_REFRESH_RUNNING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-/// Re-fetch OMDb + TVDB ratings for every library item with an IMDb id.
-/// Sequential per item so we never have more than one OMDb and one TVDB
-/// request in flight at a time — the per-service throttles enforce pacing
-/// further. By default skips rows that already have both ratings (cheap
-/// resume after an interrupted run); `force=true` re-fetches everything.
+/// Which rows a ratings refresh looks at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RatingsRefreshMode {
+    /// Background top-up (startup, the 15-minute cycle, after an index).
+    /// Rows still missing a rating are skipped while their last complete
+    /// lookup is recent — see `ratings_retry_after`.
+    Auto,
+    /// Manual "Refresh ratings" press: every row still missing a rating,
+    /// ignoring the backoff.
+    Missing,
+    /// Re-fetch everything, including rows that already have ratings.
+    Force,
+}
+
+/// How long the background top-up waits before asking OMDb/TVDB again for a
+/// title that came back without a rating. Recent releases usually get their
+/// IMDb rating within days, so they're retried daily; older titles that
+/// still have none almost certainly never will, so once a week is plenty.
+/// Without this every 15-minute cycle re-requested the same titles forever
+/// (≈150 rows × 96 cycles a day against OMDb's 1 000-a-day free quota).
+fn ratings_retry_after(release_date: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> chrono::Duration {
+    let released = release_date
+        .and_then(|d| chrono::NaiveDate::parse_from_str(d.get(..10).unwrap_or(d), "%Y-%m-%d").ok());
+    match released {
+        Some(date) if (now.date_naive() - date).num_days() > 90 => chrono::Duration::days(7),
+        _ => chrono::Duration::days(1),
+    }
+}
+
+/// True when an `Auto` refresh should skip a row that is still missing a
+/// rating because its last complete lookup is younger than the backoff.
+fn ratings_recently_checked(
+    fetched_at: Option<&str>,
+    release_date: Option<&str>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    fetched_at
+        .and_then(|raw| chrono::DateTime::parse_from_rfc3339(raw).ok())
+        .map(|last| now - last.with_timezone(&chrono::Utc) < ratings_retry_after(release_date, now))
+        .unwrap_or(false)
+}
+
+/// Re-fetch OMDb + TVDB ratings for library items with an IMDb id.
+/// Rows are grouped by IMDb id so all the episodes of a show share one
+/// OMDb + one TVDB lookup, and titles are processed one at a time — the
+/// per-service throttles enforce pacing further. Which rows are included
+/// depends on `mode` (see `RatingsRefreshMode`).
 ///
-/// Emits `ratings:start`, `ratings:progress` (every 10 items + at completion),
-/// and `ratings:complete` over both Tauri events and the WS broadcast channel.
+/// Emits `ratings:start` (only when there is work), `ratings:progress`
+/// (every 5 titles + at completion), and `ratings:complete` over both Tauri
+/// events and the WS broadcast channel. Progress counts titles, not files.
 pub async fn refresh_all_ratings_internal(
     db: crate::db::Db,
     window: Option<tauri::WebviewWindow>,
-    force: bool,
+    mode: RatingsRefreshMode,
 ) -> Result<usize, String> {
     if RATINGS_REFRESH_RUNNING
         .compare_exchange(
@@ -1291,27 +1358,57 @@ pub async fn refresh_all_ratings_internal(
     }
 
     // Pull all matched rows and decide locally which still need work — the
-    // shared `get_all_media` query already returns the new rating columns.
+    // shared `get_all_media` query already returns the rating columns.
+    let now = chrono::Utc::now();
     let media = db.get_all_media()?;
-    let pending: Vec<(i64, String)> = media
-        .into_iter()
-        .filter_map(|item| {
-            let imdb = item.imdb_id.unwrap_or_default();
-            if imdb.trim().is_empty() {
-                return None;
+    let mut groups: Vec<(String, Vec<i64>)> = Vec::new();
+    let mut group_index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut skipped_backoff = 0usize;
+    for item in media {
+        let imdb = item.imdb_id.as_deref().unwrap_or_default().trim().to_string();
+        if imdb.is_empty() {
+            continue;
+        }
+        if mode != RatingsRefreshMode::Force {
+            let omdb_done = !omdb_enabled || item.imdb_rating.is_some();
+            let tvdb_done = !tvdb_enabled || item.tvdb_rating.is_some();
+            if omdb_done && tvdb_done {
+                continue;
             }
-            if !force {
-                let omdb_done = !omdb_enabled || item.imdb_rating.is_some();
-                let tvdb_done = !tvdb_enabled || item.tvdb_rating.is_some();
-                if omdb_done && tvdb_done {
-                    return None;
-                }
+            if mode == RatingsRefreshMode::Auto
+                && ratings_recently_checked(
+                    item.ratings_fetched_at.as_deref(),
+                    item.tmdb_release_date.as_deref(),
+                    now,
+                )
+            {
+                skipped_backoff += 1;
+                continue;
             }
-            Some((item.id, imdb))
-        })
-        .collect();
+        }
+        match group_index.get(&imdb) {
+            Some(&i) => groups[i].1.push(item.id),
+            None => {
+                group_index.insert(imdb.clone(), groups.len());
+                groups.push((imdb, vec![item.id]));
+            }
+        }
+    }
 
-    let total = pending.len();
+    let total = groups.len();
+    if total == 0 {
+        // Nothing to do: no banner. Still send `complete` so a manual press
+        // in Settings resolves to "done" instead of waiting forever.
+        if skipped_backoff > 0 {
+            eprintln!("[ratings] nothing due — {skipped_backoff} row(s) waiting for their retry window");
+        }
+        let complete = serde_json::json!({ "total": 0 });
+        if let Some(ref w) = window {
+            w.emit("ratings:complete", complete.clone()).ok();
+        }
+        crate::ws_broadcast("ratings:complete", complete);
+        return Ok(0);
+    }
 
     if let Some(ref w) = window {
         w.emit("ratings:start", serde_json::json!({ "total": total })).ok();
@@ -1320,39 +1417,47 @@ pub async fn refresh_all_ratings_internal(
     emit_ratings_log(
         &window,
         format!(
-            "🌟 Refreshing ratings for {total} item(s){}",
-            if force { " (forced — re-fetching everything)" } else { "" },
+            "🌟 Refreshing ratings for {total} title(s){}",
+            match mode {
+                RatingsRefreshMode::Force => " (forced — re-fetching everything)",
+                _ => "",
+            },
         ),
     );
 
-    for (idx, (id, imdb_id)) in pending.into_iter().enumerate() {
+    for (idx, (imdb_id, ids)) in groups.into_iter().enumerate() {
         emit_ratings_log(
             &window,
-            format!("🌟 [{}/{}] {imdb_id}", idx + 1, total),
+            format!("🌟 [{}/{}] {imdb_id} ({} file(s))", idx + 1, total, ids.len()),
         );
-        let (omdb, tvdb) =
-            enrich_extra_ratings(&db, &config, id, &imdb_id, window.as_ref()).await;
+        let fetched = fetch_extra_ratings(&config, &imdb_id, window.as_ref()).await;
 
-        // Push the live patch to the Tauri window (local listener — no
-        // broadcast cost). We deliberately do NOT ws_broadcast each item:
-        // for a 3000-row catalog that produced ~3000 WS messages over the
-        // refresh, each one triggering a React setItems → re-render storm
-        // that starved poster <img> loads of main-thread time in web mode.
-        // Web clients pick up the new ratings through `ratings:complete` →
-        // useIndexing re-fetches /api/media in one shot.
-        if let Some(ref w) = window {
-            let update_payload = serde_json::json!({
-                "id": id,
-                "imdb_rating": omdb.as_ref().and_then(|o| o.imdb_rating),
-                "imdb_votes":  omdb.as_ref().and_then(|o| o.imdb_votes),
-                "tvdb_id":     tvdb.as_ref().and_then(|t| t.tvdb_id),
-                "tvdb_rating": tvdb.as_ref().and_then(|t| t.rating),
-            });
-            w.emit("index:update", update_payload).ok();
+        for id in ids {
+            persist_extra_ratings(&db, id, &fetched, window.as_ref());
+
+            // Push the live patch to the Tauri window (local listener — no
+            // broadcast cost). We deliberately do NOT ws_broadcast each item:
+            // for a 3000-row catalog that produced ~3000 WS messages over the
+            // refresh, each one triggering a React setItems → re-render storm
+            // that starved poster <img> loads of main-thread time in web mode.
+            // Web clients pick up the new ratings through `ratings:complete` →
+            // useIndexing re-fetches /api/media in one shot.
+            if let Some(ref w) = window {
+                if fetched.omdb.is_some() || fetched.tvdb.is_some() {
+                    let update_payload = serde_json::json!({
+                        "id": id,
+                        "imdb_rating": fetched.omdb.as_ref().and_then(|o| o.imdb_rating),
+                        "imdb_votes":  fetched.omdb.as_ref().and_then(|o| o.imdb_votes),
+                        "tvdb_id":     fetched.tvdb.as_ref().and_then(|t| t.tvdb_id),
+                        "tvdb_rating": fetched.tvdb.as_ref().and_then(|t| t.rating),
+                    });
+                    w.emit("index:update", update_payload).ok();
+                }
+            }
         }
 
         let done = idx + 1;
-        if done % 10 == 0 || done == total {
+        if done % 5 == 0 || done == total {
             let progress = serde_json::json!({ "done": done, "total": total });
             if let Some(ref w) = window {
                 w.emit("ratings:progress", progress.clone()).ok();
@@ -1368,7 +1473,7 @@ pub async fn refresh_all_ratings_internal(
     crate::ws_broadcast("ratings:complete", complete);
     emit_ratings_log(
         &window,
-        format!("✓ Ratings refresh complete — {total} item(s) processed"),
+        format!("✓ Ratings refresh complete — {total} title(s) processed"),
     );
     Ok(total)
 }
@@ -1386,9 +1491,13 @@ pub async fn refresh_all_ratings(
         return Err("Ratings refresh already running".to_string());
     }
     let db = state.inner().clone();
-    let force = force.unwrap_or(false);
+    let mode = if force.unwrap_or(false) {
+        RatingsRefreshMode::Force
+    } else {
+        RatingsRefreshMode::Missing
+    };
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = refresh_all_ratings_internal(db, Some(window), force).await {
+        if let Err(e) = refresh_all_ratings_internal(db, Some(window), mode).await {
             eprintln!("[ratings] refresh job failed: {e}");
         }
     });
@@ -1663,7 +1772,7 @@ pub fn spawn_post_index_topups(db: crate::db::Db, window: Option<tauri::WebviewW
         refresh_all_metadata_internal(db.clone(), window.clone()).await.ok();
         let (db_r, win_r) = (db.clone(), window.clone());
         tauri::async_runtime::spawn(async move {
-            refresh_all_ratings_internal(db_r, win_r, false).await.ok();
+            refresh_all_ratings_internal(db_r, win_r, RatingsRefreshMode::Auto).await.ok();
         });
         refresh_watch_providers_internal(db, window).await.ok();
     });
@@ -5006,7 +5115,7 @@ mod indexing_tests {
                 cell.get_or_init(|| async {
                     calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    (None, None)
+                    FetchedRatings::default()
                 })
                 .await
                 .clone()
@@ -5384,5 +5493,38 @@ mod audio_preference_tests {
         assert!(!audio_codec_matches("EAC3", "AC3"));
         assert!(!audio_codec_matches("DTS-HD MA", "DTS"));
         assert!(!audio_codec_matches("AAC", ""));
+    }
+}
+
+#[cfg(test)]
+mod ratings_backoff_tests {
+    use super::ratings_recently_checked;
+    use chrono::{Duration, TimeZone, Utc};
+
+    #[test]
+    fn never_checked_is_due() {
+        let now = Utc.with_ymd_and_hms(2026, 11, 23, 12, 0, 0).unwrap();
+        assert!(!ratings_recently_checked(None, Some("2026-11-11"), now));
+        assert!(!ratings_recently_checked(Some("garbage"), None, now));
+    }
+
+    #[test]
+    fn recent_release_retries_daily() {
+        let now = Utc.with_ymd_and_hms(2026, 11, 23, 12, 0, 0).unwrap();
+        let fifteen_min_ago = (now - Duration::minutes(15)).to_rfc3339();
+        let two_days_ago = (now - Duration::days(2)).to_rfc3339();
+        assert!(ratings_recently_checked(Some(&fifteen_min_ago), Some("2026-11-11"), now));
+        assert!(!ratings_recently_checked(Some(&two_days_ago), Some("2026-11-11"), now));
+        // Unknown release date behaves like a recent one.
+        assert!(!ratings_recently_checked(Some(&two_days_ago), None, now));
+    }
+
+    #[test]
+    fn old_release_retries_weekly() {
+        let now = Utc.with_ymd_and_hms(2026, 11, 23, 12, 0, 0).unwrap();
+        let two_days_ago = (now - Duration::days(2)).to_rfc3339();
+        let eight_days_ago = (now - Duration::days(8)).to_rfc3339();
+        assert!(ratings_recently_checked(Some(&two_days_ago), Some("2019-05-01"), now));
+        assert!(!ratings_recently_checked(Some(&eight_days_ago), Some("2019-05-01"), now));
     }
 }

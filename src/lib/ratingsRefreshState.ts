@@ -47,6 +47,12 @@ export function markRatingsRefreshError(message: string): void {
   setSnapshot({ ...snapshot, state: "error", message });
 }
 
+/** Called right before a manual refresh so its result (even "nothing to
+ * do") is shown; background no-op runs stay silent. */
+export function markRatingsRefreshRequested(): void {
+  setSnapshot({ state: "running", done: 0, total: 0, message: "" });
+}
+
 function onStart(total: number) {
   setSnapshot({ state: "running", done: 0, total, message: "" });
 }
@@ -54,6 +60,9 @@ function onProgress(done: number, total: number) {
   setSnapshot({ state: "running", done, total, message: "" });
 }
 function onComplete(total: number) {
+  // The background top-up reports `total: 0` when nothing was due. Only
+  // surface that when someone pressed the button and is waiting for it.
+  if (total === 0 && snapshot.state !== "running") return;
   setSnapshot({ state: "done", done: total, total, message: "" });
 }
 

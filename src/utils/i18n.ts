@@ -897,8 +897,12 @@ const messages = {
     en: "Refreshing ratings…",
   },
   "settings.refreshRatingsDone": {
-    es: "Listo — {count} ítems procesados",
-    en: "Done — {count} items processed",
+    es: "Listo — {count} títulos consultados",
+    en: "Done — {count} titles checked",
+  },
+  "settings.refreshRatingsUpToDate": {
+    es: "No falta ninguna puntuación",
+    en: "No ratings are missing",
   },
   "settings.defaultLanguage": {
     es: "Idioma por defecto de la biblioteca",

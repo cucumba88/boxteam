@@ -2980,21 +2980,26 @@ impl Db {
     /// (the corresponding service is disabled or had no data); columns are
     /// only overwritten when the new value is `Some`, so disabling OMDb later
     /// won't wipe a previously-saved IMDb rating.
+    ///
+    /// `mark_checked` stamps `ratings_fetched_at` with the current time. Pass
+    /// it only when every configured service answered, so a failed lookup is
+    /// retried on the next cycle instead of waiting out the backoff.
     pub fn update_extra_ratings(
         &self,
         id: i64,
         omdb: Option<&crate::omdb::OmdbRating>,
         tvdb: Option<&crate::tvdb::TvdbRating>,
+        mark_checked: bool,
     ) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let now = mark_checked.then(|| chrono::Utc::now().to_rfc3339());
         conn.execute(
             "UPDATE media_items SET
                 imdb_rating       = COALESCE(?1, imdb_rating),
                 imdb_votes        = COALESCE(?2, imdb_votes),
                 tvdb_id           = COALESCE(?3, tvdb_id),
                 tvdb_rating       = COALESCE(?4, tvdb_rating),
-                ratings_fetched_at= ?5
+                ratings_fetched_at= COALESCE(?5, ratings_fetched_at)
              WHERE id = ?6",
             params![
                 omdb.and_then(|o| o.imdb_rating),

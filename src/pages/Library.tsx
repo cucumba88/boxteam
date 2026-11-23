@@ -2109,7 +2109,7 @@ export default function Library({
           : null
       }
       ratingsRefresh={
-        ratingsRefresh.state === "running"
+        ratingsRefresh.state === "running" && ratingsRefresh.total > 0
           ? {
               label: t(language, "ratings.banner", {
                 done: formatCount(ratingsRefresh.done, language),
@@ -2541,7 +2541,7 @@ export default function Library({
               : null
           }
           ratingsRefresh={
-            ratingsRefresh.state === "running"
+            ratingsRefresh.state === "running" && ratingsRefresh.total > 0
               ? {
                   label: t(language, "ratings.banner", {
                     done: formatCount(ratingsRefresh.done, language),

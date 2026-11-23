@@ -436,7 +436,7 @@ pub fn run() {
                     let db_clone = db.clone();
                     let window = visible_main_window(&handle);
                     tauri::async_runtime::spawn(async move {
-                        commands::refresh_all_ratings_internal(db_clone, window, false).await.ok();
+                        commands::refresh_all_ratings_internal(db_clone, window, commands::RatingsRefreshMode::Auto).await.ok();
                     });
                 }
                 // Auto-backfill streaming-platform availability for any
@@ -517,7 +517,7 @@ pub fn run() {
                         let db_clone = db.clone();
                         let win_clone = window.clone();
                         tauri::async_runtime::spawn(async move {
-                            commands::refresh_all_ratings_internal(db_clone, win_clone, false).await.ok();
+                            commands::refresh_all_ratings_internal(db_clone, win_clone, commands::RatingsRefreshMode::Auto).await.ok();
                         });
                     }
                     // Top up missing watch-providers on every cycle too.
