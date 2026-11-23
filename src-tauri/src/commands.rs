@@ -1704,6 +1704,60 @@ pub async fn is_portable_mode(
     Ok(state.is_portable())
 }
 
+/// Whether this install can update itself in place with the Tauri updater.
+///
+/// Only the installed builds can: the macOS .app, the Windows NSIS install
+/// and the Linux AppImage. The portable Windows zip, the .deb/.rpm packages
+/// (owned by the system package manager) and the Docker image are updated
+/// by replacing them, so the app doesn't offer an update there.
+#[tauri::command]
+pub async fn app_update_supported(
+    state: tauri::State<'_, crate::db::Db>,
+) -> Result<bool, String> {
+    Ok(update_supported_for(
+        std::env::consts::OS,
+        state.is_portable(),
+        std::env::var_os("APPIMAGE").is_some(),
+        cfg!(debug_assertions),
+    ))
+}
+
+/// Pure decision behind [`app_update_supported`].
+pub(crate) fn update_supported_for(
+    os: &str,
+    portable: bool,
+    running_as_appimage: bool,
+    debug_build: bool,
+) -> bool {
+    if debug_build || portable {
+        return false;
+    }
+    match os {
+        "macos" | "windows" => true,
+        "linux" => running_as_appimage,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod update_supported_tests {
+    use super::update_supported_for;
+
+    #[test]
+    fn installed_desktop_builds_can_update() {
+        assert!(update_supported_for("macos", false, false, false));
+        assert!(update_supported_for("windows", false, false, false));
+        assert!(update_supported_for("linux", false, true, false));
+    }
+
+    #[test]
+    fn portable_packages_and_dev_builds_cannot() {
+        assert!(!update_supported_for("windows", true, false, false));
+        assert!(!update_supported_for("linux", false, false, false));
+        assert!(!update_supported_for("macos", false, false, true));
+    }
+}
+
 /// Remove the custom path from bootstrap.json so the next launch uses the
 /// default app-data location. The caller must prompt the user to restart.
 #[tauri::command]

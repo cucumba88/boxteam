@@ -232,57 +232,44 @@ If `src-tauri/resources/library.seed.db` is present in the build, fresh installs
 
 ### GitHub release installers
 
-This repository now includes a GitHub Actions workflow at `.github/workflows/release-installers.yml`.
+Pushing a `v*` tag runs `.github/workflows/release.yml` on the self-hosted
+Linux runner: version check → release draft → CI → Linux (deb, rpm, AppImage,
+tar.gz) and Windows (NSIS installer + portable zip, cross-compiled) → Docker
+image → `latest.json` for the updater → the draft is published. If a job
+fails the release stays a draft; re-run the failed jobs to resume it.
 
-When you publish a GitHub Release, the workflow will:
+CI doesn't build macOS. Build it on a Mac with `scripts/build-dmg.sh`, or
+attach it to a published release with `scripts/release-mac.sh vX.Y.Z` (see
+below).
 
-- build installers on macOS, Windows, and Linux runners
-- upload the generated installers back to that GitHub Release
-- include `src-tauri/resources/library.seed.db` in the app bundle when that file is committed in the repository
+## In-app updates
 
-Recommended release flow:
+The desktop app checks for a new version shortly after startup and every 6
+hours, and offers it in a toast (and in Settings → Sistema → Actualizaciones):
+one click downloads it, installs it and restarts the app. It uses the Tauri
+updater, which reads
+`https://github.com/<owner>/boxteam/releases/latest/download/latest.json`
+(the endpoint is in `src-tauri/tauri.conf.json`).
 
-```bash
-npm run seed-db
-git add src-tauri/resources/library.seed.db
-git commit -m "Update starter database"
-git push
-```
+- **Signing.** Every update package is signed; the app only installs packages
+  whose signature matches the public key in `tauri.conf.json`. The private key
+  is the Actions secret `TAURI_SIGNING_PRIVATE_KEY` (+
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). Keep an offline backup: if it is
+  lost, installed apps can't update anymore and need a manual reinstall with a
+  new key.
+- **What updates itself.** The macOS app, the Windows NSIS install and the
+  Linux AppImage. The Windows portable zip, the .deb/.rpm packages and Docker
+  are updated by replacing them; the app says so in Settings.
+- **macOS.** After the release is published, on a Mac with the key
+  (`~/.tauri/boxteam-updater.key`, password in the Keychain item
+  "BoxTeam updater signing key password"):
 
-Then create or publish the GitHub Release for the version you want to ship. The workflow will build platform-specific installers for that release.
+  ```bash
+  git checkout vX.Y.Z && scripts/release-mac.sh vX.Y.Z
+  ```
 
-If you want fresh installs to ship with indexed media and metadata, make sure the updated `src-tauri/resources/library.seed.db` is committed before publishing the release.
-
-### macOS signing and notarization
-
-If macOS release downloads say the app is **damaged** or cannot be opened, that usually means the app was built without a trusted Apple signature/notarization and Gatekeeper blocked it.
-
-The GitHub workflow now supports macOS signing automatically when these repository secrets are configured:
-
-- required for signing:
-  - `APPLE_CERTIFICATE`
-  - `APPLE_CERTIFICATE_PASSWORD`
-  - `KEYCHAIN_PASSWORD`
-- optional for notarization via Apple ID:
-  - `APPLE_ID`
-  - `APPLE_PASSWORD`
-  - `APPLE_TEAM_ID`
-- optional for notarization via App Store Connect API:
-  - `APPLE_API_KEY`
-  - `APPLE_API_ISSUER`
-  - `APPLE_API_KEY_CONTENT`
-
-Notes:
-
-- `APPLE_CERTIFICATE` should contain the base64-encoded `.p12` certificate export
-- `APPLE_API_KEY_CONTENT` should contain the contents of the downloaded `.p8` key file
-- if `APPLE_CERTIFICATE` is missing, the workflow now falls back to ad-hoc signing (`APPLE_SIGNING_IDENTITY=-`) for macOS builds
-- ad-hoc signing is useful for testing and is better than a completely unsigned app on Apple Silicon, but it is still not equivalent to Developer ID signing + notarization
-- without a real Apple Developer signing setup, macOS may still show warnings for GitHub-downloaded builds
-
-## Current updater status
-
-The runtime updater is currently disabled/removed. Versioning and release preparation are in place, but in-app update checking/install flow is not active right now.
+  It builds the app, uploads `BoxTeam_X.Y.Z_aarch64.app.tar.gz` (+ `.sig`) and
+  the DMG, and regenerates `latest.json` with the Mac entry.
 
 ## Notes
 

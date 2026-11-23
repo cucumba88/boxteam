@@ -124,6 +124,8 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(db::Db::new().expect("Failed to init SQLite"))
         .manage(Arc::new(Mutex::new(downloads::DownloadQueue::new(2))) as downloads::SharedQueue)
         .manage(Arc::new(Mutex::new(uploads::UploadQueue::new(2))) as uploads::SharedUploadQueue)
@@ -152,6 +154,7 @@ pub fn run() {
             commands::init_db_path,
             commands::set_db_path,
             commands::is_portable_mode,
+            commands::app_update_supported,
             commands::reset_db_path,
             commands::get_all_media,
             commands::get_media_overview,

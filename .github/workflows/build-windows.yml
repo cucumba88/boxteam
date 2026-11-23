@@ -124,8 +124,10 @@ jobs:
       - name: Build Tauri (NSIS installer)
         run: npm run tauri build -- --runner cargo-xwin --target "$TARGET"
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          # Signs the updater packages (.sig next to the installer) that
+          # the in-app updater verifies against the pubkey in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Pack portable zip
         run: bash scripts/build-portable-windows.sh --target "$TARGET"
@@ -151,4 +153,5 @@ jobs:
           shopt -s nullglob
           node _ci/scripts/release-assets.mjs upload "$RELEASE_TAG" \
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe \
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig \
             boxteam-windows-portable-*.zip

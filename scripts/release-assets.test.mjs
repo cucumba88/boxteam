@@ -4,8 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  buildUpdaterManifest,
   cargoPackageVersion,
   findRelease,
+  updaterPlatform,
   versionFromTag,
   versionMismatches,
 } from "./release-assets.mjs";
@@ -65,4 +67,40 @@ test("the repo's own versions agree with each other", () => {
   const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
   const cargoToml = fs.readFileSync(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
   assert.deepEqual(versionMismatches(`v${packageJson.version}`, { packageJson, cargoToml }), []);
+});
+
+test("updaterPlatform maps the installers the in-app updater can install", () => {
+  assert.equal(updaterPlatform("BoxTeam_0.21.0_x64-setup.exe"), "windows-x86_64");
+  assert.equal(updaterPlatform("BoxTeam_0.21.0_amd64.AppImage"), "linux-x86_64");
+  assert.equal(updaterPlatform("BoxTeam_0.21.0_aarch64.app.tar.gz"), "darwin-aarch64");
+  assert.equal(updaterPlatform("BoxTeam_0.21.0_amd64.deb"), null);
+  assert.equal(updaterPlatform("boxteam-windows-portable-0.21.0.zip"), null);
+  assert.equal(updaterPlatform("BoxTeam_0.21.0_x64-setup.exe.sig"), null);
+});
+
+test("buildUpdaterManifest lists only signed installers, with download URLs", () => {
+  const manifest = buildUpdaterManifest({
+    repo: "owner/boxteam",
+    tag: "v0.21.0",
+    notes: "Novedades",
+    pubDate: "2026-11-23T12:00:00.000Z",
+    assetNames: [
+      "BoxTeam_0.21.0_x64-setup.exe",
+      "BoxTeam_0.21.0_x64-setup.exe.sig",
+      "BoxTeam_0.21.0_amd64.AppImage",
+      "BoxTeam_0.21.0_amd64.deb",
+    ],
+    signatures: { "BoxTeam_0.21.0_x64-setup.exe": "c2lnbmF0dXJl\n" },
+  });
+  assert.deepEqual(manifest, {
+    version: "0.21.0",
+    notes: "Novedades",
+    pub_date: "2026-11-23T12:00:00.000Z",
+    platforms: {
+      "windows-x86_64": {
+        signature: "c2lnbmF0dXJl",
+        url: "https://github.com/owner/boxteam/releases/download/v0.21.0/BoxTeam_0.21.0_x64-setup.exe",
+      },
+    },
+  });
 });

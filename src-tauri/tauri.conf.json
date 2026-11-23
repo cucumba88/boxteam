@@ -50,6 +50,18 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhBN0QxQzc5QzU1NUQyNTUKUldSVjBsWEZlUng5aXFtdDQwckpETi9uUnlLYzFrbmV3TGdZdVBrQUFDREhpbGNlVEM5UkdBcVYK",
+      "endpoints": [
+        "https://github.com/cucumba88/boxteam/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

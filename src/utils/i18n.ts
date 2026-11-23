@@ -1759,6 +1759,49 @@ const messages = {
     en: "Metadata cleared. It's being fetched again in the background.",
   },
 
+  "updates.title": { es: "Actualizaciones", en: "Updates" },
+  "updates.description": {
+    es: "Instala las versiones nuevas sin volver a descargar el instalador.",
+    en: "Install new versions without downloading the installer again.",
+  },
+  "updates.currentVersion": { es: "Tienes la versión {version}", en: "You have version {version}" },
+  "updates.check": { es: "Buscar actualizaciones", en: "Check for updates" },
+  "updates.checking": { es: "Buscando…", en: "Checking…" },
+  "updates.upToDate": { es: "Ya tienes la última versión.", en: "You're on the latest version." },
+  "updates.available": {
+    es: "Hay una versión nueva: {version}.",
+    en: "A new version is available: {version}.",
+  },
+  "updates.install": { es: "Instalar y reiniciar", en: "Install and restart" },
+  "updates.retry": { es: "Reintentar", en: "Try again" },
+  "updates.later": { es: "Más tarde", en: "Later" },
+  "updates.downloading": { es: "Descargando la actualización…", en: "Downloading the update…" },
+  "updates.downloadingPercent": {
+    es: "Descargando la actualización… {percent} %",
+    en: "Downloading the update… {percent}%",
+  },
+  "updates.restarting": { es: "Instalada. Reiniciando BoxTeam…", en: "Installed. Restarting BoxTeam…" },
+  "updates.installFailed": {
+    es: "No se pudo instalar la actualización. Tu versión actual sigue funcionando.",
+    en: "The update couldn't be installed. Your current version keeps working.",
+  },
+  "updates.checkFailed": {
+    es: "No se pudo comprobar si hay versiones nuevas. Revisa tu conexión.",
+    en: "Couldn't check for new versions. Check your connection.",
+  },
+  "updates.unsupported": {
+    es: "Esta instalación (portable, .deb/.rpm o Docker) se actualiza descargando la versión nueva.",
+    en: "This install (portable, .deb/.rpm or Docker) is updated by downloading the new version.",
+  },
+  "updates.help": {
+    es: "BoxTeam busca versiones nuevas al arrancar y cada 6 horas. Las actualizaciones van firmadas y se comprueban antes de instalarse.",
+    en: "BoxTeam checks for new versions at startup and every 6 hours. Updates are signed and verified before they're installed.",
+  },
+  "updates.toastTitle": { es: "BoxTeam {version} disponible", en: "BoxTeam {version} is available" },
+  "updates.toastBody": {
+    es: "Se descarga, se instala y la app se reinicia sola.",
+    en: "It downloads, installs and the app restarts on its own.",
+  },
   "maintenance.title": {
     es: "Mantenimiento de la biblioteca",
     en: "Library maintenance",
