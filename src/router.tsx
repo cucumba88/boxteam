@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { LogOut, User } from "lucide-react";
 import Library from "./pages/Library";
 import { isTauri } from "./lib/transport";
+import { t } from "./utils/i18n";
 import { prefetchConfig } from "./lib/configCache";
 import { prefetchMedia } from "./lib/mediaCache";
 import { AuthProvider, useAuth } from "./lib/AuthContext";
@@ -507,6 +508,12 @@ function menuItemStyle(active: boolean): React.CSSProperties {
 }
 
 function LoadingScreen() {
+  // The user's language lives in the config we haven't loaded yet, so go by
+  // the browser/OS locale for this one line.
+  const language =
+    typeof navigator !== "undefined" && navigator.language?.startsWith("en")
+      ? "en"
+      : "es";
   return (
     <div
       style={{
@@ -541,6 +548,19 @@ function LoadingScreen() {
         }}
       >
         BoxTeam
+      </div>
+      <div
+        role="status"
+        aria-live="polite"
+        style={{
+          marginTop: -8,
+          fontSize: 13,
+          color: "var(--color-text-muted)",
+          fontFamily: "var(--font-sans)",
+          opacity: 0.85,
+        }}
+      >
+        {t(language, "startup.starting")}
       </div>
     </div>
   );

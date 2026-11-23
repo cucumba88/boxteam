@@ -3,11 +3,11 @@ import {
   Activity,
   Check,
   Download,
-  RefreshCw,
   Upload,
   Wifi,
   WifiOff,
 } from "lucide-react";
+import ActivityIndicator, { type ActivityTask } from "./ActivityIndicator";
 import type { AppLanguage } from "../utils/mediaLanguage";
 import { t } from "../utils/i18n";
 import { percentOf } from "../lib/progressFormat";
@@ -118,78 +118,34 @@ export default function AppStatusBar({
     }
   }, [liveWorkActive, flashVisible]);
 
-  // Priority for the center slot, top to bottom:
-  //   1. Completion flash (transient win)
-  //   2. Active indexing (with percent bar)
-  //   3. Metadata refresh (post-index)
-  //   4. Ratings refresh (manual)
-  //   5. Item-count idle label
-  const indexingPercent =
-    indexing?.isActive && indexing.percent != null ? indexing.percent : null;
-
-  // Shared renderer for a progress slot — keeps the visual signature
-  // consistent across indexing / meta-refresh / ratings-refresh so the bar
-  // always reads the same way: spinner · label · big bar · percent.
-  const renderProgress = (label: string, pct: number) => (
-    <>
-      <RefreshCw
-        size={13}
-        strokeWidth={2.4}
-        aria-hidden="true"
-        className="shell-statusbar-icon-spin"
-      />
-      <span className="shell-statusbar-label">{label}</span>
-      <div
-        className="shell-statusbar-progress"
-        role="progressbar"
-        aria-valuenow={pct}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={label}
-      >
-        <div style={{ width: `${pct}%` }} />
-      </div>
-      <span className="shell-statusbar-percent">{pct}%</span>
-    </>
-  );
+  // Every job that is running right now, in a stable order. The status bar
+  // only shows a compact chip for them; the full list (with a bar each)
+  // lives in a popover so the bar never grows or shimmers.
+  const tasks: ActivityTask[] = [];
+  if (indexing?.isActive) {
+    tasks.push({
+      id: "indexing",
+      label: indexing.label,
+      percent: indexing.percent ?? null,
+    });
+  }
+  for (const [id, job] of [
+    ["meta", metaRefresh],
+    ["ratings", ratingsRefresh],
+    ["providers", watchProvidersRefresh],
+  ] as const) {
+    if (job && job.total > 0) {
+      tasks.push({
+        id,
+        label: job.label,
+        percent: percentOf(job.done, job.total) ?? 0,
+      });
+    }
+  }
 
   const renderCenter = () => {
-    // Priority order, top wins:
-    //   1. Active indexing (with bar + percent, or indeterminate spinner)
-    //   2. Active metadata refresh
-    //   3. Active ratings refresh
-    //   4. Completion flash (transient "done" pill — only shown when no
-    //      live work is in progress, so doing > done)
-    //   5. Idle item count
-    if (indexing?.isActive) {
-      // Indexing has an indeterminate phase (scanning, no percent yet);
-      // show the spinner + label, and add the bar only once we have one.
-      if (indexingPercent != null) {
-        return renderProgress(indexing.label, indexingPercent);
-      }
-      return (
-        <>
-          <RefreshCw
-            size={13}
-            strokeWidth={2.4}
-            aria-hidden="true"
-            className="shell-statusbar-icon-spin"
-          />
-          <span className="shell-statusbar-label">{indexing.label}</span>
-        </>
-      );
-    }
-    if (metaRefresh && metaRefresh.total > 0) {
-      const pct = percentOf(metaRefresh.done, metaRefresh.total) ?? 0;
-      return renderProgress(metaRefresh.label, pct);
-    }
-    if (ratingsRefresh && ratingsRefresh.total > 0) {
-      const pct = percentOf(ratingsRefresh.done, ratingsRefresh.total) ?? 0;
-      return renderProgress(ratingsRefresh.label, pct);
-    }
-    if (watchProvidersRefresh && watchProvidersRefresh.total > 0) {
-      const pct = percentOf(watchProvidersRefresh.done, watchProvidersRefresh.total) ?? 0;
-      return renderProgress(watchProvidersRefresh.label, pct);
+    if (tasks.length > 0) {
+      return <ActivityIndicator language={language} tasks={tasks} />;
     }
     if (flashVisible && completionFlash) {
       return (
@@ -198,8 +154,8 @@ export default function AppStatusBar({
           role="status"
           aria-live="polite"
         >
-          <Check size={14} strokeWidth={2.8} aria-hidden="true" />
-          <span style={{ fontWeight: 800 }}>{completionFlash.label}</span>
+          <Check size={12} strokeWidth={2.8} aria-hidden="true" />
+          <span style={{ fontWeight: 700 }}>{completionFlash.label}</span>
           {completionFlash.sublabel && (
             <span style={{ opacity: 0.9 }}>· {completionFlash.sublabel}</span>
           )}
@@ -209,18 +165,8 @@ export default function AppStatusBar({
     return <span style={{ opacity: 0.6 }}>{indexing?.label ?? ""}</span>;
   };
 
-  // Drive the "working" state on the footer so CSS can grow the bar height,
-  // raise font sizes, and show the accent strip without prop-drilling.
-  // `liveWorkActive` is recomputed each render — checks every job source so
-  // the bar grows the moment any one of them becomes truthy.
-  const isWorking = liveWorkActive || flashVisible;
-
   return (
-    <footer
-      className={`shell-statusbar${isWorking ? " working" : ""}${
-        flashVisible ? " flashing" : ""
-      }`}
-    >
+    <footer className="shell-statusbar">
       {/* Left: connection */}
       <div className="shell-statusbar-section">
         {connection ? (

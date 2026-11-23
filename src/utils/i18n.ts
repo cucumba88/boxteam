@@ -10,6 +10,13 @@ const messages = {
   "nav.uploads": { es: "Subidas", en: "Uploads" },
 
   "common.loading": { es: "Cargando…", en: "Loading…" },
+  "startup.starting": { es: "Arrancando BoxTeam…", en: "Starting BoxTeam…" },
+  "startup.preparingLibrary": { es: "Preparando tu biblioteca…", en: "Getting your library ready…" },
+  "startup.preparingLibraryDetail": {
+    es: "Leyendo los títulos guardados. Con bibliotecas grandes tarda unos segundos.",
+    en: "Reading your saved titles. Large libraries take a few seconds.",
+  },
+  "startup.loadingSettings": { es: "Cargando tus ajustes…", en: "Loading your settings…" },
   "common.search": { es: "Buscar", en: "Search" },
   "common.clear": { es: "Limpiar", en: "Clear" },
   "common.cancel": { es: "Cancelar", en: "Cancel" },
@@ -60,6 +67,13 @@ const messages = {
   "library.titlesCount": {
     es: "{count} títulos",
     en: "{count} titles",
+  },
+  "statusbar.tasksRunning": { es: "{count} tareas en curso", en: "{count} tasks running" },
+  "statusbar.tasksTitle": { es: "Tareas en segundo plano", en: "Background tasks" },
+  "statusbar.tasksShow": { es: "Ver tareas en curso", en: "Show running tasks" },
+  "statusbar.tasksHint": {
+    es: "Puedes seguir usando BoxTeam mientras terminan.",
+    en: "You can keep using BoxTeam while they finish.",
   },
   "statusbar.activeDownloads": {
     es: "Descargas en curso",
@@ -1057,6 +1071,100 @@ const messages = {
   },
   "settings.discardChanges": { es: "Descartar", en: "Discard" },
   "settings.jumpTo": { es: "Ir a la sección", en: "Jump to section" },
+  "telegramSetup.step1Title": { es: "Token del bot", en: "Bot token" },
+  "telegramSetup.step1Hint": {
+    es: "En Telegram, abre @BotFather, envía /newbot y pega aquí el token que te da.",
+    en: "In Telegram, open @BotFather, send /newbot and paste the token it gives you here.",
+  },
+  "telegramSetup.tokenLabel": { es: "Token del bot de Telegram", en: "Telegram bot token" },
+  "telegramSetup.step2Title": { es: "Bot en el grupo o canal", en: "Bot in the group or channel" },
+  "telegramSetup.step2Hint": {
+    es: "Añade el bot al grupo o canal donde quieres los anuncios, publica un mensaje (en un grupo, menciona al bot) y pulsa Detectar.",
+    en: "Add the bot to the group or channel for the announcements, post a message (in a group, mention the bot) and press Detect.",
+  },
+  "telegramSetup.chatLabel": { es: "Chat ID del canal o grupo", en: "Channel or group chat ID" },
+  "telegramSetup.detect": { es: "Detectar", en: "Detect" },
+  "telegramSetup.detectTitle": {
+    es: "Busca el último canal o grupo que ha escrito al bot",
+    en: "Finds the last channel or group that wrote to the bot",
+  },
+  "telegramSetup.detecting": { es: "Buscando el chat…", en: "Looking for the chat…" },
+  "telegramSetup.detected": {
+    es: "Chat detectado. Guarda los cambios para usarlo.",
+    en: "Chat detected. Save your changes to use it.",
+  },
+  "telegramSetup.detectedNamed": {
+    es: "Detectado «{title}». Guarda los cambios para usarlo.",
+    en: "Detected “{title}”. Save your changes to use it.",
+  },
+  "telegramSetup.step3Title": { es: "Permiso de administrador", en: "Admin rights" },
+  "telegramSetup.step3Hint": {
+    es: "Haz al bot administrador. En un canal, con el permiso «Publicar mensajes».",
+    en: "Make the bot an admin. In a channel, with the “Post messages” right.",
+  },
+  "telegramSetup.step4Title": { es: "Prueba", en: "Test" },
+  "telegramSetup.step4Hint": {
+    es: "Envía un mensaje de prueba o un aviso de subida de ejemplo y míralo en Telegram.",
+    en: "Send a test message or a sample upload notice and check it in Telegram.",
+  },
+  "telegramSetup.sendTest": { es: "Enviar prueba", en: "Send test" },
+  "telegramSetup.sendSample": { es: "Enviar ejemplo de subida", en: "Send sample upload" },
+  "telegramSetup.sendSampleTitle": {
+    es: "Envía un aviso de subida de ejemplo con el formato real",
+    en: "Sends a sample upload notice with the real format",
+  },
+  "telegramSetup.sending": { es: "Enviando…", en: "Sending…" },
+  "telegramSetup.testSent": {
+    es: "Mensaje de prueba enviado. Míralo en Telegram.",
+    en: "Test message sent. Check it in Telegram.",
+  },
+  "telegramSetup.sampleSent": {
+    es: "Ejemplo de aviso enviado. Así se verán las subidas.",
+    en: "Sample notice sent. This is how uploads will look.",
+  },
+  "telegramSetup.checking": { es: "Comprobando…", en: "Checking…" },
+  "telegramSetup.recheck": { es: "Volver a comprobar", en: "Check again" },
+  "telegramSetup.footer": {
+    es: "Cada subida terminada se anunciará con el póster, la calidad, el audio y los subtítulos. Deja el token vacío para no enviar avisos.",
+    en: "Every finished upload is announced with its poster, quality, audio and subtitles. Leave the token empty to send nothing.",
+  },
+  "telegramSetup.allDone": {
+    es: "Todo listo. Guarda los cambios y las subidas se anunciarán solas.",
+    en: "All set. Save your changes and uploads will be announced automatically.",
+  },
+  "settingsNav.menuLabel": { es: "Secciones de ajustes", en: "Settings sections" },
+  "settingsNav.searchPlaceholder": { es: "Buscar ajustes…", en: "Search settings…" },
+  "settingsNav.clearSearch": { es: "Borrar búsqueda", en: "Clear search" },
+  "settingsNav.resultsFor": { es: "Resultados para «{query}»", en: "Results for “{query}”" },
+  "settingsNav.noResults": {
+    es: "No hay ningún ajuste que coincida. Prueba con otra palabra, como «FTP», «Telegram» o «tema».",
+    en: "No setting matches that. Try another word, like “FTP”, “Telegram” or “theme”.",
+  },
+  "settingsNav.general": { es: "General", en: "General" },
+  "settingsNav.generalDesc": {
+    es: "Apariencia, pestaña inicial y comportamiento de la ventana.",
+    en: "Appearance, start tab and window behaviour.",
+  },
+  "settingsNav.library": { es: "Biblioteca", en: "Library" },
+  "settingsNav.libraryDesc": {
+    es: "Metadatos, carpetas, perfiles de calidad y mantenimiento de la biblioteca.",
+    en: "Metadata, folders, quality profiles and library maintenance.",
+  },
+  "settingsNav.connection": { es: "Conexión", en: "Connection" },
+  "settingsNav.connectionDesc": {
+    es: "Servidor FTP, descargas, servidores multimedia e interfaz web.",
+    en: "FTP server, downloads, media servers and web interface.",
+  },
+  "settingsNav.notifications": { es: "Avisos", en: "Notifications" },
+  "settingsNav.notificationsDesc": {
+    es: "Avisos por Telegram: el canal de anuncios de subidas y tus avisos personales.",
+    en: "Telegram notifications: the upload announcement channel and your personal alerts.",
+  },
+  "settingsNav.system": { es: "Sistema", en: "System" },
+  "settingsNav.systemDesc": {
+    es: "Almacenamiento, copias de seguridad y zona de peligro.",
+    en: "Storage, backups and danger zone.",
+  },
 
   // ── Folder Routing ─────────────────────────────────────────────────────
   "settings.folderRoutingTitle": {

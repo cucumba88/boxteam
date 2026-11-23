@@ -31,6 +31,7 @@ const DESKTOP_ONLY = new Set([
   "test_telegram",
   "test_telegram_upload_sample",
   "detect_telegram_chat",
+  "check_telegram_setup",
 ]);
 
 type AxumRoute = { method: string; pattern: RegExp; path: string };

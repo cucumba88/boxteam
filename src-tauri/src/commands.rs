@@ -5132,6 +5132,16 @@ pub async fn test_telegram_upload_sample(token: String, chat_id: String) -> Resu
     crate::telegram::send_message(&token, &chat_id, &text).await
 }
 
+/// Step-by-step check of the announcement bot (token, bot in the chat,
+/// bot's role) for the Settings → Avisos wizard.
+#[tauri::command]
+pub async fn check_telegram_setup(
+    token: String,
+    chat_id: String,
+) -> Result<crate::telegram::SetupCheck, String> {
+    Ok(crate::telegram::check_setup(&token, &chat_id).await)
+}
+
 /// Find the chat id of the channel/group/private chat the bot last saw.
 #[tauri::command]
 pub async fn detect_telegram_chat(token: String) -> Result<crate::telegram::DetectedChat, String> {

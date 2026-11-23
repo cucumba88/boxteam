@@ -30,6 +30,9 @@ export type SidebarItem<TabId extends string> = {
   label: string;
   icon: LucideIcon;
   count?: number;
+  /** Show the count even when it is 0 (library sections, so an empty
+   *  section reads "0" instead of looking like it has no counter). */
+  showZero?: boolean;
 };
 
 export type SidebarSection<TabId extends string> = {
@@ -116,7 +119,8 @@ export default function AppSidebar<TabId extends string>({
                   <Icon size={18} strokeWidth={active ? 2.4 : 2.0} aria-hidden="true" />
                 </span>
                 <span className="shell-sidebar-item-label">{item.label}</span>
-                {item.count !== undefined && item.count > 0 && (
+                {item.count !== undefined &&
+                  (item.count > 0 || item.showZero) && (
                   <span className="shell-sidebar-item-count">{item.count}</span>
                 )}
               </button>

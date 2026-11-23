@@ -64,6 +64,19 @@ import FtpTlsFields from "../components/FtpTlsFields";
 import DangerZone from "../features/reset/DangerZone";
 import LibraryMaintenance from "../features/maintenance/LibraryMaintenance";
 import { TelegramBotGuide } from "../features/uploads/TelegramBotGuide";
+import TelegramSetupWizard from "../features/notifications/TelegramSetupWizard";
+import {
+  SETTINGS_GROUPS,
+  SettingsNavContext,
+  isSettingsGroupId,
+  readStoredGroup,
+  storeGroup,
+  useSettingsSectionVisibility,
+  type SettingsGroupId,
+} from "../features/settings/settingsNav";
+import SettingsNavMenu, {
+  type SettingsIndexEntry,
+} from "../features/settings/SettingsNavMenu";
 import FtpPermissionsPanel, {
   FTP_CONFIG_SAVED_EVENT,
 } from "../components/FtpPermissionsPanel";
@@ -284,6 +297,8 @@ function SectionCard({
   children,
   defaultOpen = true,
   anchor,
+  group,
+  keywords,
 }: {
   icon: LucideIcon;
   title: string;
@@ -292,8 +307,19 @@ function SectionCard({
   defaultOpen?: boolean;
   /** Stable handle so other screens can deep-link to this section. */
   anchor?: string;
+  /** Block of the Settings menu this card belongs to. */
+  group: SettingsGroupId;
+  /** Extra words the Settings search should match (field names, synonyms). */
+  keywords?: string;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [openState, setOpen] = useState(defaultOpen);
+  const { visible, forceOpen } = useSettingsSectionVisibility(
+    group,
+    title,
+    description,
+    keywords,
+  );
+  const open = openState || forceOpen;
   const sectionId = `settings-section-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   // The index chips at the top of Settings dispatch this event so a
   // collapsed section opens before it's scrolled into view.
@@ -309,7 +335,13 @@ function SectionCard({
       id={sectionId}
       data-settings-section={title}
       data-settings-anchor={anchor}
-      style={{ ...sectionCardStyle, scrollMarginTop: 12 }}
+      data-settings-group={group}
+      hidden={!visible}
+      style={{
+        ...sectionCardStyle,
+        scrollMarginTop: 12,
+        display: visible ? undefined : "none",
+      }}
     >
       <button
         type="button"
@@ -369,8 +401,43 @@ function SectionCard({
           <AppIcon name="chevron-down" size={16} />
         </div>
       </button>
-      {open && children}
+      {open && visible && children}
     </section>
+  );
+}
+
+/** Wraps a block that brings its own card (Zona de peligro) so it takes
+ *  part in the Settings menu and search like a SectionCard. */
+function SettingsSlot({
+  title,
+  description,
+  keywords,
+  group,
+  children,
+}: {
+  title: string;
+  description: string;
+  keywords?: string;
+  group: SettingsGroupId;
+  children: React.ReactNode;
+}) {
+  const { visible } = useSettingsSectionVisibility(
+    group,
+    title,
+    description,
+    keywords,
+  );
+  const id = `settings-section-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  return (
+    <div
+      id={id}
+      data-settings-section={title}
+      data-settings-group={group}
+      hidden={!visible}
+      style={{ display: visible ? undefined : "none", scrollMarginTop: 12 }}
+    >
+      {visible && children}
+    </div>
   );
 }
 
@@ -406,6 +473,8 @@ function PreferencesSection({ language }: { language: AppLanguage }) {
 
   return (
     <SectionCard
+      group="general"
+      keywords="pestaña inicial orden vista predeterminada default tab sort view"
       icon={SlidersHorizontal}
       title={t(language, "settings.preferencesTitle")}
       description={t(language, "settings.preferencesDescription")}
@@ -607,6 +676,8 @@ function QualityProfilesSection({ language }: { language: AppLanguage }) {
 
   return (
     <SectionCard
+      group="library"
+      keywords="calidad resolucion codec 4k hdr seguimiento descarga automatica quality profile"
       icon={Gauge}
       title={t(language, "qualityProfile.title")}
       description={t(language, "qualityProfile.description")}
@@ -839,31 +910,70 @@ export default function Settings({
   const isDirty = changedFields > 0;
 
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const [sectionIndex, setSectionIndex] = useState<
-    { id: string; title: string }[]
-  >([]);
+  const [sectionIndex, setSectionIndex] = useState<SettingsIndexEntry[]>([]);
+  // Settings menu: which block is shown, and the search text (which, when
+  // set, shows matching sections from every block instead).
+  const [activeGroup, setActiveGroupState] = useState<SettingsGroupId>(
+    () => (focusSection === "telegram" ? "notifications" : readStoredGroup()) ?? "general",
+  );
+  const [settingsQuery, setSettingsQuery] = useState("");
+  const setActiveGroup = (group: SettingsGroupId) => {
+    setActiveGroupState(group);
+    storeGroup(group);
+    setSettingsQuery("");
+    panelRef.current?.scrollTo({ top: 0 });
+  };
   // Re-read the rendered sections after every render; only update state when
-  // the list actually changed so this can't loop.
+  // the list actually changed so this can't loop. Built from the DOM because
+  // which sections render depends on platform and role.
   useEffect(() => {
     const nodes = panelRef.current?.querySelectorAll<HTMLElement>(
       "[data-settings-section]",
     );
-    const next = Array.from(nodes ?? []).map((node) => ({
-      id: node.id,
-      title: node.dataset.settingsSection ?? "",
-    }));
+    const next: SettingsIndexEntry[] = Array.from(nodes ?? []).flatMap(
+      (node) => {
+        const group = node.dataset.settingsGroup;
+        if (!isSettingsGroupId(group)) return [];
+        return [
+          {
+            id: node.id,
+            title: node.dataset.settingsSection ?? "",
+            group,
+            hidden: node.hidden,
+          },
+        ];
+      },
+    );
     setSectionIndex((prev) =>
       JSON.stringify(prev) === JSON.stringify(next) ? prev : next,
     );
   });
   const jumpToSection = (id: string) => {
+    // Switch to the section's block first (and drop any search) so it is
+    // on screen, then open it and scroll once React has rendered it.
+    const group = document.getElementById(id)?.dataset.settingsGroup;
+    if (isSettingsGroupId(group) && (group !== activeGroup || settingsQuery)) {
+      setActiveGroupState(group);
+      storeGroup(group);
+      setSettingsQuery("");
+    }
     window.dispatchEvent(new CustomEvent(SECTION_OPEN_EVENT, { detail: id }));
-    requestAnimationFrame(() => {
-      document
-        .getElementById(id)
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        document
+          .getElementById(id)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }),
+    );
   };
+  const searchingSettings = settingsQuery.trim().length > 0;
+  const activeGroupDef =
+    SETTINGS_GROUPS.find((group) => group.id === activeGroup) ??
+    SETTINGS_GROUPS[0];
+  const noSearchResults =
+    searchingSettings &&
+    sectionIndex.length > 0 &&
+    sectionIndex.every((entry) => entry.hidden);
   const [ftpStatus, setFtpStatus] = useState<ConnectionState>("idle");
   const [ftpError, setFtpError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -876,9 +986,6 @@ export default function Settings({
   const [embyMsg, setEmbyMsg] = useState("");
   const [plexStatus, setPlexStatus] = useState<ConnectionState>("idle");
   const [plexMsg, setPlexMsg] = useState("");
-  const [telegramStatus, setTelegramStatus] = useState<ConnectionState>("idle");
-  const [telegramMsg, setTelegramMsg] = useState("");
-  const [telegramDetecting, setTelegramDetecting] = useState(false);
   const [tmdbTestStatus, setTmdbTestStatus] = useState<ConnectionState>("idle");
   const [omdbTestStatus, setOmdbTestStatus] = useState<ConnectionState>("idle");
   const [tvdbTestStatus, setTvdbTestStatus] = useState<ConnectionState>("idle");
@@ -1123,20 +1230,46 @@ export default function Settings({
   };
 
   if (!form) {
+    // Same footprint as the loaded page (title + menu + cards) so nothing
+    // jumps when the config arrives.
     return (
       <div
+        aria-busy="true"
         style={{
-          position: "fixed",
-          inset: 0,
-          background: "color-mix(in srgb, black 55%, transparent)",
-          zIndex: 200,
+          height: "100%",
+          width: "100%",
+          background: "var(--color-bg)",
+          padding: isMobile ? "16px 14px" : "18px 24px",
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          flexDirection: "column",
+          gap: 16,
         }}
       >
-        <div style={{ padding: 24, color: "var(--color-text-muted)" }}>
-          {t(language, "common.loading")}
+        <div
+          role="status"
+          aria-live="polite"
+          style={{ fontSize: 13, color: "var(--color-text-muted)" }}
+        >
+          {t(language, "startup.loadingSettings")}
+        </div>
+        <div style={{ display: "flex", gap: 24, flex: 1, minHeight: 0 }}>
+          {!isMobile && (
+            <div style={{ width: 220, display: "grid", gap: 10, alignContent: "start" }}>
+              <div className="skeleton" style={{ height: 36 }} />
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="skeleton" style={{ height: 30, width: `${70 + (i % 3) * 10}%` }} />
+              ))}
+            </div>
+          )}
+          <div style={{ flex: 1, display: "grid", gap: 14, alignContent: "start" }}>
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="skeleton"
+                style={{ height: i === 0 ? 220 : 76, borderRadius: "var(--radius-lg)" }}
+              />
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -1257,70 +1390,6 @@ export default function Settings({
     } catch (error: unknown) {
       setPlexMsg(String(error));
       setPlexStatus("error");
-    }
-  };
-
-  const testTelegram = async () => {
-    setTelegramStatus("testing");
-    setTelegramMsg("");
-    try {
-      await call("test_telegram", {
-        token: form.telegram_bot_token,
-        chatId: form.telegram_chat_id,
-      });
-      setTelegramMsg("Mensaje de prueba enviado. Míralo en Telegram.");
-      setTelegramStatus("ok");
-    } catch (error: unknown) {
-      setTelegramMsg(String(error));
-      setTelegramStatus("error");
-    }
-  };
-
-  // Sends a full sample upload card through the real formatter.
-  const sendTelegramSample = async () => {
-    setTelegramStatus("testing");
-    setTelegramMsg("");
-    try {
-      await call("test_telegram_upload_sample", {
-        token: form.telegram_bot_token,
-        chatId: form.telegram_chat_id,
-      });
-      setTelegramMsg("Ejemplo de aviso enviado. Así se verán las subidas.");
-      setTelegramStatus("ok");
-    } catch (error: unknown) {
-      setTelegramMsg(String(error));
-      setTelegramStatus("error");
-    }
-  };
-
-  // Reads the bot's latest update to fill the chat id for the admin.
-  const detectTelegramChat = async () => {
-    setTelegramDetecting(true);
-    setTelegramStatus("idle");
-    setTelegramMsg("");
-    try {
-      const chat = await call<{ id: string; title: string; kind: string }>(
-        "detect_telegram_chat",
-        { token: form.telegram_bot_token },
-      );
-      setForm((f) => (f ? { ...f, telegram_chat_id: chat.id } : f));
-      const kindLabel =
-        chat.kind === "channel"
-          ? "canal"
-          : chat.kind === "private"
-            ? "chat privado"
-            : "grupo";
-      setTelegramMsg(
-        chat.title
-          ? `Detectado ${kindLabel} «${chat.title}». Guarda los cambios para usarlo.`
-          : `Detectado ${kindLabel}. Guarda los cambios para usarlo.`,
-      );
-      setTelegramStatus("ok");
-    } catch (error: unknown) {
-      setTelegramMsg(String(error));
-      setTelegramStatus("error");
-    } finally {
-      setTelegramDetecting(false);
     }
   };
 
@@ -1708,55 +1777,27 @@ export default function Settings({
         )}
       </div>
 
-      {/* Section index — one chip per visible section. Clicking opens the
-          section (if collapsed) and scrolls to it. Built from the DOM because
-          which sections render depends on platform and role. */}
-      {sectionIndex.length > 1 && (
-        <nav
-          aria-label={t(language, "settings.jumpTo")}
-          className="settings-index"
-          style={{
-            display: "flex",
-            gap: 6,
-            // Wrap on desktop so every section is visible at once; scroll
-            // sideways on mobile to keep the header short.
-            flexWrap: isMobile ? "nowrap" : "wrap",
-            overflowX: isMobile ? "auto" : "visible",
-            padding: isMobile ? "8px 12px" : "8px 24px",
-            borderBottom:
-              "1px solid color-mix(in srgb, var(--color-border) 50%, transparent)",
-            background: "var(--color-bg)",
-            flexShrink: 0,
-            scrollbarWidth: "none",
-          }}
-        >
-          {sectionIndex.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              onClick={() => jumpToSection(entry.id)}
-              style={{
-                flexShrink: 0,
-                height: 28,
-                padding: "0 12px",
-                borderRadius: 999,
-                border:
-                  "1px solid color-mix(in srgb, var(--color-border) 70%, transparent)",
-                background:
-                  "color-mix(in srgb, var(--color-surface) 85%, transparent)",
-                color: "var(--color-text-muted)",
-                fontSize: 12,
-                fontWeight: 600,
-                fontFamily: "inherit",
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {entry.title}
-            </button>
-          ))}
-        </nav>
-      )}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: isMobile ? "column" : "row",
+        }}
+      >
+      <SettingsNavMenu
+        language={language}
+        isMobile={isMobile}
+        query={settingsQuery}
+        onQueryChange={(value) => {
+          setSettingsQuery(value);
+          panelRef.current?.scrollTo({ top: 0 });
+        }}
+        activeGroup={activeGroup}
+        onGroupChange={setActiveGroup}
+        entries={sectionIndex}
+        onJump={jumpToSection}
+      />
 
       {/* Scroll area is full width so the bottom footer can span edge-to-edge.
           Content is centred via an inner max-width wrapper. */}
@@ -1765,6 +1806,7 @@ export default function Settings({
         className="settings-panel"
         style={{
           flex: 1,
+          minWidth: 0,
           overflowY: "auto",
           overscrollBehavior: "contain",
           background: "transparent",
@@ -1773,15 +1815,57 @@ export default function Settings({
         <div
           style={{
             width: "100%",
-            maxWidth: 1200,
+            maxWidth: 980,
             margin: "0 auto",
             padding: isMobile
-              ? "10px 0.875rem 1.5rem"
-              : "16px 1.5rem 1.5rem",
+              ? "12px 0.875rem 1.5rem"
+              : "20px 1.75rem 1.5rem",
           }}
         >
+          <div style={{ marginBottom: 14 }}>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: isMobile ? 17 : 19,
+                fontWeight: 700,
+                color: "var(--color-text)",
+              }}
+            >
+              {searchingSettings
+                ? t(language, "settingsNav.resultsFor", {
+                    query: settingsQuery.trim(),
+                  })
+                : t(language, activeGroupDef.label)}
+            </h2>
+            {!searchingSettings && (
+              <p style={{ ...subtextStyle, margin: "4px 0 0" }}>
+                {t(language, activeGroupDef.description)}
+              </p>
+            )}
+          </div>
+          {noSearchResults && (
+            <div
+              role="status"
+              style={{
+                padding: "28px 20px",
+                borderRadius: "var(--radius-lg)",
+                border:
+                  "1px dashed color-mix(in srgb, var(--color-border) 90%, transparent)",
+                color: "var(--color-text-muted)",
+                fontSize: 13.5,
+                textAlign: "center",
+              }}
+            >
+              {t(language, "settingsNav.noResults")}
+            </div>
+          )}
+          <SettingsNavContext.Provider
+            value={{ activeGroup, query: settingsQuery }}
+          >
           <div style={{ display: "grid", gap: 16 }}>
             <SectionCard
+              group="general"
+              keywords="tema oscuro claro sistema theme dark light"
               icon={Palette}
               title={t(language, "settings.appearanceTitle")}
               description={t(language, "settings.appearanceDescription")}
@@ -1846,6 +1930,8 @@ export default function Settings({
             <QualityProfilesSection language={language} />
 
             <SectionCard
+              group="connection"
+              keywords="ftp host puerto usuario contraseña tls ftps ruta raiz permisos server port user password"
               icon={Server}
               title={t(language, "settings.ftpTitle")}
               description={t(language, "settings.ftpDescription")}
@@ -2061,14 +2147,10 @@ export default function Settings({
               )}
             </SectionCard>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: c2,
-                gap: 16,
-              }}
-            >
+            <div style={{ display: "contents" }}>
               <SectionCard
+                group="connection"
+                keywords="descargas carpeta simultaneas destino downloads folder concurrent"
                 icon={Download}
                 title={t(language, "settings.downloadsTitle")}
                 description={t(language, "settings.downloadsDescription")}
@@ -2136,6 +2218,8 @@ export default function Settings({
                 </div>
               </SectionCard>
               <SectionCard
+                group="library"
+                keywords="tmdb omdb tvdb imdb idioma puntuaciones notas api key language ratings"
                 icon={Languages}
                 title={t(language, "settings.metaTitle")}
                 description={t(language, "settings.metaDescription")}
@@ -2449,6 +2533,8 @@ export default function Settings({
             {/* ─── Folder Routing ─────────────────────────────────────────── */}
             {canWrite && (
               <SectionCard
+                group="library"
+                keywords="enrutamiento subidas destino genero carpetas alfabetico routing uploads genre"
                 icon={FolderTree}
                 title={t(language, "settings.folderRoutingTitle")}
                 description={t(language, "settings.folderRoutingDescription")}
@@ -2834,6 +2920,8 @@ export default function Settings({
             {/* ─── end Folder Routing ───────────────────────────────────── */}
 
             <SectionCard
+              group="library"
+              keywords="tipos carpeta peliculas series documentales folder types"
               icon={FolderCog}
               title={t(language, "settings.folderTypesTitle")}
               description={t(language, "settings.folderTypesDescription")}
@@ -2954,6 +3042,8 @@ export default function Settings({
             </SectionCard>
 
             <SectionCard
+              group="connection"
+              keywords="emby plex jellyfin servidor multimedia media server token"
               icon={MonitorPlay}
               title={t(language, "settings.mediaServersTitle")}
               description={t(language, "settings.mediaServersDescription")}
@@ -3174,6 +3264,8 @@ export default function Settings({
             </SectionCard>
             {isTauri() && (
               <SectionCard
+                group="general"
+                keywords="escritorio bandeja cerrar ventana tray close window"
                 icon={AppWindow}
                 title={t(language, "settings.desktopTitle")}
                 description={t(language, "settings.desktopDescription")}
@@ -3245,6 +3337,8 @@ export default function Settings({
 
             {webGuiConfig && (
               <SectionCard
+                group="connection"
+                keywords="web lan navegador acceso remoto puerto usuarios browser remote port"
                 icon={Globe}
                 title={t(language, "settings.webInterfaceTitle")}
                 description={t(language, "settings.webInterfaceDescription")}
@@ -3774,6 +3868,8 @@ export default function Settings({
 
             {isTauri() && (
               <SectionCard
+                group="system"
+                keywords="almacenamiento base de datos ruta portable database storage path"
                 icon={HardDrive}
                 title={t(language, "settings.storage")}
                 description={t(language, "settings.dbLocationDesc")}
@@ -3893,6 +3989,8 @@ export default function Settings({
 
             {isTauri() && (
               <SectionCard
+                group="notifications"
+                keywords="telegram bot token chat id canal grupo avisos anuncios notifications channel"
                 icon={Bell}
                 anchor="telegram"
                 title="Notificaciones"
@@ -4017,133 +4115,21 @@ export default function Settings({
                             )}
                           </div>
                         )}
-                        <div style={fieldStyle}>
-                          <label style={labelStyle} htmlFor="settings-field-28">
-                            Token del bot de Telegram
-                          </label>
-                          <input
-                            id="settings-field-28"
-                            style={inputStyle}
-                            type="password"
-                            value={form.telegram_bot_token ?? ""}
-                            onChange={set("telegram_bot_token")}
-                            placeholder="1234567890:ABCdef..."
-                            autoComplete="off"
-                          />
-                        </div>
-                        <div style={fieldStyle}>
-                          <label style={labelStyle} htmlFor="settings-field-29">
-                            Chat ID del canal o grupo
-                          </label>
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: 8,
-                              alignItems: "stretch",
-                            }}
-                          >
-                            <input
-                              id="settings-field-29"
-                              style={{ ...inputStyle, flex: 1, minWidth: 0 }}
-                              value={form.telegram_chat_id ?? ""}
-                              onChange={set("telegram_chat_id")}
-                              placeholder="-1001234567890"
-                              inputMode="numeric"
-                            />
-                            <button
-                              type="button"
-                              onClick={detectTelegramChat}
-                              disabled={
-                                telegramDetecting || !form.telegram_bot_token
-                              }
-                              title="Busca el último canal o grupo que ha escrito al bot (si no hay ninguno, tu chat privado)"
-                              style={{
-                                ...ghostBtn,
-                                flexShrink: 0,
-                                opacity:
-                                  telegramDetecting || !form.telegram_bot_token
-                                    ? 0.5
-                                    : 1,
-                              }}
-                            >
-                              {telegramDetecting ? "Buscando…" : "Detectar"}
-                            </button>
-                          </div>
-                          <span style={subtextStyle}>
-                            Añade el bot al canal o grupo como administrador,
-                            publica un mensaje (en un grupo, menciona al bot)
-                            y pulsa Detectar. Si copias el ID de Telegram Web,
-                            añade -100 delante: #-1234567890 es -1001234567890.
-                          </span>
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          <button
-                            onClick={testTelegram}
-                            disabled={
-                              telegramStatus === "testing" ||
-                              !form.telegram_bot_token ||
-                              !form.telegram_chat_id
-                            }
-                            style={{
-                              ...ghostBtn,
-                              opacity:
-                                telegramStatus === "testing" ||
-                                !form.telegram_bot_token ||
-                                !form.telegram_chat_id
-                                  ? 0.5
-                                  : 1,
-                            }}
-                          >
-                            Probar conexión
-                          </button>
-                          <button
-                            onClick={sendTelegramSample}
-                            disabled={
-                              telegramStatus === "testing" ||
-                              !form.telegram_bot_token ||
-                              !form.telegram_chat_id
-                            }
-                            title="Envía un aviso de subida de ejemplo con el formato real"
-                            style={{
-                              ...ghostBtn,
-                              opacity:
-                                telegramStatus === "testing" ||
-                                !form.telegram_bot_token ||
-                                !form.telegram_chat_id
-                                  ? 0.5
-                                  : 1,
-                            }}
-                          >
-                            Enviar ejemplo de subida
-                          </button>
-                          {telegramStatus === "testing" && (
-                            <span style={subtextStyle}>Enviando…</span>
-                          )}
-                        </div>
-                        {telegramStatus !== "idle" &&
-                          telegramStatus !== "testing" && (
-                            <div>
-                              <StatusPill
-                                state={telegramStatus}
-                                text={
-                                  telegramMsg ||
-                                  (telegramStatus === "ok" ? "Enviado" : "Error")
-                                }
-                              />
-                            </div>
-                          )}
-                        <span style={subtextStyle}>
-                          Cada subida terminada se anuncia aquí con el póster,
-                          la calidad, el audio y los subtítulos del fichero.
-                          Deja el token vacío para no enviar avisos.
-                        </span>
+                        <TelegramSetupWizard
+                          language={language}
+                          token={form.telegram_bot_token ?? ""}
+                          chatId={form.telegram_chat_id ?? ""}
+                          onTokenChange={(value) =>
+                            setForm((f) =>
+                              f ? { ...f, telegram_bot_token: value } : f,
+                            )
+                          }
+                          onChatIdChange={(value) =>
+                            setForm((f) =>
+                              f ? { ...f, telegram_chat_id: value } : f,
+                            )
+                          }
+                        />
                       </>
                     )}
                   </div>
@@ -4318,6 +4304,8 @@ export default function Settings({
 
             {!isTauri() && (
               <SectionCard
+                group="notifications"
+                keywords="telegram bot token chat id canal grupo avisos anuncios notifications channel"
                 icon={Bell}
                 title="Notificaciones"
                 description={
@@ -4553,6 +4541,8 @@ export default function Settings({
 
             {(isTauri() || (user && user.role === "admin")) && (
               <SectionCard
+                group="library"
+                keywords="mantenimiento metadatos reemparejar puntuaciones borrar maintenance rematch ratings"
                 icon={Wrench}
                 title={t(language, "maintenance.title")}
                 description={t(language, "maintenance.description")}
@@ -4563,6 +4553,8 @@ export default function Settings({
             )}
 
             <SectionCard
+              group="system"
+              keywords="copia seguridad exportar importar restaurar backup export import restore"
               icon={ArchiveRestore}
               title={t(language, "settings.backupsTitle")}
               description={t(language, "settings.backupsDescription")}
@@ -4615,10 +4607,19 @@ export default function Settings({
             </SectionCard>
 
             {(isTauri() || (user && user.role === "admin")) && (
-              <DangerZone language={language} onLibraryReset={onLibraryReset} />
+              <SettingsSlot
+                group="system"
+                title={t(language, "reset.sectionTitle")}
+                description={t(language, "reset.sectionDescription")}
+                keywords="reiniciar restablecer fabrica borrar biblioteca reset factory wipe"
+              >
+                <DangerZone language={language} onLibraryReset={onLibraryReset} />
+              </SettingsSlot>
             )}
           </div>
+          </SettingsNavContext.Provider>
         </div>
+      </div>
       </div>
 
       {/* Save bar — only shown while there are unsaved changes (or right

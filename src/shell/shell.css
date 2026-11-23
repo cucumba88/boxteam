@@ -388,10 +388,8 @@ body[data-boxteam-indexing="true"]
 /* ── Status bar ───────────────────────────────────────────────────────── */
 
 .shell-statusbar {
-  /* Idle: a slim 28px strip. Active: 40px so the progress bar and the
-     percentage actually have room to breathe — the user shouldn't have to
-     squint to know what the app is doing. Smooth height transition keeps
-     the layout shift from feeling jarring. */
+  /* Always a slim 28px strip: running jobs show up as a compact chip in
+     the centre (see ActivityIndicator) instead of growing the bar. */
   height: 28px;
   flex-shrink: 0;
   display: flex;
@@ -405,62 +403,6 @@ body[data-boxteam-indexing="true"]
   color: var(--color-text-muted);
   z-index: 30;
   position: relative;
-  transition:
-    height 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    background 220ms ease,
-    border-color 220ms ease;
-}
-
-.shell-statusbar.working {
-  height: 40px;
-  font-size: 12.5px;
-  color: var(--color-text);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--color-primary) 6%, transparent),
-    color-mix(in srgb, var(--color-bg) 96%, black 4%)
-  );
-  border-top: 1px solid
-    color-mix(in srgb, var(--color-primary) 32%, var(--color-border));
-}
-
-/* Accent strip that runs along the top edge of the status bar while work
-   is happening — a 2px brand-purple line with a soft shimmer. Doubles as
-   the "I'm alive" signal even if the user is scrolled away from the bar. */
-.shell-statusbar.working::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    var(--color-primary) 20%,
-    color-mix(in srgb, var(--color-primary) 50%, white 50%) 50%,
-    var(--color-primary) 80%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: boxteam-statusbar-shimmer 2.4s linear infinite;
-  pointer-events: none;
-}
-
-@keyframes boxteam-statusbar-shimmer {
-  from { background-position: 200% 0; }
-  to   { background-position: -200% 0; }
-}
-
-.shell-statusbar.flashing::before {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    var(--color-success) 30%,
-    color-mix(in srgb, var(--color-success) 50%, white 50%) 50%,
-    var(--color-success) 70%,
-    transparent 100%
-  );
 }
 
 .shell-statusbar-section {
@@ -510,42 +452,127 @@ body[data-boxteam-indexing="true"]
   flex-shrink: 0;
 }
 
-.shell-statusbar-label {
+/* ── Background-task indicator (status bar centre) ───────────────────── */
+.shell-activity {
+  position: relative;
+  min-width: 0;
+  display: flex;
+}
+
+.shell-activity-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(420px, 46vw);
+  height: 20px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 9%, transparent);
+  color: var(--color-text);
+  font: inherit;
   font-weight: 600;
-  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.shell-activity-trigger:hover,
+.shell-activity-trigger[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 50%, var(--color-border));
+}
+
+.shell-activity-summary {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 38vw;
+  min-width: 0;
 }
 
-.shell-statusbar-progress {
-  width: 240px;
-  height: 6px;
-  background: color-mix(in srgb, var(--color-surface-2) 92%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
-  border-radius: 999px;
-  overflow: hidden;
+.shell-activity-percent {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  font-weight: 600;
   flex-shrink: 0;
 }
 
-.shell-statusbar-progress > div {
+.shell-activity-popover {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: 0 12px 32px color-mix(in srgb, black 40%, transparent);
+  color: var(--color-text);
+  font-size: 12.5px;
+  animation: boxteam-flash-in 160ms ease-out;
+}
+
+.shell-activity-popover-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 10px;
+}
+
+.shell-activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.shell-activity-row-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.shell-activity-row-label {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-activity-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-surface-2);
+  overflow: hidden;
+}
+
+.shell-activity-bar > div {
   height: 100%;
-  background: linear-gradient(
-    90deg,
-    var(--color-primary),
-    color-mix(in srgb, var(--color-primary) 70%, white 30%)
-  );
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 60%, transparent);
+  border-radius: 999px;
+  background: var(--color-primary);
   transition: width 0.3s ease;
 }
 
-.shell-statusbar-percent {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  color: var(--color-text);
-  min-width: 36px;
-  text-align: right;
+.shell-activity-bar.indeterminate > div {
+  animation: boxteam-activity-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes boxteam-activity-indeterminate {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(300%); }
+}
+
+.shell-activity-hint {
+  margin-top: 12px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
 }
 
 /* Inline success flash shown when an indexing run finishes — replaces the
@@ -554,17 +581,14 @@ body[data-boxteam-indexing="true"]
 .shell-statusbar-flash {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 14px;
+  gap: 6px;
+  padding: 1px 10px;
   border-radius: 999px;
-  font-size: 12.5px;
+  font-size: 11.5px;
   color: var(--color-success);
-  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
   border: 1px solid
-    color-mix(in srgb, var(--color-success) 42%, transparent);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--color-success) 14%, transparent),
-    0 4px 14px color-mix(in srgb, var(--color-success) 28%, transparent);
+    color-mix(in srgb, var(--color-success) 35%, transparent);
   animation: boxteam-flash-in 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
@@ -579,21 +603,9 @@ body[data-boxteam-indexing="true"]
   }
 }
 
-/* Narrower viewports — drop the progress bar width so the label still
-   fits before the percent. */
-@media (max-width: 900px) {
-  .shell-statusbar-progress {
-    width: 140px;
-  }
-  .shell-statusbar-label {
-    max-width: 32vw;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .shell-statusbar,
-  .shell-statusbar.working::before,
-  .shell-statusbar-icon-spin {
+  .shell-statusbar-icon-spin,
+  .shell-activity-bar.indeterminate > div {
     transition: none;
     animation: none;
   }

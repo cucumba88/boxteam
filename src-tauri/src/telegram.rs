@@ -243,6 +243,205 @@ pub async fn detect_latest_chat(token: &str) -> Result<Option<DetectedChat>, Str
         .and_then(|arr| pick_detected_chat(arr)))
 }
 
+// ─── Setup check (Settings → Avisos wizard) ─────────────────────────────────
+
+/// Result of one step of the announcement-bot setup check.
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct SetupStep {
+    /// "ok" | "warn" | "error" | "skipped"
+    pub state: String,
+    /// Human text for the UI (Spanish, like the rest of the Telegram errors).
+    pub message: String,
+}
+
+impl SetupStep {
+    fn new(state: &str, message: impl Into<String>) -> Self {
+        Self { state: state.to_string(), message: message.into() }
+    }
+    fn ok(message: impl Into<String>) -> Self { Self::new("ok", message) }
+    fn warn(message: impl Into<String>) -> Self { Self::new("warn", message) }
+    fn error(message: impl Into<String>) -> Self { Self::new("error", message) }
+    fn skipped(message: impl Into<String>) -> Self { Self::new("skipped", message) }
+}
+
+/// Token → bot in the chat → bot can post. Each step is only checked when
+/// the previous one passed; later steps come back as "skipped".
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct SetupCheck {
+    pub bot: SetupStep,
+    pub chat: SetupStep,
+    pub admin: SetupStep,
+    /// Bot @username when the token is valid, so the UI can name it.
+    pub bot_username: Option<String>,
+    /// Chat title/type when the bot can see the chat.
+    pub chat_title: Option<String>,
+    pub chat_kind: Option<String>,
+}
+
+/// Calls a Bot API method with a JSON body. Err carries (HTTP status,
+/// Telegram description, full response) for the humanizers.
+async fn api_call(
+    token: &str,
+    method: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, (u16, String, serde_json::Value)> {
+    let url = format!("https://api.telegram.org/bot{token}/{method}");
+    let response = TELEGRAM_CLIENT
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| (0, format!("No se ha podido contactar con Telegram: {e}"), serde_json::Value::Null))?;
+    let status = response.status().as_u16();
+    let json: serde_json::Value = response.json().await.unwrap_or(serde_json::Value::Null);
+    if status == 200 && json["ok"].as_bool().unwrap_or(false) {
+        Ok(json["result"].clone())
+    } else {
+        let desc = json["description"].as_str().unwrap_or("error desconocido").to_string();
+        Err((status, desc, json))
+    }
+}
+
+fn describe_api_error(status: u16, description: &str) -> String {
+    if status == 0 {
+        description.to_string()
+    } else {
+        humanize_error(status, description)
+    }
+}
+
+/// Spanish name of a Telegram chat type, for messages.
+fn chat_kind_label(kind: &str) -> &'static str {
+    match kind {
+        "channel" => "el canal",
+        "private" => "el chat privado",
+        _ => "el grupo",
+    }
+}
+
+/// Interprets the bot's own `getChatMember` result in a chat of `kind`.
+/// Pure so it can be unit-tested without the network.
+pub fn admin_step_from_member(kind: &str, member: &serde_json::Value) -> SetupStep {
+    let place = chat_kind_label(kind);
+    match member["status"].as_str().unwrap_or("") {
+        "creator" => SetupStep::ok(format!("El bot es el propietario de {place}.")),
+        "administrator" => {
+            // In channels only admins with "Publicar mensajes" can post.
+            if kind == "channel" && !member["can_post_messages"].as_bool().unwrap_or(false) {
+                SetupStep::error(
+                    "El bot es administrador del canal pero sin permiso para publicar. Actívale «Publicar mensajes».",
+                )
+            } else {
+                SetupStep::ok(format!("El bot es administrador de {place}."))
+            }
+        }
+        "member" if kind == "channel" => SetupStep::error(
+            "En un canal el bot tiene que ser administrador con permiso para publicar.",
+        ),
+        "member" => SetupStep::warn(
+            "El bot está en el grupo pero no es administrador. Puede funcionar si los miembros pueden escribir, pero hazlo administrador para evitar fallos.",
+        ),
+        "restricted" => {
+            if member["can_send_messages"].as_bool().unwrap_or(false) {
+                SetupStep::warn("El bot tiene permisos limitados en el grupo. Hazlo administrador para evitar fallos.")
+            } else {
+                SetupStep::error("El bot está silenciado en el grupo y no puede escribir. Hazlo administrador.")
+            }
+        }
+        "left" | "kicked" => SetupStep::error(format!(
+            "El bot ya no está en {place}. Vuelve a añadirlo y hazlo administrador."
+        )),
+        other => SetupStep::warn(format!(
+            "Telegram devuelve un estado inesperado para el bot ({other})."
+        )),
+    }
+}
+
+/// Checks the announcement-bot setup step by step: valid token (getMe),
+/// bot can see the chat (getChat) and bot's role there (getChatMember).
+pub async fn check_setup(token: &str, chat_id: &str) -> SetupCheck {
+    let token = token.trim();
+    let chat_id = chat_id.trim();
+    let mut out = SetupCheck {
+        bot: SetupStep::skipped("Pega el token que te dio @BotFather."),
+        chat: SetupStep::skipped("Primero comprueba el token."),
+        admin: SetupStep::skipped("Primero comprueba que el bot está en el grupo o canal."),
+        bot_username: None,
+        chat_title: None,
+        chat_kind: None,
+    };
+    if token.is_empty() {
+        return out;
+    }
+
+    let me = match api_call(token, "getMe", serde_json::json!({})).await {
+        Ok(me) => me,
+        Err((status, desc, _)) => {
+            out.bot = SetupStep::error(describe_api_error(status, &desc));
+            return out;
+        }
+    };
+    let username = me["username"].as_str().unwrap_or("").to_string();
+    out.bot = SetupStep::ok(if username.is_empty() {
+        "Token válido.".to_string()
+    } else {
+        format!("Token válido: el bot es @{username}.")
+    });
+    out.bot_username = (!username.is_empty()).then_some(username);
+
+    if chat_id.is_empty() {
+        out.chat = SetupStep::skipped(
+            "Añade el bot al grupo o canal, publica un mensaje y pulsa Detectar (o escribe el chat ID).",
+        );
+        return out;
+    }
+
+    let chat = match api_call(token, "getChat", serde_json::json!({ "chat_id": chat_id })).await {
+        Ok(chat) => chat,
+        Err((status, desc, json)) => {
+            let migrate_to = json["parameters"]["migrate_to_chat_id"].as_i64();
+            out.chat = SetupStep::error(if status == 0 {
+                desc
+            } else {
+                humanize_send_error(status, &desc, chat_id, migrate_to)
+            });
+            return out;
+        }
+    };
+    let kind = chat["type"].as_str().unwrap_or("").to_string();
+    let title = chat["title"]
+        .as_str()
+        .or_else(|| chat["username"].as_str())
+        .or_else(|| chat["first_name"].as_str())
+        .unwrap_or("")
+        .to_string();
+    out.chat = SetupStep::ok(if title.is_empty() {
+        format!("El bot ve {}.", chat_kind_label(&kind))
+    } else {
+        format!("El bot está en «{title}».")
+    });
+    out.chat_title = (!title.is_empty()).then_some(title);
+    out.chat_kind = Some(kind.clone());
+
+    if kind == "private" {
+        out.admin = SetupStep::ok("En un chat privado no hace falta ser administrador.");
+        return out;
+    }
+
+    let bot_id = me["id"].as_i64().unwrap_or(0);
+    out.admin = match api_call(
+        token,
+        "getChatMember",
+        serde_json::json!({ "chat_id": chat_id, "user_id": bot_id }),
+    )
+    .await
+    {
+        Ok(member) => admin_step_from_member(&kind, &member),
+        Err((status, desc, _)) => SetupStep::error(describe_api_error(status, &desc)),
+    };
+    out
+}
+
 /// Telegram caption hard limit for `sendPhoto`. `sendMessage` allows 4096
 /// but anything attached to a media has to fit in this window or the API
 /// rejects the whole request with `MEDIA_CAPTION_TOO_LONG`.
@@ -331,6 +530,28 @@ pub async fn send_photo(token: &str, chat_id: &str, photo_url: &str, caption: &s
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn admin_step_reads_member_status() {
+        use serde_json::json;
+        assert_eq!(admin_step_from_member("supergroup", &json!({"status": "administrator"})).state, "ok");
+        assert_eq!(admin_step_from_member("group", &json!({"status": "creator"})).state, "ok");
+        assert_eq!(admin_step_from_member("supergroup", &json!({"status": "member"})).state, "warn");
+        assert_eq!(admin_step_from_member("channel", &json!({"status": "member"})).state, "error");
+        assert_eq!(
+            admin_step_from_member("channel", &json!({"status": "administrator", "can_post_messages": false})).state,
+            "error"
+        );
+        assert_eq!(
+            admin_step_from_member("channel", &json!({"status": "administrator", "can_post_messages": true})).state,
+            "ok"
+        );
+        assert_eq!(
+            admin_step_from_member("supergroup", &json!({"status": "restricted", "can_send_messages": false})).state,
+            "error"
+        );
+        assert_eq!(admin_step_from_member("supergroup", &json!({"status": "kicked"})).state, "error");
+    }
+
     use super::*;
 
     #[test]

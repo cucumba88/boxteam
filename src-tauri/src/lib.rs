@@ -212,6 +212,7 @@ pub fn run() {
             commands::test_telegram,
             commands::test_telegram_upload_sample,
             commands::detect_telegram_chat,
+            commands::check_telegram_setup,
             commands::get_telegram_sub,
             commands::link_telegram_bot,
             commands::update_telegram_sub,

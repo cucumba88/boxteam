@@ -1099,12 +1099,15 @@ export default function Library({
             case "documentary":
               acc[t.id] = libraryTabCounts[t.id];
               break;
+            case "watchlist":
+              acc[t.id] = watchlist.items.length;
+              break;
           }
           return acc;
         },
         {} as Record<TabId, number>,
       ),
-    [downloads, uploads, libraryTabCounts],
+    [downloads, uploads, libraryTabCounts, watchlist.items.length],
   );
 
   const tabItems = useMemo(
@@ -1818,6 +1821,12 @@ export default function Library({
       label: t(language, tab.labelKey as never),
       icon: tab.icon,
       count: tabCounts[tab.id] ?? 0,
+      // Library sections always show their count (an empty Documentales
+      // reads "0"); transfers only show it while something is active. Not
+      // before the first load lands, or every section would flash "0".
+      showZero:
+        libraryIds.includes(tab.id) &&
+        !(tab.id === "watchlist" ? watchlist.loading : initialLoading),
     });
     return [
       {
@@ -1830,7 +1839,7 @@ export default function Library({
       },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [language, tabCounts, visibleTabs]);
+  }, [language, tabCounts, visibleTabs, initialLoading, watchlist.loading]);
 
   // ─── Command palette items ────────────────────────────────────────────
   // Library item search for the palette, in its own memo: folding 4 000
@@ -3591,7 +3600,12 @@ export default function Library({
               <>
                 {mediaContent}
 
-                {initialLoading && items.length === 0 && <SkeletonGrid />}
+                {initialLoading && items.length === 0 && (
+                  <SkeletonGrid
+                    caption={t(language, "startup.preparingLibrary")}
+                    detail={t(language, "startup.preparingLibraryDetail")}
+                  />
+                )}
 
                 {filtered.length === 0 && !progress && !initialLoading && (
                   <div
