@@ -76,6 +76,7 @@ import {
   useSettingsSectionVisibility,
   type SettingsGroupId,
 } from "../features/settings/settingsNav";
+import ApiKeysGuideLink from "../components/ApiKeysGuideLink";
 import SettingsNavMenu, {
   type SettingsIndexEntry,
 } from "../features/settings/SettingsNavMenu";
@@ -2272,6 +2273,10 @@ export default function Settings({
                               : t(language, "settings.test")}
                       </button>
                     </div>
+                    <span style={subtextStyle}>
+                      {t(language, "settings.tmdbHelp")}{" "}
+                      <ApiKeysGuideLink language={language} />
+                    </span>
                   </div>
                   <div style={fieldStyle}>
                     <label style={labelStyle}>
@@ -2318,7 +2323,8 @@ export default function Settings({
                       </button>
                     </div>
                     <span style={subtextStyle}>
-                      {t(language, "settings.omdbHelp")}
+                      {t(language, "settings.omdbHelp")}{" "}
+                      <ApiKeysGuideLink language={language} />
                     </span>
                   </div>
                   <div style={fieldStyle}>
