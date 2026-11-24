@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import AppIcon from "../AppIcon";
-import { isTauri } from "../../lib/transport";
+import ApiKeysGuideLink, { openExternal } from "../ApiKeysGuideLink";
 import type { AppLanguage } from "../../utils/mediaLanguage";
 import { t } from "../../utils/i18n";
 import type { WizardConfig } from "./types";
@@ -17,18 +17,6 @@ import {
 } from "./wizardUi";
 
 const TMDB_API_URL = "https://www.themoviedb.org/settings/api";
-
-/** Open an external link in the system browser (a plain <a target=_blank>
- *  does nothing inside the Tauri webview). */
-function openExternal(url: string) {
-  if (isTauri()) {
-    import("@tauri-apps/plugin-opener")
-      .then(({ openUrl }) => openUrl(url))
-      .catch((e) => console.error("[openUrl] failed", url, e));
-  } else {
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-}
 
 export default function StepTMDB({
   defaults,
@@ -106,6 +94,8 @@ export default function StepTMDB({
               >
                 themoviedb.org
               </button>
+              {" · "}
+              <ApiKeysGuideLink language={language} />
             </span>
           </div>
 

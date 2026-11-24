@@ -890,6 +890,14 @@ const messages = {
   },
   "settings.tvdbTestOk": { es: "Funciona", en: "Works" },
   "settings.tvdbTestFail": { es: "Fallo", en: "Failed" },
+  "settings.apiKeysGuide": {
+    es: "¿Cómo la consigo? Guía paso a paso",
+    en: "How do I get one? Step-by-step guide (Spanish)",
+  },
+  "settings.tmdbHelp": {
+    es: "Gratis en themoviedb.org. Usa la API Key (v3) de 32 caracteres, no el token largo que empieza por «eyJ».",
+    en: "Free at themoviedb.org. Use the 32-character API Key (v3), not the long token starting with \"eyJ\".",
+  },
   "settings.test": { es: "Probar", en: "Test" },
   "settings.testing": { es: "Probando…", en: "Testing…" },
   "settings.ratingOrder": {

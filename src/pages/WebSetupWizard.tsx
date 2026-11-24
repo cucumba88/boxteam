@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { apiBase, getToken } from "../lib/transport";
 import AppIcon from "../components/AppIcon";
+import ApiKeysGuideLink from "../components/ApiKeysGuideLink";
 import { friendlyFtpError } from "../components/wizard/wizardUi";
 import FtpTlsFields from "../components/FtpTlsFields";
 
@@ -304,15 +305,18 @@ function StepTMDB({
       </div>
 
       <section style={sectionCard}>
-        <label style={labelStyle}>Clave API (v3 — Read Access Token)</label>
+        <label style={labelStyle}>Clave de API (v3)</label>
         <input
           style={inputStyle}
           value={key}
           onChange={(e) => setKey(e.target.value)}
-          placeholder="eyJhbGciOiJIUzI1NiJ9..."
+          placeholder="Pega tu API key v3 (32 caracteres)"
           required
         />
         <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
+          Es la «API Key» de 32 caracteres, no el token largo que empieza por «eyJ».{" "}
+          <ApiKeysGuideLink language="es" />
+          <br />
           Puedes cambiarla más adelante en Ajustes.
         </p>
       </section>
