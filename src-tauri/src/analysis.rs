@@ -655,6 +655,7 @@ mod tests {
         let r = |w, h| super::dims_to_resolution(w, h);
         assert_eq!(r(Some(1920), Some(1080)).as_deref(), Some("1080p"));
         assert_eq!(r(Some(1440), Some(1080)).as_deref(), Some("1080p"));
+        assert_eq!(r(Some(1792), Some(1080)).as_deref(), Some("1080p"));
         assert_eq!(r(Some(1920), Some(800)).as_deref(), Some("1080p"));
         assert_eq!(r(Some(3840), Some(1600)).as_deref(), Some("2160p"));
         assert_eq!(r(Some(3840), Some(2076)).as_deref(), Some("2160p"));
