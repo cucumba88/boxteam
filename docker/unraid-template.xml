@@ -1,33 +1,33 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>boxteam</Name>
-  <Repository>boxteam</Repository>
-  <Registry>https://hub.docker.com/\</Registry\>
+  <Repository>ghcr.io/cucumba88/boxteam:latest</Repository>
+  <Registry>https://github.com/cucumba88/boxteam/pkgs/container/boxteam</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support/>
-  <Project/>
-  <Overview>BoxTeam — gestor de biblioteca multimedia con descarga automática vía FTP y metadatos TMDB. Modo headless: acceso exclusivamente por navegador web.</Overview>
-  <Category>MediaApp:Tools</Category>
-  <WebUI>http://\[IP\]:\[PORT:47860\]\</WebUI\>
-  <TemplateURL/>
-  <Icon/>
+  <Support>https://github.com/cucumba88/boxteam/issues</Support>
+  <Project>https://github.com/cucumba88/boxteam</Project>
+  <Overview>BoxTeam: explora como una plataforma de streaming la biblioteca de películas, series y documentales de un servidor FTP, con metadatos de TMDB, descargas, seguimiento y subidas. En Docker se usa solo desde el navegador (interfaz web en el puerto 47860). Guía: https://github.com/cucumba88/boxteam/wiki/Docker-y-NAS</Overview>
+  <Category>MediaApp:Other Tools:</Category>
+  <WebUI>http://[IP]:[PORT:47860]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/cucumba88/boxteam/main/docker/unraid-template.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/cucumba88/boxteam/main/src-tauri/icons/128x128.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
   <DateInstalled/>
   <DonateText/>
   <DonateLink/>
-  <Description>Runs BoxTeam in headless mode with the built-in web UI exposed on port 47860. No VNC or desktop environment required.</Description>
+  <Requires/>
 
-  <Config Name="AppData" Target="/config" Default="/mnt/user/appdata/boxteam" Mode="rw" Description="App data: SQLite DB, configuration, cache" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/boxteam</Config>
-  <Config Name="Downloads" Target="/downloads" Default="/mnt/user/data/downloads/boxteam" Mode="rw" Description="Download target directory" Type="Path" Display="always" Required="false" Mask="false">/mnt/user/data/downloads/boxteam</Config>
+  <Config Name="Datos de la app" Target="/config" Default="/mnt/user/appdata/boxteam" Mode="rw" Description="Base de datos, ajustes y copias de seguridad. Haz copia de esta carpeta." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/boxteam</Config>
+  <Config Name="Descargas" Target="/downloads" Default="/mnt/user/data/downloads/boxteam" Mode="rw" Description="Carpeta donde se guardan las descargas." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/data/downloads/boxteam</Config>
 
-  <Config Name="WebGUI" Target="47860" Default="47860" Mode="tcp" Description="BoxTeam web UI port" Type="Port" Display="always" Required="true" Mask="false">47860</Config>
+  <Config Name="Interfaz web" Target="47860" Default="47860" Mode="tcp" Description="Puerto de la interfaz web. No lo abras en el router: para entrar desde fuera usa un proxy inverso con HTTPS (https://github.com/cucumba88/boxteam/wiki/Acceso-desde-fuera-con-HTTPS)." Type="Port" Display="always" Required="true" Mask="false">47860</Config>
 
-  <Config Name="BOXTEAM_WEBGUI_EXPOSED_PORT" Target="BOXTEAM_WEBGUI_EXPOSED_PORT" Default="47860" Mode="" Description="Externally visible port (for reverse-proxy setups)" Type="Variable" Display="advanced" Required="false" Mask="false">47860</Config>
-  <Config Name="BOXTEAM_WEBGUI_APP_URL" Target="BOXTEAM_WEBGUI_APP_URL" Default="" Mode="" Description="Optional external URL for email invite links" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
-  <Config Name="BOXTEAM_WEBGUI_OTP_ENABLED" Target="BOXTEAM_WEBGUI_OTP_ENABLED" Default="0" Mode="" Description="Require email OTP on login" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="Dirección pública (orígenes permitidos)" Target="BOXTEAM_WEBGUI_ALLOWED_ORIGINS" Default="" Mode="" Description="Dirección HTTPS con la que entras desde fuera, por ejemplo https://boxteam.example.com (varias separadas por comas, sin barra final). Rellénala si abres BoxTeam a Internet. También puedes ponerla en Ajustes → URL de la app." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Proxies de confianza" Target="BOXTEAM_TRUSTED_PROXIES" Default="127.0.0.1,::1" Mode="" Description="IPs exactas (sin rangos) de tu proxy inverso, separadas por comas, para que BoxTeam vea la IP real de quien entra. Pon solo la IP de tu proxy." Type="Variable" Display="advanced" Required="false" Mask="false">127.0.0.1,::1</Config>
+  <Config Name="Puerto expuesto" Target="BOXTEAM_WEBGUI_EXPOSED_PORT" Default="47860" Mode="" Description="Puerto con el que se generan los enlaces de invitación si no has puesto la URL de la app en Ajustes. Cámbialo solo si publicas la interfaz en otro puerto del servidor." Type="Variable" Display="advanced" Required="false" Mask="false">47860</Config>
 </Container>
