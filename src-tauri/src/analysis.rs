@@ -472,35 +472,37 @@ pub fn ffprobe_analyze(path: &str) -> Result<LocalMediaInfo, String> {
 
 /// Classify resolution from ffprobe width/height.
 ///
-/// Width is the primary signal because it is stable across:
-/// - Dolby Vision profile 8 (height can be 2076 instead of 2160)
-/// - Scope/anamorphic crops (height is cropped but width stays at 3840/1920/1280)
+/// Each dimension gives a class and the higher one wins:
+/// - Width keeps scope/anamorphic crops right (1920×800 stays 1080p,
+///   3840×1600 stays 4K) and Dolby Vision profile 8 (3840×2076).
+/// - Height keeps narrow full-height pictures right: 1440×1080 (HDV,
+///   4:3 content, anamorphic storage) is 1080p, not 720p.
 ///
-/// Thresholds (width-first):
-///   >=3200  → 4K   (covers 3840, 4096 and any DV variant)
-///   >=1800  → 1080p (covers 1920)
-///   >=1100  → 720p  (covers 1280)
-///   >=600   → 480p  (covers 720/854)
-///
-/// Height-only fallback (width unavailable):
-///   >=2000  → 4K   (safely above 1080p territory)
-///   >=1000  → 1080p
-///   >=650   → 720p
-///   >=430   → 480p
+/// Width:  >=3200 → 4K, >=1800 → 1080p, >=1100 → 720p, >=600 → 480p
+/// Height: >=2000 → 4K, >=1000 → 1080p, >=650  → 720p, >=430 → 480p
 fn dims_to_resolution(width: Option<u32>, height: Option<u32>) -> Option<String> {
-    match (width, height) {
-        (Some(w), _) if w >= 3200 => Some("2160p".to_string()),
-        (Some(w), _) if w >= 1800 => Some("1080p".to_string()),
-        (Some(w), _) if w >= 1100 => Some("720p".to_string()),
-        (Some(w), _) if w >= 600  => Some("480p".to_string()),
-        (Some(_), _)              => None,
-        // Width unavailable — use height with conservative thresholds
-        (None, Some(h)) if h >= 2000 => Some("2160p".to_string()),
-        (None, Some(h)) if h >= 1000 => Some("1080p".to_string()),
-        (None, Some(h)) if h >= 650  => Some("720p".to_string()),
-        (None, Some(h)) if h >= 430  => Some("480p".to_string()),
-        (None, Some(h))              => Some(format!("{}p", h)),
-        (None, None)                 => None,
+    const LABELS: [&str; 4] = ["480p", "720p", "1080p", "2160p"];
+    let by_width = width.and_then(|w| match w {
+        w if w >= 3200 => Some(3),
+        w if w >= 1800 => Some(2),
+        w if w >= 1100 => Some(1),
+        w if w >= 600 => Some(0),
+        _ => None,
+    });
+    let by_height = height.and_then(|h| match h {
+        h if h >= 2000 => Some(3),
+        h if h >= 1000 => Some(2),
+        h if h >= 650 => Some(1),
+        h if h >= 430 => Some(0),
+        _ => None,
+    });
+    match by_width.max(by_height) {
+        Some(rank) => Some(LABELS[rank].to_string()),
+        // Tiny picture: only label it when width is unknown, as before.
+        None => match (width, height) {
+            (None, Some(h)) => Some(format!("{}p", h)),
+            _ => None,
+        },
     }
 }
 
@@ -648,6 +650,24 @@ fn detect_hdr(stream: &FfprobeStream, frame_hdr10_plus: bool) -> Option<String> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dims_to_resolution_takes_the_higher_class() {
+        let r = |w, h| super::dims_to_resolution(w, h);
+        assert_eq!(r(Some(1920), Some(1080)).as_deref(), Some("1080p"));
+        assert_eq!(r(Some(1440), Some(1080)).as_deref(), Some("1080p"));
+        assert_eq!(r(Some(1920), Some(800)).as_deref(), Some("1080p"));
+        assert_eq!(r(Some(3840), Some(1600)).as_deref(), Some("2160p"));
+        assert_eq!(r(Some(3840), Some(2076)).as_deref(), Some("2160p"));
+        assert_eq!(r(Some(2880), Some(2160)).as_deref(), Some("2160p"));
+        assert_eq!(r(Some(1280), Some(720)).as_deref(), Some("720p"));
+        assert_eq!(r(Some(960), Some(720)).as_deref(), Some("720p"));
+        assert_eq!(r(Some(720), Some(576)).as_deref(), Some("480p"));
+        assert_eq!(r(None, Some(1080)).as_deref(), Some("1080p"));
+        assert_eq!(r(None, Some(360)).as_deref(), Some("360p"));
+        assert_eq!(r(Some(320), Some(240)), None);
+        assert_eq!(r(None, None), None);
+    }
+
     use super::*;
 
     fn parse_stream(json: &str) -> FfprobeStream {
