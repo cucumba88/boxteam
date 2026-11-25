@@ -180,3 +180,39 @@ export function parseQualityFromFilename(name: string): ParsedQuality {
 
   return { source, resolution, codec, hdr, audio, channels };
 }
+
+/** Quality values the user picked in the upload form dropdowns. "" means the
+ *  user left (or set) that field empty. */
+export interface QualityChoice {
+  resolution: string;
+  codec: string;
+  hdr: string;
+  audioCodec: string;
+}
+
+/** Metadata sent with `queue_upload` (shown in the upload list and the
+ *  Telegram card). */
+export interface QueuedQuality {
+  resolution: string | null;
+  codec: string | null;
+  hdr: string | null;
+  audioCodec: string | null;
+}
+
+/** What the form picked wins over what ffprobe / the filename parser
+ *  detected: the dropdowns are seeded from detection, so a different value
+ *  there is a deliberate correction. Without a form choice (the row never
+ *  rendered) the detected values are used as before. */
+export function resolveQueuedQuality(
+  choice: QualityChoice | null | undefined,
+  detected: QueuedQuality,
+): QueuedQuality {
+  if (!choice) return detected;
+  const pick = (v: string) => v.trim() || null;
+  return {
+    resolution: pick(choice.resolution),
+    codec: pick(choice.codec),
+    hdr: pick(choice.hdr),
+    audioCodec: pick(canonicalAudio(choice.audioCodec)),
+  };
+}

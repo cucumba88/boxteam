@@ -46,6 +46,7 @@ import {
   mergeHdr,
   parseQualityFromFilename,
   formatChannels,
+  type QualityChoice,
 } from "./quality";
 
 const TMDB_IMG = "https://image.tmdb.org/t/p/w92";
@@ -350,6 +351,8 @@ interface AnalysisRowProps {
   onDestChange: (path: string, dest: string) => void;
   onFilenameChange: (path: string, filename: string) => void;
   onTmdbChange: (path: string, match: TmdbMatch | null) => void;
+  /** Quality picked in the form (resolution, codec, HDR, audio). */
+  onQualityChange?: (path: string, quality: QualityChoice) => void;
   onEpisodePlanChange?: (
     path: string,
     plan: { localPath: string; filename: string }[],
@@ -376,6 +379,7 @@ export default function AnalysisRow({
   onDestChange,
   onFilenameChange,
   onTmdbChange,
+  onQualityChange,
   onEpisodePlanChange,
 }: AnalysisRowProps) {
   const { path, filename, info, error } = result;
@@ -619,6 +623,20 @@ export default function AnalysisRow({
     suggestion,
     tvBaseOverride,
   ]);
+
+  // TV (season folder or single episode): the season quality dropdowns are
+  // what gets queued, so report them like FilenameBuilder does for movies.
+  const seasonFirstAudio = seasonAudioTracks[0]?.codec ?? "";
+  useEffect(() => {
+    if (mediaType !== "tv") return;
+    onQualityChange?.(path, {
+      resolution: seasonResolution,
+      codec: seasonCodec,
+      hdr: seasonHdr,
+      audioCodec: seasonFirstAudio,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaType, seasonResolution, seasonCodec, seasonHdr, seasonFirstAudio]);
 
   // For single TV episode files: auto-build and propagate the renamed filename.
   useEffect(() => {
@@ -1988,6 +2006,7 @@ export default function AnalysisRow({
                 channels: suggestion?.detected_audio_channels,
               }}
               onChange={(newName) => onFilenameChange(path, newName)}
+              onQualityChange={(q) => onQualityChange?.(path, q)}
             />
           )}
         </div>

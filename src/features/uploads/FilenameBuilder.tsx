@@ -16,6 +16,7 @@ import {
   normalizeResolution,
   formatChannels,
   mergeHdr,
+  type QualityChoice,
 } from "./quality";
 import { audioFilenameToken, canonicalAudio } from "../../utils/techTags";
 
@@ -42,6 +43,9 @@ interface FilenameBuilderProps {
   dest?: string; // FTP destination folder — shows full path preview
   fallback?: FilenameFallback;
   onChange: (filename: string) => void;
+  /** Reports the quality dropdowns so the queued upload carries what the
+   *  user picked, not only what was detected. */
+  onQualityChange?: (quality: QualityChoice) => void;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -93,6 +97,7 @@ export default function FilenameBuilder({
   dest,
   fallback,
   onChange,
+  onQualityChange,
 }: FilenameBuilderProps) {
   // Shared fields. Seeded values are normalised so the dropdowns can match
   // them against the canonical lists (e.g. "4K" → "2160p", "DOLBYVISION" → "DV").
@@ -127,7 +132,6 @@ export default function FilenameBuilder({
     setAudioTracks((prev) =>
       prev.map((t, i) => (i === idx ? { ...t, [field]: value } : t)),
     );
-    notify();
   };
   const removeAudioTrack = (idx: number) => {
     if (audioTracks.length <= 1) {
@@ -135,7 +139,6 @@ export default function FilenameBuilder({
     } else {
       setAudioTracks((prev) => prev.filter((_, i) => i !== idx));
     }
-    notify();
   };
   const addAudioTrack = () => {
     setAudioTracks((prev) => [...prev, { codec: "", channels: "" }]);
@@ -236,13 +239,18 @@ export default function FilenameBuilder({
   };
 
   const filename = buildFilename();
-  const notify = () => onChange(buildFilename());
 
-  // Push the initial computed filename to the parent immediately on mount
-  // so customFilename is correct even if the user never touches any field.
+  // Push the computed filename to the parent on mount and whenever any field
+  // changes. Done from an effect (not right after each setState) so the
+  // parent always gets the name built from the *new* values.
   useEffect(() => {
-    onChange(buildFilename());
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    onChange(filename);
+  }, [filename]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const firstAudioCodec = audioTracks[0]?.codec ?? "";
+  useEffect(() => {
+    onQualityChange?.({ resolution, codec, hdr, audioCodec: firstAudioCodec });
+  }, [resolution, codec, hdr, firstAudioCodec]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const copy = () => {
     navigator.clipboard.writeText(filename).then(() => {
@@ -276,7 +284,6 @@ export default function FilenameBuilder({
               value={title}
               onChange={(e) => {
                 setTitle(e.target.value);
-                notify();
               }}
               placeholder="The Dark Knight"
               style={inputStyle}
@@ -287,7 +294,6 @@ export default function FilenameBuilder({
               value={year}
               onChange={(e) => {
                 setYear(e.target.value);
-                notify();
               }}
               placeholder="2008"
               style={inputStyle}
@@ -312,7 +318,6 @@ export default function FilenameBuilder({
                 value={showName}
                 onChange={(e) => {
                   setShowName(e.target.value);
-                  notify();
                 }}
                 placeholder="Breaking Bad"
                 style={inputStyle}
@@ -326,7 +331,6 @@ export default function FilenameBuilder({
                 value={season}
                 onChange={(e) => {
                   setSeason(Number(e.target.value));
-                  notify();
                 }}
                 style={inputStyle}
               />
@@ -340,7 +344,6 @@ export default function FilenameBuilder({
                   value={episode}
                   onChange={(e) => {
                     setEpisode(Number(e.target.value));
-                    notify();
                   }}
                   style={inputStyle}
                 />
@@ -353,7 +356,6 @@ export default function FilenameBuilder({
                 value={episodeTitle}
                 onChange={(e) => {
                   setEpisodeTitle(e.target.value);
-                  notify();
                 }}
                 placeholder="Pilot"
                 style={inputStyle}
@@ -376,7 +378,6 @@ export default function FilenameBuilder({
             value={source}
             onChange={(e) => {
               setSource(e.target.value);
-              notify();
             }}
             style={selectStyle}
           >
@@ -388,7 +389,6 @@ export default function FilenameBuilder({
             value={resolution}
             onChange={(e) => {
               setResolution(e.target.value);
-              notify();
             }}
             style={selectStyle}
           >
@@ -400,7 +400,6 @@ export default function FilenameBuilder({
             value={codec}
             onChange={(e) => {
               setCodec(e.target.value);
-              notify();
             }}
             style={selectStyle}
           >
@@ -415,7 +414,6 @@ export default function FilenameBuilder({
           value={hdr}
           onChange={(e) => {
             setHdr(e.target.value);
-            notify();
           }}
           style={selectStyle}
         >
@@ -519,7 +517,6 @@ export default function FilenameBuilder({
             value={langs}
             onChange={(e) => {
               setLangs(e.target.value);
-              notify();
             }}
             placeholder="SPA, ENG"
             style={inputStyle}
@@ -549,7 +546,6 @@ export default function FilenameBuilder({
               checked={subs}
               onChange={(v) => {
                 setSubs(v);
-                notify();
               }}
             />
           </div>

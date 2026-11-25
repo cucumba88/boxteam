@@ -19,7 +19,7 @@ import type {
   TmdbMatch,
   UploadSuggestion,
 } from "./types";
-import { mergeHdr } from "./quality";
+import { mergeHdr, resolveQueuedQuality, type QualityChoice } from "./quality";
 
 /** Lowercase + strip subtitle separators before sending to TMDB. */
 function cleanTmdbQuery(raw: string): string {
@@ -49,6 +49,8 @@ interface FileEntry {
   suggestion: UploadSuggestion | null;
   tmdbMatch: TmdbMatch | null;
   episodePlan: { localPath: string; filename: string }[] | null;
+  /** Quality picked in the form; wins over detection when queueing. */
+  quality?: QualityChoice;
 }
 
 export default function UploadPrepareModal({
@@ -239,6 +241,12 @@ export default function UploadPrepareModal({
     );
   };
 
+  const handleQualityChange = (path: string, quality: QualityChoice) => {
+    setFiles((prev) =>
+      prev.map((f) => (f.path === path ? { ...f, quality } : f)),
+    );
+  };
+
   const handleEpisodePlanChange = (
     path: string,
     plan: { localPath: string; filename: string }[],
@@ -255,22 +263,29 @@ export default function UploadPrepareModal({
       for (const f of files) {
         const info = analysisResults.get(f.path)?.info;
         const sug = f.suggestion;
-        const resolution = info?.resolution ?? sug?.detected_resolution ?? null;
         // Combine ffprobe + filename-parser HDR so DV detected only by the
         // parser (or HDR10 detected only by ffprobe) doesn't drop the other
         // signal. Returns "" when neither source detected anything.
         const mergedHdr = mergeHdr(info?.hdr, sug?.detected_hdr);
-        const hdr = mergedHdr || null;
+        // The form's dropdowns are seeded from detection; if the user changed
+        // one (e.g. 720p → 1080p) that choice is what gets queued and shown.
+        const { resolution, codec, hdr, audioCodec } = resolveQueuedQuality(
+          f.quality,
+          {
+            resolution: info?.resolution ?? sug?.detected_resolution ?? null,
+            codec: info?.codec ?? sug?.detected_codec ?? null,
+            hdr: mergedHdr || null,
+            audioCodec:
+              canonicalAudio(
+                info?.audio_tracks?.[0]?.codec ?? sug?.detected_audio_codec,
+              ) || null,
+          },
+        );
         const languages =
           (info?.languages?.length
             ? info.languages
             : sug?.detected_languages) ?? [];
-        const codec = info?.codec ?? sug?.detected_codec ?? null;
         const videoKbps = info?.video_bitrate_kbps ?? null;
-        const audioCodec =
-          canonicalAudio(
-            info?.audio_tracks?.[0]?.codec ?? sug?.detected_audio_codec,
-          ) || null;
         const audioTracks = info?.audio_tracks ?? [];
         const subtitleLangs = [
           ...new Set(
@@ -629,6 +644,7 @@ export default function UploadPrepareModal({
                     onDestChange={handleDestChange}
                     onFilenameChange={handleFilenameChange}
                     onTmdbChange={handleTmdbChange}
+                    onQualityChange={handleQualityChange}
                     onEpisodePlanChange={handleEpisodePlanChange}
                   />
                 );
