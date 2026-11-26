@@ -1175,6 +1175,19 @@ mod tests {
     }
 
     #[test]
+    fn year_and_tags_inside_one_paren_block_parse_as_a_film() {
+        // Tags and channel layouts ("EAC3 5.1") inside the year's parens must not
+        // read as an episode marker: the file is a film, with no season.
+        let file = "Mínimo contacto (2026.WEB-DL.1080P.AVC.SPA.ENG.EAC3 5.1.EAC3 5.1.SUBS).mkv";
+        let p = parse_media_path(&format!("/Documentales 4K 2160p - HD 1080p/{file}"), file);
+        assert_eq!(p.title, "Mínimo contacto");
+        assert_eq!(p.year, Some(2026));
+        assert_eq!((p.season, p.episode), (None, None));
+        assert_eq!(p.resolution.as_deref(), Some("1080P"));
+        assert_eq!(p.release_type.as_deref(), Some("WEB-DL"));
+    }
+
+    #[test]
     fn parses_s100_convention_as_season_1_episode_1() {
         // Some release groups use S[season*100]E[ep]: S100E01 = Season 1, Episode 1
         let p = parse_media_path("", "Helluva Boss_S100E01_La familia asesina.mkv");
