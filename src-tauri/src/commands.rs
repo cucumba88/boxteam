@@ -1119,6 +1119,19 @@ struct FetchedRatings {
 }
 type TmdbMatch = Option<(crate::tmdb::TmdbMovie, String)>;
 
+/// Ids a file names itself with ("{tmdb-…}" / "{imdb-tt…}" tags).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct FileIds<'a> {
+    pub tmdb_id: Option<i64>,
+    pub imdb_id: Option<&'a str>,
+}
+
+impl<'a> FileIds<'a> {
+    pub fn from_parsed(parsed: &'a crate::parser::ParsedMedia) -> Self {
+        Self { tmdb_id: parsed.tmdb_id, imdb_id: parsed.imdb_id.as_deref() }
+    }
+}
+
 /// Memo of remote lookups for the duration of one indexing / refresh run.
 /// Every episode of a show parses to the same title, year and type, so
 /// without this a 60-episode show cost 60 identical TMDB searches (each
@@ -1142,15 +1155,22 @@ impl LookupCache {
         map.entry(imdb_id.to_string()).or_default().clone()
     }
 
+    /// The TMDB entry for one file. A "{tmdb-…}" / "{imdb-tt…}" tag in its
+    /// name (written by BoxTeam's uploader) is fetched directly; without a
+    /// tag, or when the tagged id can't be fetched, this falls back to
     /// `resolve_tmdb_match_with_plex`, memoised by (type, year, title).
     async fn tmdb_match(
         &self,
         config: &crate::db::AppConfig,
         api_key: &str,
+        ids: FileIds<'_>,
         title: &str,
         year: Option<u16>,
         tmdb_search_type: &str,
     ) -> Result<TmdbMatch, String> {
+        if let Some(found) = self.tmdb_from_ids(api_key, ids, tmdb_search_type).await {
+            return Ok(Some(found));
+        }
         let cell = self.tmdb_cell(tmdb_lookup_key(title, year, tmdb_search_type));
         cell.get_or_try_init(|| {
             resolve_tmdb_match_with_plex(config, api_key, title, year, tmdb_search_type)
@@ -1178,6 +1198,40 @@ impl LookupCache {
             .as_ref()
             .map(|(movie, _)| movie.clone())
             .ok_or_else(|| format!("TMDB id {tmdb_id} not found"))
+    }
+
+    /// TMDB entry for the id tags of a file, or None to fall back to search.
+    async fn tmdb_from_ids(
+        &self,
+        api_key: &str,
+        ids: FileIds<'_>,
+        tmdb_search_type: &str,
+    ) -> Option<(crate::tmdb::TmdbMovie, String)> {
+        if let Some(tmdb_id) = ids.tmdb_id {
+            match self.tmdb_by_id(api_key, tmdb_id, tmdb_search_type).await {
+                Ok(movie) => return Some((movie, tmdb_search_type.to_string())),
+                Err(e) => eprintln!(
+                    "[tmdb] tagged id {tmdb_search_type}/{tmdb_id} failed, trying next: {e}"
+                ),
+            }
+        }
+        if let Some(imdb_id) = ids.imdb_id.filter(|s| !s.trim().is_empty()) {
+            let key = format!("imdb|{tmdb_search_type}|{imdb_id}");
+            let cell = self.tmdb_cell(key);
+            let found = cell
+                .get_or_try_init(|| async {
+                    crate::tmdb::find_by_imdb_id_typed(api_key, imdb_id, tmdb_search_type)
+                        .await
+                        .map(|hit| hit.map(|(movie, kind)| (movie, kind.to_string())))
+                })
+                .await;
+            match found {
+                Ok(Some(hit)) => return Some(hit.clone()),
+                Ok(None) => {}
+                Err(e) => eprintln!("[tmdb] tagged imdb id {imdb_id} failed, searching instead: {e}"),
+            }
+        }
+        None
     }
 
     fn has_tmdb_by_id(&self, tmdb_id: i64, media_type: &str) -> bool {
@@ -1814,13 +1868,10 @@ pub async fn rematch_all_internal(
             .unwrap_or_else(|| "movie".to_string());
 
         // TMDB search type: documentary series search as TV, documentary films as movie
+        let parsed = crate::parser::parse_media_path(&item.ftp_path, &item.filename);
         let tmdb_search_type = match mtype.as_str() {
             "tv" => "tv",
-            "documentary" => {
-                // Infer from filename if it has a season marker
-                let parsed = crate::parser::parse_media_path(&item.ftp_path, &item.filename);
-                if parsed.season.is_some() { "tv" } else { "movie" }
-            },
+            "documentary" => if parsed.season.is_some() { "tv" } else { "movie" },
             _ => "movie",
         };
         let year = item.year.map(|y| y as u16);
@@ -1834,7 +1885,9 @@ pub async fn rematch_all_internal(
         tokio::time::sleep(std::time::Duration::from_millis(260)).await;
 
         let api_key = &config.tmdb_api_key;
-        let result = resolve_tmdb_match_with_plex(&config, api_key, &title, year, tmdb_search_type).await;
+        let result = LookupCache::default()
+            .tmdb_match(&config, api_key, FileIds::from_parsed(&parsed), &title, year, tmdb_search_type)
+            .await;
 
         if let Ok(Some((movie, actual_type))) = result {
             emit_index_log(
@@ -2066,6 +2119,8 @@ pub async fn start_indexing_internal(
             let year = parsed.year;
             let _mtype = media_type.clone().unwrap_or_else(|| "movie".to_string());
             let tmdb_stype = tmdb_search_type.clone();
+            let tagged_tmdb_id = parsed.tmdb_id;
+            let tagged_imdb_id = parsed.imdb_id.clone();
 
             // Whether the file is new or existing, spawn the TMDB enrichment as a
             // background task so it never blocks the index loop.
@@ -2084,8 +2139,9 @@ pub async fn start_indexing_internal(
 
                 metadata_tasks.push(tokio::spawn(async move {
                     on_log_clone(format!("🌐 TMDB ({label}): {title}"));
+                    let ids = FileIds { tmdb_id: tagged_tmdb_id, imdb_id: tagged_imdb_id.as_deref() };
                     let result = lookups_clone
-                        .tmdb_match(&config_clone, &api_key, &title, year, &tmdb_stype)
+                        .tmdb_match(&config_clone, &api_key, ids, &title, year, &tmdb_stype)
                         .await;
                     match result {
                         Ok(Some((movie, actual_type))) => {
@@ -2809,16 +2865,15 @@ pub async fn refresh_all_metadata_internal(
 
         // Items with no tmdb_id need a full search, not just a detail fetch.
         if item.tmdb_id.is_none() {
+            let parsed = crate::parser::parse_media_path(&item.ftp_path, &item.filename);
             let tmdb_search_type = match media_type.as_str() {
                 "tv" => "tv",
-                "documentary" => {
-                    let parsed = crate::parser::parse_media_path(&item.ftp_path, &item.filename);
-                    if parsed.season.is_some() { "tv" } else { "movie" }
-                },
+                "documentary" => if parsed.season.is_some() { "tv" } else { "movie" },
                 _ => "movie",
             };
             let year = item.year.map(|y| y as u16);
-            match lookups.tmdb_match(&config, &config.tmdb_api_key, &title, year, tmdb_search_type).await {
+            let ids = FileIds::from_parsed(&parsed);
+            match lookups.tmdb_match(&config, &config.tmdb_api_key, ids, &title, year, tmdb_search_type).await {
                 Ok(Some((movie, actual_type))) => {
                     db.update_tmdb_auto(item.id, &movie, &actual_type).ok();
                     db.mark_metadata_checked(&[item.id]).ok();
@@ -5692,5 +5747,40 @@ mod metadata_backoff_tests {
         // Old release missing a synopsis: weekly.
         assert!(metadata_recently_checked(Some(&ago(30)), Some("2001-05-01"), now));
         assert!(!metadata_recently_checked(Some(&ago(24 * 8)), Some("2001-05-01"), now));
+    }
+}
+
+#[cfg(test)]
+mod tagged_match_tests {
+    use super::{FileIds, LookupCache};
+
+    /// Live check against TMDB: a "{tmdb-…}" tag matches a title the search
+    /// can't find. Run with `TMDB_API_KEY=… cargo test -- --ignored tagged`.
+    #[tokio::test]
+    #[ignore = "needs network and TMDB_API_KEY"]
+    async fn tagged_documentary_matches_without_searching() {
+        let Ok(key) = std::env::var("TMDB_API_KEY") else { return };
+        let file = "Mínimo contacto (2026.WEB-DL.1080P.AVC.SPA.ENG.EAC3 5.1.EAC3 5.1.SUBS) {tmdb-1632599}.mkv";
+        let parsed = crate::parser::parse_media_path(&format!("/Documentales 4K 2160p - HD 1080p/{file}"), file);
+
+        // The title search alone finds nothing (or something else).
+        let searched = crate::tmdb::smart_search(&key, &parsed.title, parsed.year, "movie")
+            .await
+            .expect("search runs");
+        println!("untagged search: {:?}", searched.as_ref().map(|(m, t)| (m.id, m.title.clone(), *t)));
+        assert_ne!(searched.map(|(m, _)| m.id), Some(1632599));
+
+        let lookups = LookupCache::default();
+        let (movie, kind) = lookups
+            .tmdb_from_ids(&key, FileIds::from_parsed(&parsed), "movie")
+            .await
+            .expect("tagged id resolves");
+        println!("tagged: {} {:?} / {:?} poster={:?}", movie.id, movie.title, movie.title_en, movie.poster_path);
+        assert_eq!((movie.id, kind.as_str()), (1632599, "movie"));
+        assert!(movie.poster_path.is_some());
+
+        // A bad id falls through (None), so indexing goes back to searching.
+        let bad = FileIds { tmdb_id: Some(999_999_999), imdb_id: None };
+        assert!(lookups.tmdb_from_ids(&key, bad, "movie").await.is_none());
     }
 }

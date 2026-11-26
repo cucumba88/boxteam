@@ -22,6 +22,15 @@ static PAREN_YEAR_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\(((?:19|20)\d{2})").expect("valid paren-year regex")
 });
 
+/// A media-server id tag: "{tmdb-12345}", "[tmdbid-12345]", "{imdb-tt1234567}",
+/// "[imdbid=tt1234567]" (Plex / Jellyfin / Emby spellings). BoxTeam writes
+/// "{tmdb-…}" when it uploads a file, so indexing can fetch that exact TMDB
+/// entry instead of searching by title. Group 1 is the source, group 2 the id.
+static ID_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?ix)[\{\[]\s*(tmdb|imdb)(?:id)?\s*[-=]\s*(tt\d{5,10}|\d{1,10})\s*[\}\]]")
+        .expect("valid id tag regex")
+});
+
 /// Tags that mark the end of the human-readable title portion of a filename.
 static TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -452,6 +461,10 @@ pub struct ParsedMedia {
     pub languages: Vec<String>,
     pub release_type: Option<String>,  // WEB-DL, BluRay, BDREMUX, etc.
     pub release_group: Option<String>, // scene group name
+    /// TMDB id from a "{tmdb-…}" tag in the filename or a parent folder.
+    pub tmdb_id: Option<i64>,
+    /// IMDb id from an "{imdb-tt…}" tag in the filename or a parent folder.
+    pub imdb_id: Option<String>,
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -467,7 +480,47 @@ fn parse_with_context(ftp_path: Option<&str>, filename: &str) -> ParsedMedia {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(filename);
-    parse_stem(ftp_path, without_ext)
+    // Id tags are metadata, not title: read them, then parse the name without
+    // them. A tag on a parent folder ("Dune (2021) {tmdb-438631}/…") counts
+    // too, filename first.
+    let (mut tmdb_id, mut imdb_id) = id_tags(without_ext);
+    if let Some(path) = ftp_path {
+        let mut dir = std::path::Path::new(path).parent();
+        while let Some(d) = dir {
+            if tmdb_id.is_some() && imdb_id.is_some() {
+                break;
+            }
+            if let Some(name) = d.file_name().and_then(|n| n.to_str()) {
+                let (t, i) = id_tags(name);
+                tmdb_id = tmdb_id.or(t);
+                imdb_id = imdb_id.or(i);
+            }
+            dir = d.parent();
+        }
+    }
+    let stripped = ID_TAG_RE.replace_all(without_ext, " ");
+    let stripped = WHITESPACE_RE.replace_all(stripped.trim(), " ");
+    let mut parsed = parse_stem(ftp_path, &stripped);
+    parsed.tmdb_id = tmdb_id;
+    parsed.imdb_id = imdb_id;
+    parsed
+}
+
+/// Ids from the "{tmdb-…}" / "{imdb-tt…}" tags in one path segment.
+fn id_tags(segment: &str) -> (Option<i64>, Option<String>) {
+    let mut tmdb_id = None;
+    let mut imdb_id = None;
+    for caps in ID_TAG_RE.captures_iter(segment) {
+        let id = &caps[2];
+        if caps[1].eq_ignore_ascii_case("tmdb") {
+            if tmdb_id.is_none() {
+                tmdb_id = id.parse::<i64>().ok().filter(|&n| n > 0);
+            }
+        } else if imdb_id.is_none() && id.starts_with("tt") {
+            imdb_id = Some(id.to_string());
+        }
+    }
+    (tmdb_id, imdb_id)
 }
 
 fn parse_stem(ftp_path: Option<&str>, without_ext: &str) -> ParsedMedia {
@@ -738,6 +791,8 @@ fn parse_stem(ftp_path: Option<&str>, without_ext: &str) -> ParsedMedia {
         languages,
         release_type,
         release_group,
+        tmdb_id: None,
+        imdb_id: None,
     }
 }
 
@@ -1172,6 +1227,57 @@ mod tests {
         let p = parse_media_path("", "Je m'appelle Agneta (2026.WEB-DL.2160P.HEVC.mkv");
         assert_eq!(p.title, "Je m'appelle Agneta");
         assert_eq!(p.year, Some(2026));
+    }
+
+    #[test]
+    fn tmdb_id_tag_is_read_and_kept_out_of_the_title() {
+        // The name BoxTeam's uploader writes for a documentary film.
+        let file = "Mínimo contacto (2026.WEB-DL.1080P.AVC.SPA.ENG.EAC3 5.1.EAC3 5.1.SUBS) {tmdb-1234567}.mkv";
+        let p = parse_media_path(&format!("/Documentales 4K 2160p - HD 1080p/{file}"), file);
+        assert_eq!(p.tmdb_id, Some(1234567));
+        assert_eq!(p.imdb_id, None);
+        assert_eq!(p.title, "Mínimo contacto");
+        assert_eq!(p.year, Some(2026));
+        assert_eq!((p.season, p.episode), (None, None));
+        assert_eq!(p.release_group, None);
+    }
+
+    #[test]
+    fn id_tags_in_plex_jellyfin_and_emby_spellings() {
+        for (file, tmdb, imdb) in [
+            ("Dune (2021) {tmdb-438631}.mkv", Some(438631), None),
+            ("Dune (2021) [tmdbid-438631].mkv", Some(438631), None),
+            ("Dune (2021) [tmdbid=438631] 1080p.mkv", Some(438631), None),
+            ("Dune (2021) {imdb-tt1160419}.mkv", None, Some("tt1160419")),
+            ("Dune (2021) {TMDB-438631} {imdb-tt1160419}.mkv", Some(438631), Some("tt1160419")),
+            // Not ids: no braces, an imdb id without "tt", a zero id.
+            ("Dune tmdb-438631 (2021).mkv", None, None),
+            ("Dune (2021) {imdb-1160419}.mkv", None, None),
+            ("Dune (2021) {tmdb-0}.mkv", None, None),
+        ] {
+            let p = parse_media_path("", file);
+            assert_eq!((p.tmdb_id, p.imdb_id.as_deref()), (tmdb, imdb), "{file}");
+        }
+        let p = parse_media_path("", "Dune (2021) [tmdbid=438631] 1080p.mkv");
+        assert_eq!((p.title.as_str(), p.year), ("Dune", Some(2021)));
+        assert_eq!(p.resolution.as_deref(), Some("1080P"));
+    }
+
+    #[test]
+    fn episodes_inherit_the_id_tag_of_their_season_folder() {
+        let p = parse_media_path(
+            "/Series HD 1080p/Atrapadas en Bolivia (2025) S01 WEB-DL 1080p {tmdb-321}/Atrapadas.en.Bolivia.S01E02.WEB-DL.1080p.mkv",
+            "Atrapadas.en.Bolivia.S01E02.WEB-DL.1080p.mkv",
+        );
+        assert_eq!(p.tmdb_id, Some(321));
+        assert_eq!(p.title, "Atrapadas en Bolivia");
+        assert_eq!((p.season, p.episode), (Some(1), Some(2)));
+        // The file's own tag wins over the folder's.
+        let p = parse_media_path(
+            "/Peliculas/Saga {tmdb-1}/Dune (2021) {tmdb-438631}.mkv",
+            "Dune (2021) {tmdb-438631}.mkv",
+        );
+        assert_eq!(p.tmdb_id, Some(438631));
     }
 
     #[test]

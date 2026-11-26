@@ -46,6 +46,7 @@ import {
   mergeHdr,
   parseQualityFromFilename,
   formatChannels,
+  withTmdbIdTag,
   type QualityChoice,
 } from "./quality";
 
@@ -334,13 +335,15 @@ function buildSeasonFolderName(
   season: number,
   source: string,
   resolution: string,
+  tmdbId?: number | null,
 ): string {
   let name = showName.trim() || "Serie";
   if (year) name += ` (${year})`;
   name += ` S${String(season).padStart(2, "0")}`;
   if (source.trim()) name += ` ${source.trim()}`;
   if (resolution.trim()) name += ` ${resolution.trim()}`;
-  return name;
+  // The episodes inside inherit the folder's id tag when they are indexed.
+  return withTmdbIdTag(name, tmdbId);
 }
 
 interface AnalysisRowProps {
@@ -607,6 +610,7 @@ export default function AnalysisRow({
       season,
       seasonSource,
       seasonResolution,
+      tmdbSelected?.id,
     );
     const newDest = tvBase ? `${tvBase}/${folderName}` : folderName;
     setDest(newDest);
@@ -803,6 +807,7 @@ export default function AnalysisRow({
         season,
         seasonSource,
         seasonResolution,
+        tmdbSelected?.id,
       );
       // Prefer tv_category_dest (includes the category subfolder like "Temporadas en emision")
       const tvBase = (suggestion?.tv_category_dest || baseDest || "").replace(
@@ -1993,6 +1998,7 @@ export default function AnalysisRow({
                 filename.replace(/\.[^.]+$/, "").replace(/[._]/g, " ")
               }
               defaultYear={suggestion?.detected_year ?? undefined}
+              tmdbId={tmdbSelected?.id}
               defaultReleaseType={
                 suggestion?.detected_release_type ?? undefined
               }

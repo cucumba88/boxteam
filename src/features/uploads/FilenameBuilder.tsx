@@ -16,6 +16,7 @@ import {
   normalizeResolution,
   formatChannels,
   mergeHdr,
+  withTmdbIdTag,
   type QualityChoice,
 } from "./quality";
 import { audioFilenameToken, canonicalAudio } from "../../utils/techTags";
@@ -42,6 +43,9 @@ interface FilenameBuilderProps {
   extension: string;
   dest?: string; // FTP destination folder — shows full path preview
   fallback?: FilenameFallback;
+  /** TMDB id of the match picked for this upload. Written as "{tmdb-…}" so
+   *  indexing fetches that entry instead of searching by title. */
+  tmdbId?: number | null;
   onChange: (filename: string) => void;
   /** Reports the quality dropdowns so the queued upload carries what the
    *  user picked, not only what was detected. */
@@ -96,6 +100,7 @@ export default function FilenameBuilder({
   extension,
   dest,
   fallback,
+  tmdbId,
   onChange,
   onQualityChange,
 }: FilenameBuilderProps) {
@@ -201,7 +206,7 @@ export default function FilenameBuilder({
         .filter(Boolean)
         .map((l) => l.toUpperCase());
       parts.push(...langList);
-      const name = parts.join(".");
+      const name = withTmdbIdTag(parts.join("."), tmdbId);
       return ext ? `${name}.${ext}` : name;
     }
 
@@ -230,11 +235,14 @@ export default function FilenameBuilder({
 
     const inner = tags.join(".");
     const dvBracket = isDV(hdr) ? "[Dolby Vision]" : "";
-    const base = titleClean
-      ? `${titleClean} (${inner})${dvBracket}`
-      : inner
-        ? `(${inner})${dvBracket}`
-        : "";
+    const base = withTmdbIdTag(
+      titleClean
+        ? `${titleClean} (${inner})${dvBracket}`
+        : inner
+          ? `(${inner})${dvBracket}`
+          : "",
+      tmdbId,
+    );
     return ext ? `${base}.${ext}` : base;
   };
 

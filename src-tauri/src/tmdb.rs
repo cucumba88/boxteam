@@ -607,6 +607,18 @@ pub async fn find_by_imdb_id(
     imdb_id: &str,
     preferred_type: &str,
 ) -> Result<Option<TmdbMovie>, String> {
+    Ok(find_by_imdb_id_typed(api_key, imdb_id, preferred_type)
+        .await?
+        .map(|(movie, _)| movie))
+}
+
+/// `find_by_imdb_id`, also returning which TMDB namespace ("movie" / "tv")
+/// the id resolved to.
+pub async fn find_by_imdb_id_typed(
+    api_key: &str,
+    imdb_id: &str,
+    preferred_type: &str,
+) -> Result<Option<(TmdbMovie, &'static str)>, String> {
     let imdb = imdb_id.trim();
     if imdb.is_empty() {
         return Ok(None);
@@ -646,7 +658,9 @@ pub async fn find_by_imdb_id(
     };
 
     match pick {
-        Some((id, media_type)) => fetch_movie_by_id(api_key, id, media_type).await.map(Some),
+        Some((id, media_type)) => fetch_movie_by_id(api_key, id, media_type)
+            .await
+            .map(|movie| Some((movie, media_type))),
         None => Ok(None),
     }
 }

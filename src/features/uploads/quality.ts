@@ -216,3 +216,23 @@ export function resolveQueuedQuality(
     audioCodec: pick(canonicalAudio(choice.audioCodec)),
   };
 }
+
+/**
+ * "{tmdb-12345}" — the Plex-style id tag BoxTeam writes into uploaded names
+ * so indexing fetches that exact TMDB entry instead of searching by title
+ * (src-tauri/src/parser.rs reads it back). Empty when there is no valid id.
+ */
+export function tmdbIdTag(tmdbId: number | null | undefined): string {
+  return tmdbId != null && Number.isInteger(tmdbId) && tmdbId > 0
+    ? `{tmdb-${tmdbId}}`
+    : "";
+}
+
+/** `name` followed by its TMDB id tag, space-separated; unchanged without an id. */
+export function withTmdbIdTag(
+  name: string,
+  tmdbId: number | null | undefined,
+): string {
+  const tag = tmdbIdTag(tmdbId);
+  return tag && name ? `${name} ${tag}` : name;
+}
