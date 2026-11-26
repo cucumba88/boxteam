@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveQueuedQuality } from "./quality";
+import { resolveQueuedQuality, tmdbIdTag, withTmdbIdTag } from "./quality";
 
 const detected = {
   resolution: "720p",
@@ -29,5 +29,26 @@ describe("resolveQueuedQuality", () => {
 
   it("falls back to detection when the form never reported a choice", () => {
     expect(resolveQueuedQuality(undefined, detected)).toEqual(detected);
+  });
+});
+
+describe("tmdbIdTag", () => {
+  it("writes the Plex-style tag for a real id", () => {
+    expect(tmdbIdTag(1234567)).toBe("{tmdb-1234567}");
+  });
+
+  it("writes nothing without a usable id, so the current matching applies", () => {
+    expect(tmdbIdTag(undefined)).toBe("");
+    expect(tmdbIdTag(null)).toBe("");
+    expect(tmdbIdTag(0)).toBe("");
+    expect(tmdbIdTag(-3)).toBe("");
+    expect(tmdbIdTag(1.5)).toBe("");
+  });
+
+  it("appends the tag to a name with a space", () => {
+    expect(withTmdbIdTag("Atrapadas en Bolivia (2025) S01 WEB-DL 1080p", 321)).toBe(
+      "Atrapadas en Bolivia (2025) S01 WEB-DL 1080p {tmdb-321}",
+    );
+    expect(withTmdbIdTag("Serie S01", undefined)).toBe("Serie S01");
   });
 });

@@ -3509,6 +3509,8 @@ mod tests {
             languages: vec![],
             release_type: None,
             release_group: None,
+            tmdb_id: None,
+            imdb_id: None,
         }
     }
 
