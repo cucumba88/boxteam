@@ -56,6 +56,7 @@ const WebUsers = lazy(() => import("./WebUsers"));
 import ActivityLog from "../components/ActivityLog";
 import DetailPage from "../components/DetailPage";
 import TVShowPage from "../components/TVShowPage";
+import { isShowItem } from "../utils/mediaKind";
 import FixMatchModal from "../components/FixMatchModal";
 import DownloadsTab from "../components/DownloadsTab";
 import WatchlistTab from "../features/watchlist/WatchlistTab";
@@ -739,10 +740,7 @@ export default function Library({
       if (detailId != null) {
         const match = items.find((i) => i.tmdb_id === detailId);
         if (match) {
-          const isTV =
-            match.tmdb_type === "tv" ||
-            match.media_type === "tv" ||
-            match.media_type === "documentary";
+          const isTV = isShowItem(match);
           if (isTV) {
             setTvShow(match);
             setSelected(null);
@@ -783,10 +781,7 @@ export default function Library({
     if (detailId == null) return;
     const match = items.find((i) => i.tmdb_id === detailId);
     if (!match) return;
-    const isTV =
-      match.tmdb_type === "tv" ||
-      match.media_type === "tv" ||
-      match.media_type === "documentary";
+    const isTV = isShowItem(match);
     if (isTV) {
       setTvShow(match);
     } else {
@@ -847,9 +842,7 @@ export default function Library({
 
   const getTvEpisodes = (show: MediaItem): MediaItem[] => {
     return items.filter((ep) =>
-      ep.tmdb_type === "tv" ||
-      ep.media_type === "tv" ||
-      ep.media_type === "documentary"
+      isShowItem(ep)
         ? show.tmdb_id
           ? ep.tmdb_id === show.tmdb_id
           : (ep.title ?? ep.filename) === (show.title ?? show.filename)
@@ -913,10 +906,7 @@ export default function Library({
       // same row when the user closes the detail / TV-show takeover. Captured
       // before any state mutation that triggers re-render.
       setRestoreGridIndex(firstVisibleIndexRef.current);
-      const isTV =
-        item.tmdb_type === "tv" ||
-        item.media_type === "tv" ||
-        item.media_type === "documentary";
+      const isTV = isShowItem(item);
       if (isTV) {
         setTvShow(item);
       } else {
@@ -930,11 +920,12 @@ export default function Library({
       // Tauri has no URL bar so it's a no-op). Falls back to the file's db
       // id under `/file/<n>` when there's no tmdb match.
       if (!isTauri() && item.tmdb_id) {
-        const slug = isTV
-          ? item.media_type === "documentary"
+        const slug =
+          item.media_type === "documentary"
             ? "/documentales"
-            : "/series"
-          : "/peliculas";
+            : isTV
+              ? "/series"
+              : "/peliculas";
         const target = `${slug}/${item.tmdb_id}`;
         if (window.location.pathname !== target) {
           window.history.pushState({}, "", target);

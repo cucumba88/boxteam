@@ -2,6 +2,7 @@ import { hdrLabel, isPremiumHdr, parseHdr } from "../utils/techTags";
 import { memo, useState } from "react";
 import { Check, Clapperboard, Download, Tv2 } from "lucide-react";
 import { MediaItem } from "../hooks/useIndexing";
+import { isShowItem } from "../utils/mediaKind";
 import type { DownloadItem } from "../hooks/useDownloads";
 import DownloadRing from "./DownloadRing";
 import { PlexIcon, EmbyIcon } from "./ServerIcons";
@@ -156,10 +157,7 @@ function MediaCard({
 }: Props) {
   const [imgLoaded, setImgLoaded] = useState(false);
   const ratingOrder = useRatingOrder();
-  const isTV =
-    item.tmdb_type === "tv" ||
-    item.media_type === "tv" ||
-    item.media_type === "documentary";
+  const isTV = isShowItem(item);
   const posterPath = getLocalizedPosterPath(item, language);
   const episodeCode =
     item.season != null
