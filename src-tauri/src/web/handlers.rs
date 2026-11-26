@@ -679,7 +679,7 @@ pub async fn start_indexing_handler(
     // Take the flag before spawning so two quick requests can't both start
     // a pass (the old load-then-store left a window between them).
     let Some(guard) = crate::commands::IndexingGuard::try_acquire() else {
-        return Ok(Json(serde_json::json!({"running": true, "message": "Already in progress"})));
+        return Ok(Json(serde_json::json!({"running": true, "started": false, "message": "Already in progress"})));
     };
     let db = state.db.clone();
     let queue = state.queue.clone();
@@ -693,7 +693,7 @@ pub async fn start_indexing_handler(
             crate::commands::spawn_post_index_topups(db, window);
         }
     });
-    Ok(Json(serde_json::json!({"running": true, "message": "Indexing started"})))
+    Ok(Json(serde_json::json!({"running": true, "started": true, "message": "Indexing started"})))
 }
 
 /// Admin only: re-matches (and overwrites) every automatic match — long
@@ -742,7 +742,7 @@ pub async fn indexing_status_handler(
     AuthUser(_u): AuthUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<crate::web::dto::IndexingStatusResponse>> {
-    let running = crate::INDEXING_RUNNING.load(std::sync::atomic::Ordering::SeqCst);
+    let running = crate::commands::is_indexing_running();
     let last_indexed_at = state.db.load_last_indexed_at().ok().flatten();
     Ok(Json(IndexingStatusResponse { running, last_indexed_at }))
 }

@@ -170,6 +170,7 @@ pub fn run() {
             commands::get_all_media,
             commands::get_media_overview,
             commands::start_indexing,
+            commands::get_indexing_status,
             commands::rematch_all,
             commands::queue_download,
             commands::get_downloads,

@@ -415,6 +415,7 @@ export default function Library({
     indexError,
     clearIndexError,
     retryIndexing,
+    requestIndexing,
     log,
     appendLog,
     clearLog,
@@ -834,7 +835,7 @@ export default function Library({
 
     hasStartedInitialIndexRef.current = true;
     const timer = window.setTimeout(() => {
-      call("start_indexing").catch(console.error);
+      requestIndexing().catch(console.error);
     }, 0);
 
     return () => window.clearTimeout(timer);
@@ -858,7 +859,9 @@ export default function Library({
     if (libraryBusy) return;
     setRefreshingLibrary(true);
     try {
-      await call("start_indexing");
+      // If a pass is already running (often the scheduler's, right after
+      // launch) this returns at once and the button follows that pass.
+      await requestIndexing();
     } catch (error) {
       console.error("Failed to refresh library:", error);
     } finally {
