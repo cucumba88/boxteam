@@ -1798,13 +1798,15 @@ pub async fn start_indexing(
     state: tauri::State<'_, crate::db::Db>,
     queue_state: tauri::State<'_, crate::downloads::SharedQueue>,
     window: WebviewWindow,
-) -> Result<(), String> {
+) -> Result<StartIndexingOutcome, String> {
     // Shared with the web handler, the 15-minute scheduler and the reset
     // commands: one index pass at a time, and a reset can't wipe the table
-    // under a running one. A press while a pass is running just lets the
-    // UI follow that pass's events.
+    // under a running one. A press while a pass is running returns at once
+    // with `started: false` so the UI shows that pass as running: right
+    // after launch the scheduler's pass often started before the window was
+    // listening, and the button looked like it did nothing.
     let Some(_guard) = IndexingGuard::try_acquire() else {
-        return Ok(());
+        return Ok(StartIndexingOutcome { started: false });
     };
     let result = start_indexing_internal(
         state.inner().clone(),
@@ -1815,7 +1817,27 @@ pub async fn start_indexing(
     if result.is_ok() {
         spawn_post_index_topups(state.inner().clone(), Some(window));
     }
-    result
+    result.map(|()| StartIndexingOutcome { started: true })
+}
+
+/// Answer of `start_indexing`: `started` is false when another pass (the
+/// 15-minute scheduler's, or one from the web GUI) was already running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct StartIndexingOutcome {
+    pub started: bool,
+}
+
+/// Whether an index pass is running right now. The library asks on load,
+/// because a pass the scheduler started at launch may have sent
+/// `index:start` before the window was listening.
+#[tauri::command]
+pub fn get_indexing_status(
+    state: tauri::State<'_, crate::db::Db>,
+) -> crate::web::dto::IndexingStatusResponse {
+    crate::web::dto::IndexingStatusResponse {
+        running: is_indexing_running(),
+        last_indexed_at: state.load_last_indexed_at().ok().flatten(),
+    }
 }
 
 /// After a manual index, run the same top-ups as the automatic 15-minute
@@ -2682,9 +2704,13 @@ impl Drop for IndexingGuard {
     }
 }
 
+pub(crate) fn is_indexing_running() -> bool {
+    crate::INDEXING_RUNNING.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Refuse destructive resets while an index pass is writing to the library.
 pub(crate) fn ensure_not_indexing() -> Result<(), String> {
-    if crate::INDEXING_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+    if is_indexing_running() {
         return Err("Hay una indexación en curso. Espera a que termine e inténtalo de nuevo.".to_string());
     }
     Ok(())
@@ -5717,15 +5743,17 @@ mod ratings_backoff_tests {
 
 #[cfg(test)]
 mod indexing_guard_tests {
-    use super::{ensure_not_indexing, IndexingGuard};
+    use super::{ensure_not_indexing, is_indexing_running, IndexingGuard};
 
     #[test]
     fn only_one_index_pass_at_a_time_and_flag_clears_on_drop() {
         let first = IndexingGuard::try_acquire().expect("first pass starts");
         assert!(IndexingGuard::try_acquire().is_none(), "second pass must be refused");
         assert!(ensure_not_indexing().is_err(), "resets blocked while indexing");
+        assert!(is_indexing_running(), "status reports the running pass");
         drop(first);
         assert!(ensure_not_indexing().is_ok());
+        assert!(!is_indexing_running(), "status clears when the pass ends");
         let again = IndexingGuard::try_acquire();
         assert!(again.is_some(), "a new pass can start after the first ends");
     }

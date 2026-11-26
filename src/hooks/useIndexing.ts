@@ -3,6 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import type { LogEntry } from "../components/ActivityLog";
 import { call, connectWs, isTauri } from "../lib/transport";
 import { getMedia, invalidateMedia } from "../lib/mediaCache";
+import {
+  fetchIndexingRunning,
+  joinedRunningPass,
+  watchUntilIdle,
+} from "./indexingStatus";
 
 export interface MediaItem {
   id: number;
@@ -45,6 +50,8 @@ export interface MediaItem {
 }
 
 const MAX_LOG = 500;
+/** How often to ask whether a pass we only learned about by asking is done. */
+const IDLE_WATCH_MS = 3_000;
 const ENABLE_ACTIVITY_LOG = import.meta.env.DEV;
 
 export function useIndexing() {
@@ -153,6 +160,42 @@ export function useIndexing() {
     },
     [],
   );
+
+  // ── Passes whose start we missed ──────────────────────────────────────
+  // A pass the scheduler started at launch can send `index:start` before
+  // the listeners below exist. When we learn about such a pass by asking
+  // (on load, or because a refresh press joined it), show it as running
+  // and ask again until it ends: if the window was hidden when it began,
+  // `index:complete` never comes either.
+  const idleWatchRef = useRef<(() => void) | null>(null);
+  const markRunning = useCallback(() => {
+    setIsIndexing(true);
+    if (idleWatchRef.current) return;
+    idleWatchRef.current = watchUntilIdle(
+      () => fetchIndexingRunning(call),
+      () => {
+        idleWatchRef.current = null;
+        setIsIndexing(false);
+        setProgress(null);
+        setTmdbProgress(null);
+      },
+      IDLE_WATCH_MS,
+    );
+  }, []);
+
+  useEffect(
+    () => () => {
+      idleWatchRef.current?.();
+      idleWatchRef.current = null;
+    },
+    [],
+  );
+
+  /** Start an index pass, or follow the one already running. */
+  const requestIndexing = useCallback(async () => {
+    const result = await call<unknown>("start_indexing");
+    if (joinedRunningPass(result)) markRunning();
+  }, [markRunning]);
 
   const addLog = useCallback((msg: string) => {
     if (!ENABLE_ACTIVITY_LOG) return;
@@ -353,7 +396,18 @@ export function useIndexing() {
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
 
+    // Once the listeners are in place, ask whether a pass is already
+    // running: its `index:start` may have fired before they existed.
+    let disposed = false;
+    Promise.all([unStart, unProgress, unComplete, unError])
+      .then(() => fetchIndexingRunning(call))
+      .then((running) => {
+        if (running && !disposed) markRunning();
+      })
+      .catch(console.error);
+
     return () => {
+      disposed = true;
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
       unRefreshed.then((f) => f());
@@ -367,7 +421,7 @@ export function useIndexing() {
       unMetaRefresh.then((f) => f());
       unWatchProviders.then((f) => f());
     };
-  }, []);
+  }, [markRunning]);
 
   const dismissCompletion = useCallback(() => setCompletionSummary(null), []);
 
@@ -526,7 +580,8 @@ export function useIndexing() {
     },
     indexError,
     clearIndexError: () => setIndexError(null),
-    retryIndexing: () => call("start_indexing").catch(console.error),
+    retryIndexing: () => requestIndexing().catch(console.error),
+    requestIndexing,
     log,
     appendLog: addLog,
     clearLog: () => setLog([]),
