@@ -1390,6 +1390,83 @@ impl Db {
         Ok(fixed)
     }
 
+    /// One-shot repair for files that name their TMDB / IMDb id
+    /// ("{tmdb-…}" / "{imdb-tt…}", see `parser.rs`) but were indexed before
+    /// matching read those tags. Without it they waited out the one-day
+    /// no-match backoff (or kept a wrong title-search match) even though the
+    /// exact id is in the name.
+    ///
+    /// Non-manual rows that are unmatched, or whose stored match disagrees
+    /// with the tag, lose their match and backoff so the next metadata
+    /// refresh (run right after this at startup) fetches the tagged entry.
+    /// Manual matches are left alone. Runs once per install. Returns the
+    /// number of rows reset.
+    pub fn rematch_tagged_files(&self) -> Result<usize, String> {
+        let migration_id = "data:rematch-tagged-files:v1";
+        {
+            let conn = self.conn.lock().unwrap();
+            if Self::migration_applied(&conn, migration_id)? {
+                return Ok(0);
+            }
+        }
+
+        // Cheap pre-filter: only rows with a tag-looking brace in the path.
+        let rows: Vec<(i64, String, String, Option<i64>, Option<String>)> = {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, ftp_path, filename, tmdb_id, imdb_id FROM media_items
+                     WHERE COALESCE(manual_match, 0) = 0
+                       AND (ftp_path LIKE '%tmdb%' OR ftp_path LIKE '%imdb%')",
+                )
+                .map_err(|e| e.to_string())?;
+            let mut out = Vec::new();
+            let mut rowset = stmt.query([]).map_err(|e| e.to_string())?;
+            while let Some(row) = rowset.next().map_err(|e| e.to_string())? {
+                out.push((
+                    row.get(0).map_err(|e| e.to_string())?,
+                    row.get(1).map_err(|e| e.to_string())?,
+                    row.get(2).map_err(|e| e.to_string())?,
+                    row.get(3).map_err(|e| e.to_string())?,
+                    row.get(4).map_err(|e| e.to_string())?,
+                ));
+            }
+            out
+        };
+
+        let mut reset = 0usize;
+        for (id, ftp_path, filename, stored_tmdb, stored_imdb) in rows {
+            let parsed = crate::parser::parse_media_path(&ftp_path, &filename);
+            if !tag_disagrees_with_match(
+                parsed.tmdb_id,
+                parsed.imdb_id.as_deref(),
+                stored_tmdb,
+                stored_imdb.as_deref(),
+            ) {
+                continue;
+            }
+            let conn = self.conn.lock().unwrap();
+            reset += conn
+                .execute(
+                    "UPDATE media_items SET
+                        tmdb_id = NULL, imdb_id = NULL, tmdb_type = NULL,
+                        tmdb_title = NULL, tmdb_title_en = NULL, tmdb_year = NULL,
+                        tmdb_release_date = NULL, tmdb_overview = NULL, tmdb_overview_en = NULL,
+                        tmdb_poster = NULL, tmdb_poster_en = NULL, tmdb_rating = NULL,
+                        tmdb_genres = NULL, metadata_at = NULL, metadata_checked_at = NULL
+                     WHERE id = ?1",
+                    params![id],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+
+        {
+            let conn = self.conn.lock().unwrap();
+            Self::mark_migration_applied(&conn, migration_id)?;
+        }
+        Ok(reset)
+    }
+
     /// One-shot data repair for titles mangled by two parser bugs:
     ///  - a library *category* folder used as the title fallback ("Peliculas",
     ///    "Series HD") — then matched to some random TMDB entry;
@@ -2146,7 +2223,7 @@ impl Db {
         Ok(())
     }
 
-    #[cfg(test)]
+#[cfg(test)]
     pub fn count_media_items(&self) -> Result<i64, String> {
         let conn = self.conn.lock().unwrap();
         conn
@@ -3455,6 +3532,31 @@ fn needs_title_repair(stored: &str, new_title: &str) -> bool {
         .is_some_and(crate::parser::is_wordlike_tag)
 }
 
+/// Whether a file's id tags call for a fresh match: it has a tag and is
+/// unmatched, or its stored match is a different TMDB / IMDb entry.
+fn tag_disagrees_with_match(
+    tag_tmdb: Option<i64>,
+    tag_imdb: Option<&str>,
+    stored_tmdb: Option<i64>,
+    stored_imdb: Option<&str>,
+) -> bool {
+    let tag_imdb = tag_imdb.map(str::trim).filter(|s| !s.is_empty());
+    if tag_tmdb.is_none() && tag_imdb.is_none() {
+        return false;
+    }
+    let Some(stored) = stored_tmdb else {
+        return true;
+    };
+    if let Some(tag) = tag_tmdb {
+        return tag != stored;
+    }
+    match (tag_imdb, stored_imdb.map(str::trim).filter(|s| !s.is_empty())) {
+        (Some(tag), Some(stored)) => !tag.eq_ignore_ascii_case(stored),
+        // Matched, but we can't compare: leave the match alone.
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4024,6 +4126,68 @@ mod tests {
             db.get_watchlist_auto_download_candidates().expect("c").is_empty(),
             "removed item must no longer download"
         );
+    }
+
+    // ── id-tagged files re-match migration ─────────────────────────────────
+
+    #[test]
+    fn tag_disagrees_with_match_cases() {
+        use super::tag_disagrees_with_match as d;
+        assert!(!d(None, None, None, None), "no tag: leave it to the backoff");
+        assert!(d(Some(1632599), None, None, None), "tagged and unmatched");
+        assert!(d(None, Some("tt1160419"), None, None), "imdb-tagged and unmatched");
+        assert!(!d(Some(438631), None, Some(438631), None), "already the tagged entry");
+        assert!(d(Some(438631), None, Some(999), None), "wrong title-search match");
+        assert!(!d(None, Some("tt1160419"), Some(438631), Some("TT1160419")));
+        assert!(d(None, Some("tt1160419"), Some(1), Some("tt0000001")));
+        assert!(!d(None, Some("tt1160419"), Some(1), None), "can't compare: keep");
+    }
+
+    #[test]
+    fn rematch_tagged_files_resets_only_tagged_unmatched_or_mismatched_rows() {
+        let db = in_memory_db();
+        let checked = "2026-11-26T12:55:45+00:00";
+        {
+            let conn = db.conn.lock().unwrap();
+            let insert = |id: i64, file: &str, tmdb: Option<i64>, manual: i64| {
+                conn.execute(
+                    "INSERT INTO media_items (id, ftp_path, filename, title, tmdb_id, tmdb_title, media_type,
+                                              manual_match, metadata_at, metadata_checked_at)
+                     VALUES (?1, ?2, ?3, 'x', ?4, CASE WHEN ?4 IS NULL THEN NULL ELSE 'Old' END, 'movie',
+                             ?5, CASE WHEN ?4 IS NULL THEN NULL ELSE ?6 END, ?6)",
+                    params![id, format!("/Documentales/{file}"), file, tmdb, manual, checked],
+                )
+                .expect("insert");
+            };
+            // 1: tagged, unmatched, still inside the one-day wait.
+            insert(1, "Mínimo contacto (2026 WEB-DL 1080p) {tmdb-1632599}.mkv", None, 0);
+            // 2: tagged, matched to the wrong entry by the old title search.
+            insert(2, "Dune (2021) {tmdb-438631}.mkv", Some(999), 0);
+            // 3: tagged and already the tagged entry.
+            insert(3, "Arrival (2016) {tmdb-329865}.mkv", Some(329865), 0);
+            // 4: tagged but manually matched to something else: the person chose.
+            insert(4, "Her (2013) {tmdb-152601}.mkv", Some(1), 1);
+            // 5: untagged and unmatched: keeps waiting.
+            insert(5, "Sin etiqueta (2020).mkv", None, 0);
+        }
+
+        assert_eq!(db.rematch_tagged_files().expect("repair"), 2);
+        assert_eq!(db.rematch_tagged_files().expect("second run"), 0, "runs once");
+
+        let conn = db.conn.lock().unwrap();
+        let row = |id: i64| -> (Option<i64>, Option<String>, Option<String>) {
+            conn.query_row(
+                "SELECT tmdb_id, metadata_at, metadata_checked_at FROM media_items WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("row")
+        };
+        assert_eq!(row(1), (None, None, None), "wait cleared");
+        assert_eq!(row(2), (None, None, None), "wrong match dropped");
+        assert_eq!(row(3).0, Some(329865));
+        assert_eq!(row(4).0, Some(1));
+        assert_eq!(row(5).2.as_deref(), Some(checked));
     }
 
     // ── leading-year mismatch repair migration ─────────────────────────────

@@ -402,6 +402,15 @@ pub fn run() {
                     Ok(_) => {}
                     Err(e) => eprintln!("repair_misparsed_titles failed: {e}"),
                 }
+                // One-shot: files with "{tmdb-…}" / "{imdb-tt…}" in the name
+                // indexed before matching read those tags skip the one-day
+                // no-match wait (or drop a wrong match); the metadata refresh
+                // below fetches the tagged entry.
+                match db.rematch_tagged_files() {
+                    Ok(n) if n > 0 => println!("Queued {n} id-tagged file(s) for re-match"),
+                    Ok(_) => {}
+                    Err(e) => eprintln!("rematch_tagged_files failed: {e}"),
+                }
                 commands::restore_download_queue(db.clone(), queue.clone());
                 commands::restore_upload_queue(db.clone(), handle.state::<uploads::SharedUploadQueue>().inner().clone());
 
