@@ -9,7 +9,7 @@ name: Telegram release
 # still checks the release is complete (.exe + Linux packages attached) and
 # posts once per release (scripts/telegram-release.mjs leaves a hidden marker
 # in the release notes). To skip one release, add <!-- no-telegram --> to
-# its notes.
+# its notes; the next announced release then also carries its notes.
 #
 # Needs the repo secrets TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID. Without them
 # it does nothing.

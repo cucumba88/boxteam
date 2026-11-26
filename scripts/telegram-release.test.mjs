@@ -11,6 +11,7 @@ import {
   normalizeChatId,
   notesToBlocks,
   skipsAnnouncement,
+  skippedReleases,
   visibleLength,
 } from "./telegram-release.mjs";
 
@@ -148,4 +149,63 @@ test("on chat not found, the other form of the group id is tried", () => {
   assert.equal(alternateChatId("-4490499603"), "-1004490499603");
   assert.equal(alternateChatId("-1004490499603"), "-4490499603");
   assert.equal(alternateChatId("@canal"), null);
+});
+
+const rel = (tag, body, extra = {}) => ({ tag_name: tag, body, draft: false, prerelease: false, ...extra });
+
+test("skipped releases since the last announcement are carried, newest first", () => {
+  const releases = [
+    rel("v0.22.5", "## Versión 0.22.5\n\n- C"),
+    rel("v0.22.4", "## Versión 0.22.4\n\n- B\n\n<!-- no-telegram -->"),
+    // Cancelled release: never shipped, its changes are in the next notes.
+    rel("v0.22.3", "## Versión 0.22.3\n\n- A\n\n<!-- no-telegram -->", { draft: true }),
+    rel("v0.22.2", "## Versión 0.22.2\n\n- Z\n\n<!-- telegram: publicado -->"),
+    rel("v0.22.1", "## Versión 0.22.1\n\n- Y\n\n<!-- no-telegram -->"),
+    rel("v0.22.0-beta.1", "- beta", { prerelease: true }),
+  ];
+  assert.deepEqual(
+    skippedReleases(releases, "v0.22.5").map((r) => r.tag),
+    ["v0.22.4"],
+  );
+  // Several skipped in a row, compared as versions (0.10 > 0.9).
+  const many = [
+    rel("v0.10.1", "x"),
+    rel("v0.10.0", "- b\n<!-- no-telegram -->"),
+    rel("v0.9.9", "- a\n<!-- no-telegram -->"),
+    rel("v0.9.8", "- old\n<!-- telegram: publicado -->"),
+  ];
+  assert.deepEqual(skippedReleases(many, "v0.10.1").map((r) => r.tag), ["v0.10.0", "v0.9.9"]);
+  // Nothing skipped since the last announcement.
+  assert.deepEqual(skippedReleases([rel("v1.0.1", "x"), rel("v1.0.0", "y <!-- telegram: publicado -->")], "v1.0.1"), []);
+  // Never announced before: don't dump the whole history.
+  assert.deepEqual(skippedReleases([rel("v1.0.1", "x"), rel("v1.0.0", "- y")], "v1.0.1"), []);
+});
+
+test("a message with skipped releases has one section per version", () => {
+  const message = buildReleaseMessage({
+    appName: "BoxTeam",
+    tag: "v0.22.5",
+    notes: "## Versión 0.22.5\n\n### 🐛 Correcciones\n\n- **Uno**",
+    earlier: [{ tag: "v0.22.4", notes: "## Versión 0.22.4\n\n- Dos\n\n<!-- no-telegram -->" }],
+  });
+  assert.match(message, /Incluye también los cambios de la 0\.22\.4, que no se anunciaron\./);
+  const newer = message.indexOf("Versión 0.22.5");
+  const older = message.indexOf("Versión 0.22.4");
+  assert.ok(newer > 0 && older > newer, "newest version first");
+  assert.match(message, /• <b>Uno<\/b>/);
+  assert.match(message, /• Dos/);
+  assert.doesNotMatch(message, /no-telegram/);
+});
+
+test("trimming a combined message drops the oldest version first", () => {
+  const long = (n) => Array.from({ length: n }, (_, i) => `- Cambio largo número ${i} ${"x".repeat(60)}`).join("\n");
+  const message = buildReleaseMessage({
+    appName: "BoxTeam",
+    tag: "v0.22.5",
+    notes: `- Lo nuevo\n${long(10)}`,
+    earlier: [{ tag: "v0.22.4", notes: long(80) }],
+  });
+  assert.ok(visibleLength(message) <= MESSAGE_LIMIT);
+  assert.match(message, /Lo nuevo/);
+  assert.match(message, /…y más cambios\./);
 });

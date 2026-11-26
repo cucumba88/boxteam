@@ -10,6 +10,9 @@
 //
 // To skip the announcement for a release, put <!-- no-telegram --> anywhere
 // in its notes (GitHub doesn't show it). By default every release is posted.
+// The next release that is announced also carries the notes of the published
+// releases skipped since the last announcement, newest first, so the group
+// never misses a change.
 //
 // Environment:
 //   GITHUB_TOKEN, GITHUB_REPOSITORY        (set by GitHub Actions)
@@ -166,20 +169,71 @@ export function versionFromTag(tag) {
   return tag.replace(/^v/i, "");
 }
 
+/** "v0.22.4" -> [0, 22, 4]; null when the tag isn't a version. */
+export function parseVersion(tag) {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(tag ?? "").trim());
+  return m ? m.slice(1, 4).map(Number) : null;
+}
+
+function compareVersions(a, b) {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+
+/**
+ * Published releases whose announcement was skipped since the last one that
+ * was announced (its notes carry SENT_MARKER), older than `tag`: newest
+ * first, as [{ tag, notes }]. Drafts (cancelled or unfinished releases, never
+ * shipped) and prereleases don't count. When no earlier release was ever
+ * announced, nothing is added, so a first announcement can't dump history.
+ */
+export function skippedReleases(releases, tag) {
+  const current = parseVersion(tag);
+  if (!current) return [];
+  const versioned = releases
+    .map((r) => ({ release: r, version: parseVersion(r.tag_name) }))
+    .filter(({ version }) => version && compareVersions(version, current) < 0);
+  const announced = versioned
+    .filter(({ release }) => !release.draft && (release.body ?? "").includes(SENT_MARKER))
+    .map(({ version }) => version)
+    .sort(compareVersions)
+    .pop();
+  if (!announced) return [];
+  return versioned
+    .filter(
+      ({ release, version }) =>
+        !release.draft &&
+        !release.prerelease &&
+        compareVersions(version, announced) > 0 &&
+        stripComments(release.body ?? "").trim(),
+    )
+    .sort((a, b) => compareVersions(b.version, a.version))
+    .map(({ release }) => ({ tag: release.tag_name, notes: release.body ?? "" }));
+}
+
+/** "0.22.4 y 0.22.3" / "0.22.4, 0.22.3 y 0.22.2" */
+function joinVersions(tags) {
+  const v = tags.map(versionFromTag);
+  return v.length < 2 ? v.join("") : `${v.slice(0, -1).join(", ")} y ${v[v.length - 1]}`;
+}
+
 /**
  * Builds the whole message. If the notes don't fit, whole blocks are dropped
- * from the end (never mid-line) and a "more changes" line is added.
+ * from the end (never mid-line) and a "more changes" line is added. With
+ * `earlier` (skipped releases, newest first) each version gets its own
+ * section, so trimming drops the oldest changes first.
  */
 export function buildReleaseMessage({
   appName,
   tag,
   notes,
+  earlier = [],
   downloads = [],
   releaseUrl = null,
   limit = MESSAGE_LIMIT,
 }) {
   const version = versionFromTag(tag);
-  const header = `🚀 <b>${escapeHtml(appName)} ${escapeHtml(version)} ya disponible</b>`;
+  let header = `🚀 <b>${escapeHtml(appName)} ${escapeHtml(version)} ya disponible</b>`;
 
   const footer = [];
   if (downloads.length) {
@@ -191,9 +245,18 @@ export function buildReleaseMessage({
   const footerHtml = footer.join("\n\n");
 
   const override = extractTelegramOverride(notes);
-  let blocks = override
-    ? override.split(/\n{2,}/).map((p) => ({ kind: "text", html: escapeHtml(p) }))
-    : notesToBlocks(notes ?? "");
+  let blocks;
+  if (override) {
+    blocks = override.split(/\n{2,}/).map((p) => ({ kind: "text", html: escapeHtml(p) }));
+  } else if (earlier.length) {
+    header += `\n<i>Incluye también los cambios de la ${escapeHtml(joinVersions(earlier.map((e) => e.tag)))}, que no se anunciaron.</i>`;
+    blocks = [{ tag, notes }, ...earlier].flatMap((r) => [
+      { kind: "heading", html: `📦 <b>Versión ${escapeHtml(versionFromTag(r.tag))}</b>` },
+      ...notesToBlocks(r.notes ?? ""),
+    ]);
+  } else {
+    blocks = notesToBlocks(notes ?? "");
+  }
 
   const compose = (bs, truncated) =>
     [header, joinBlocks(bs) + (truncated ? "\n\n<i>…y más cambios.</i>" : ""), footerHtml]
@@ -427,10 +490,20 @@ export async function main() {
   }
 
 
+  // Releases published since the last announcement but not announced
+  // (<!-- no-telegram -->) go into this message too.
+  const recent = await github(`/repos/${repo}/releases?per_page=50`).catch((e) => {
+    log(`could not list releases: ${e.message}`);
+    return [];
+  });
+  const earlier = skippedReleases(recent ?? [], tag);
+  if (earlier.length) log(`also includes skipped ${earlier.map((e) => e.tag).join(", ")}`);
+
   const message = buildReleaseMessage({
     appName,
     tag,
     notes: release.body ?? "",
+    earlier,
     downloads: downloadLinks(release.assets ?? []),
     releaseUrl: release.html_url,
   });
